@@ -317,7 +317,7 @@ fn tree_controls_keyboard_and_scrolled_click_keep_the_file_identity(cx: &mut Tes
 fn git(root: &Path, args: &[&str]) -> String {
     let output = std::process::Command::new("git")
         .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", if cfg!(windows) { "NUL" } else { "/dev/null" })
+        .env("GIT_CONFIG_GLOBAL", crate::platform::process::null_device())
         .arg("-C")
         .arg(root)
         .args(args)
@@ -350,8 +350,8 @@ fn tree_stage_button_and_keyboard_unstage_target_the_same_named_file(cx: &mut Te
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();
     git(root, &["init", "-q"]);
-    git(root, &["config", "core.hooksPath", if cfg!(windows) { "NUL" } else { "/dev/null" }]);
-    git(root, &["config", "core.attributesFile", if cfg!(windows) { "NUL" } else { "/dev/null" }]);
+    git(root, &["config", "core.hooksPath", crate::platform::process::null_device()]);
+    git(root, &["config", "core.attributesFile", crate::platform::process::null_device()]);
     for path in ["aa/same.rs", "bb/same.rs"] {
         std::fs::create_dir_all(root.join(path).parent().unwrap()).unwrap();
         std::fs::write(root.join(path), "initial\n").unwrap();
@@ -420,8 +420,8 @@ fn tree_conflict_keyboard_opens_the_matching_merge_editor(cx: &mut TestAppContex
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();
     git(root, &["init", "-q", "-b", "fixture-main"]);
-    git(root, &["config", "core.hooksPath", if cfg!(windows) { "NUL" } else { "/dev/null" }]);
-    git(root, &["config", "core.attributesFile", if cfg!(windows) { "NUL" } else { "/dev/null" }]);
+    git(root, &["config", "core.hooksPath", crate::platform::process::null_device()]);
+    git(root, &["config", "core.attributesFile", crate::platform::process::null_device()]);
     std::fs::create_dir_all(root.join("module/deep")).unwrap();
     let relative = "module/deep/文件.rs";
     let path = root.join(relative);
@@ -450,7 +450,7 @@ fn tree_conflict_keyboard_opens_the_matching_merge_editor(cx: &mut TestAppContex
     commit("ours");
     let merged = std::process::Command::new("git")
         .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", if cfg!(windows) { "NUL" } else { "/dev/null" })
+        .env("GIT_CONFIG_GLOBAL", crate::platform::process::null_device())
         .arg("-C")
         .arg(root)
         .args([
