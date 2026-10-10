@@ -16,7 +16,7 @@ fn draw(cx: &mut VisualTestContext) {
 }
 
 fn key(action: &str) -> &'static str {
-    match (cfg!(target_os = "macos"), action) {
+    match (crate::platform::Platform::current() == crate::platform::Platform::MacOS, action) {
         (true, "all") => "cmd-a",
         (true, "copy") => "cmd-c",
         (true, "cut") => "cmd-x",
