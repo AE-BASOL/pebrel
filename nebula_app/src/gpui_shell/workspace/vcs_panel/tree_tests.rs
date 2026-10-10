@@ -314,17 +314,66 @@ fn tree_controls_keyboard_and_scrolled_click_keep_the_file_identity(cx: &mut Tes
     assert!(cx.debug_bounds("git-tree-row-changes-803-zz/file-0800.rs").is_some());
 }
 
-fn git(root: &Path, args: &[&str]) -> String {
-    let output = std::process::Command::new("git")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", crate::platform::process::null_device())
-        .arg("-C")
-        .arg(root)
-        .args(args)
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
-    String::from_utf8(output.stdout).unwrap()
+struct GitFixture {
+    _directory: tempfile::TempDir,
+    root: PathBuf,
+    configuration: PathBuf,
+}
+
+impl GitFixture {
+    fn new() -> Self {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("repository");
+        let configuration = directory.path().join("configuration");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::create_dir(&configuration).unwrap();
+        std::fs::create_dir(configuration.join("hooks")).unwrap();
+        for name in ["global", "attributes"] {
+            std::fs::write(configuration.join(name), b"").unwrap();
+        }
+        Self { _directory: directory, root, configuration }
+    }
+
+    fn command(&self) -> std::process::Command {
+        // Git for Windows rejects NUL as a config file. Real empty files and
+        // hooks stay outside the repository and live as long as this fixture.
+        let mut command = std::process::Command::new("git");
+        command
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", self.configuration.join("global"))
+            .args(["-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false"])
+            .arg("-C")
+            .arg(&self.root)
+            .stdin(std::process::Stdio::null());
+        crate::platform::process::hidden_command(&mut command);
+        command
+    }
+
+    fn git(&self, args: &[&str]) -> String {
+        let output = self.command().args(args).output().unwrap();
+        assert!(
+            output.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
+    }
+
+    fn configure(&self) {
+        for (name, path) in [("core.hooksPath", "hooks"), ("core.attributesFile", "attributes")] {
+            let output = self
+                .command()
+                .args(["config", "--local", name])
+                .arg(self.configuration.join(path))
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git config {name}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
 }
 
 fn settle_panel(owner: &Entity<NebulaWorkspace>, root: &Path, cx: &mut VisualTestContext) {
@@ -347,28 +396,24 @@ fn settle_panel(owner: &Entity<NebulaWorkspace>, root: &Path, cx: &mut VisualTes
 
 #[gpui::test]
 fn tree_stage_button_and_keyboard_unstage_target_the_same_named_file(cx: &mut TestAppContext) {
-    let directory = tempfile::tempdir().unwrap();
-    let root = directory.path();
-    git(root, &["init", "-q"]);
-    git(root, &["config", "core.hooksPath", crate::platform::process::null_device()]);
-    git(root, &["config", "core.attributesFile", crate::platform::process::null_device()]);
+    let fixture = GitFixture::new();
+    let root = fixture.root.as_path();
+    fixture.git(&["init", "-q"]);
+    fixture.configure();
     for path in ["aa/same.rs", "bb/same.rs"] {
         std::fs::create_dir_all(root.join(path).parent().unwrap()).unwrap();
         std::fs::write(root.join(path), "initial\n").unwrap();
     }
-    git(root, &["add", "--", "aa/same.rs", "bb/same.rs"]);
-    git(
-        root,
-        &[
-            "-c",
-            "user.name=Regression test",
-            "-c",
-            "user.email=test@example.invalid",
-            "commit",
-            "-qm",
-            "fixture",
-        ],
-    );
+    fixture.git(&["add", "--", "aa/same.rs", "bb/same.rs"]);
+    fixture.git(&[
+        "-c",
+        "user.name=Regression test",
+        "-c",
+        "user.email=test@example.invalid",
+        "commit",
+        "-qm",
+        "fixture",
+    ]);
     for path in ["aa/same.rs", "bb/same.rs"] {
         std::fs::write(root.join(path), "modified\n").unwrap();
     }
@@ -389,7 +434,7 @@ fn tree_stage_button_and_keyboard_unstage_target_the_same_named_file(cx: &mut Te
     let stage = cx.debug_bounds("vcs-stage-changes-1").unwrap();
     cx.simulate_click(stage.center(), Modifiers::default());
     settle_panel(&owner, root, cx);
-    assert_eq!(git(root, &["diff", "--cached", "--name-only"]), "bb/same.rs\n");
+    assert_eq!(fixture.git(&["diff", "--cached", "--name-only"]), "bb/same.rs\n");
     cx.update(|_, cx| {
         owner.update(cx, |workspace, _| {
             workspace.vcs_list.sync(
@@ -406,7 +451,7 @@ fn tree_stage_button_and_keyboard_unstage_target_the_same_named_file(cx: &mut Te
     press("tab", cx);
     press("enter", cx);
     settle_panel(&owner, root, cx);
-    assert!(git(root, &["diff", "--cached", "--name-only"]).is_empty());
+    assert!(fixture.git(&["diff", "--cached", "--name-only"]).is_empty());
     assert_eq!(
         owner.read_with(cx, |workspace, _| workspace.tabs.len()),
         0,
@@ -417,42 +462,35 @@ fn tree_stage_button_and_keyboard_unstage_target_the_same_named_file(cx: &mut Te
 
 #[gpui::test]
 fn tree_conflict_keyboard_opens_the_matching_merge_editor(cx: &mut TestAppContext) {
-    let directory = tempfile::tempdir().unwrap();
-    let root = directory.path();
-    git(root, &["init", "-q", "-b", "fixture-main"]);
-    git(root, &["config", "core.hooksPath", crate::platform::process::null_device()]);
-    git(root, &["config", "core.attributesFile", crate::platform::process::null_device()]);
+    let fixture = GitFixture::new();
+    let root = fixture.root.as_path();
+    fixture.git(&["init", "-q", "-b", "fixture-main"]);
+    fixture.configure();
     std::fs::create_dir_all(root.join("module/deep")).unwrap();
     let relative = "module/deep/文件.rs";
     let path = root.join(relative);
     std::fs::write(&path, "base\n").unwrap();
-    git(root, &["add", "--", relative]);
+    fixture.git(&["add", "--", relative]);
     let commit = |message: &str| {
-        git(
-            root,
-            &[
-                "-c",
-                "user.name=Regression test",
-                "-c",
-                "user.email=test@example.invalid",
-                "commit",
-                "-qam",
-                message,
-            ],
-        );
+        fixture.git(&[
+            "-c",
+            "user.name=Regression test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-qam",
+            message,
+        ]);
     };
     commit("base");
-    git(root, &["checkout", "-qb", "fixture-side"]);
+    fixture.git(&["checkout", "-qb", "fixture-side"]);
     std::fs::write(&path, "theirs\n").unwrap();
     commit("theirs");
-    git(root, &["checkout", "-q", "fixture-main"]);
+    fixture.git(&["checkout", "-q", "fixture-main"]);
     std::fs::write(&path, "ours\n").unwrap();
     commit("ours");
-    let merged = std::process::Command::new("git")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", crate::platform::process::null_device())
-        .arg("-C")
-        .arg(root)
+    let merged = fixture
+        .command()
         .args([
             "-c",
             "user.name=Regression test",

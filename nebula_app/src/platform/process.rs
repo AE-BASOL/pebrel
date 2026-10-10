@@ -289,9 +289,3 @@ exit 7
         }
     }
 }
-
-/// Platform null device for isolated synthetic subprocess fixtures.
-#[cfg(test)]
-pub(crate) fn null_device() -> &'static str {
-    if cfg!(windows) { "NUL" } else { "/dev/null" }
-}
