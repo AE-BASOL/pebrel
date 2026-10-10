@@ -440,6 +440,14 @@ impl SftpController {
 }
 
 impl SftpBrowseSession {
+    #[cfg(all(test, feature = "gpui-test-support"))]
+    pub(crate) fn from_test_session(destination: String, session: SftpSession) -> Self {
+        Self {
+            destination: Arc::from(destination),
+            session: Arc::new(tokio::sync::Mutex::new(Some(session))),
+        }
+    }
+
     pub(crate) fn new(destination: impl Into<String>) -> Self {
         Self {
             destination: Arc::from(destination.into()),
