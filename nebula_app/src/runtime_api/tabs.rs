@@ -7,6 +7,10 @@ use std::path::PathBuf;
 pub const MAX_FILE_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_CHUNK_BYTES: usize = 64 * 1024;
 
+pub(super) fn terminal_kind() -> String {
+    "terminal".into()
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TabId(pub String);
 

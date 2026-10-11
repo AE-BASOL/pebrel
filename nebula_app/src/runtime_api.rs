@@ -475,6 +475,10 @@ pub enum RuntimeLayout {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RuntimePane {
     pub id: u64,
+    #[serde(default = "tabs::terminal_kind")]
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<tabs::FileInfo>,
     pub active: bool,
     pub title: String,
     pub cwd: String,

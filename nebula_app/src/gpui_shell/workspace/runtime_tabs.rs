@@ -13,6 +13,7 @@ use gpui_component::Rope;
 use serde_json::{Value, json};
 
 use super::{NebulaWorkspace, WorkspaceTab};
+use crate::gpui_shell::file_editor::TextFileView;
 use crate::runtime_api::{
     ApiError, RuntimeCommand, RuntimeDispatch,
     tabs::{self, FileInfo, Request},
@@ -43,6 +44,22 @@ impl WorkspaceTab {
             _ => None,
         }
     }
+}
+
+pub(super) fn require_saved_files(
+    files: impl IntoIterator<Item = gpui::Entity<TextFileView>>,
+    cx: &App,
+) -> Result<(), ApiError> {
+    for file in files {
+        let view = file.read(cx);
+        if view.is_saving() || view.is_dirty() {
+            return Err(ApiError::new(
+                if view.is_saving() { "file_saving" } else { "unsaved_changes" },
+                "save or resolve this document on the computer before closing its shared content",
+            ));
+        }
+    }
+    Ok(())
 }
 
 impl NebulaWorkspace {
@@ -102,16 +119,7 @@ impl NebulaWorkspace {
             .tabs
             .get(index)
             .ok_or_else(|| ApiError::new("target_not_found", "the requested tab does not exist"))?;
-        if let Some(file) = tab.file_editor(cx) {
-            let file = file.read(cx);
-            if file.is_saving() || file.is_dirty() {
-                // 普通关闭会异步弹桌面对话框；RPC 在真正关闭之前必须保留失败状态。
-                return Err(ApiError::new(
-                    if file.is_saving() { "file_saving" } else { "unsaved_changes" },
-                    "save or resolve this document on the computer before closing its shared tab",
-                ));
-            }
-        }
+        require_saved_files(tab.file_editors(cx), cx)?;
         if let Some(process) = self.busy_process_in_tab(index, None, cx) {
             return Err(ApiError::new(
                 "confirmation_required",

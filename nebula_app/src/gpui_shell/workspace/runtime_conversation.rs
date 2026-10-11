@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use super::{NebulaWorkspace, WorkspaceTab};
+use super::NebulaWorkspace;
 use crate::{
     gpui_shell::terminal::view::TerminalView,
     runtime_api::{ApiError, RuntimeCommand, RuntimeDispatch, conversation::Request},
@@ -17,15 +17,7 @@ impl NebulaWorkspace {
         cx: &App,
     ) -> Result<Entity<TerminalView>, ApiError> {
         self.runtime_window_requested(Some(window_id))?;
-        self.tabs
-            .iter()
-            .find_map(|tab| match tab {
-                WorkspaceTab::Split { panes, .. } => panes
-                    .iter()
-                    .find(|pane| pane.id == pane_id)
-                    .map(|pane| pane.terminal_view().expect("terminal-only split stage").clone()),
-                _ => None,
-            })
+        Some(self.runtime_terminal_view(pane_id)?)
             .filter(|view| view.read(cx).runtime_conversation_identity().is_ok())
             .ok_or_else(|| {
                 ApiError::new("conversation_ended", "the Agent pane was closed or exited")

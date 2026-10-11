@@ -197,6 +197,10 @@ impl NebulaWorkspace {
             )),
             RuntimeCommand::CloseWindow { window_id } => {
                 self.runtime_window_requested(*window_id)?;
+                super::runtime_tabs::require_saved_files(
+                    self.tabs.iter().flat_map(|tab| tab.file_editors(cx)),
+                    cx,
+                )?;
                 if let Some(process) = self.busy_process_in_window(cx) {
                     return Err(runtime_close_confirmation(
                         process,
@@ -330,6 +334,7 @@ impl NebulaWorkspace {
                 self.runtime_window_requested(*window_id)?;
                 let source_pane_id = match pane_id {
                     Some(pane_id) => {
+                        self.runtime_terminal_view(*pane_id)?;
                         let Some(tab_ix) = self.tab_of_pane(*pane_id) else {
                             return Err(ApiError::new(
                                 "target_not_found",
@@ -350,7 +355,10 @@ impl NebulaWorkspace {
                         *pane_id
                     },
                     None => match self.tabs.get(self.active) {
-                        Some(WorkspaceTab::Split { focused, .. }) => *focused,
+                        Some(WorkspaceTab::Split { focused, .. }) => {
+                            self.runtime_terminal_view(*focused)?;
+                            *focused
+                        },
                         _ => {
                             return Err(ApiError::new(
                                 "invalid_state",
@@ -382,6 +390,14 @@ impl NebulaWorkspace {
                         format!("pane {pane_id} does not exist"),
                     ));
                 };
+                let file = match &self.tabs[tab_ix] {
+                    WorkspaceTab::Split { panes, .. } => panes
+                        .iter()
+                        .find(|pane| pane.id == *pane_id)
+                        .and_then(|pane| pane.file_editor(cx)),
+                    _ => None,
+                };
+                super::runtime_tabs::require_saved_files(file, cx)?;
                 if let Some(process) = self.busy_process_in_tab(tab_ix, Some(*pane_id), cx) {
                     return Err(runtime_close_confirmation(
                         process,
@@ -481,21 +497,13 @@ impl NebulaWorkspace {
             },
             RuntimeCommand::Prompt { window_id, pane_id, text, submit } => {
                 self.runtime_window_requested(*window_id)?;
-                let Some(tab_ix) = self.tab_of_pane(*pane_id) else {
+                let Some(_tab_ix) = self.tab_of_pane(*pane_id) else {
                     return Err(ApiError::new(
                         "target_not_found",
                         format!("pane {pane_id} does not exist"),
                     ));
                 };
-                let view = match self.tabs.get(tab_ix) {
-                    Some(WorkspaceTab::Split { panes, .. }) => {
-                        panes.iter().find(|pane| pane.id == *pane_id).map(|pane| {
-                            pane.terminal_view().expect("terminal-only split stage").clone()
-                        })
-                    },
-                    _ => None,
-                }
-                .expect("tab_of_pane resolved a terminal pane");
+                let view = self.runtime_terminal_view(*pane_id)?;
                 view.update(cx, |view, cx| view.runtime_prompt(text.clone(), *submit, cx))?;
                 self.runtime_result(
                     json!({
@@ -509,21 +517,13 @@ impl NebulaWorkspace {
             },
             RuntimeCommand::Paste { window_id, pane_id, text, submit } => {
                 self.runtime_window_requested(*window_id)?;
-                let Some(tab_ix) = self.tab_of_pane(*pane_id) else {
+                let Some(_tab_ix) = self.tab_of_pane(*pane_id) else {
                     return Err(ApiError::new(
                         "target_not_found",
                         format!("pane {pane_id} does not exist"),
                     ));
                 };
-                let view = match self.tabs.get(tab_ix) {
-                    Some(WorkspaceTab::Split { panes, .. }) => {
-                        panes.iter().find(|pane| pane.id == *pane_id).map(|pane| {
-                            pane.terminal_view().expect("terminal-only split stage").clone()
-                        })
-                    },
-                    _ => None,
-                }
-                .expect("tab_of_pane resolved a terminal pane");
+                let view = self.runtime_terminal_view(*pane_id)?;
                 view.update(cx, |view, cx| {
                     view.runtime_paste(text.clone(), *submit, InputOrigin::Program, cx)
                 })?;
@@ -540,41 +540,23 @@ impl NebulaWorkspace {
             },
             RuntimeCommand::ReadPane { window_id, pane_id, lines, screen } => {
                 self.runtime_window_requested(*window_id)?;
-                let Some(tab_ix) = self.tab_of_pane(*pane_id) else {
+                let Some(_tab_ix) = self.tab_of_pane(*pane_id) else {
                     return Err(ApiError::new(
                         "target_not_found",
                         format!("pane {pane_id} does not exist"),
                     ));
                 };
-                let read = match self.tabs.get(tab_ix) {
-                    Some(WorkspaceTab::Split { panes, .. }) => panes
-                        .iter()
-                        .find(|pane| pane.id == *pane_id)
-                        .expect("tab_of_pane resolved a terminal pane")
-                        .terminal_view()
-                        .expect("terminal-only split stage")
-                        .read(cx)
-                        .runtime_read(self.runtime_window_id, *lines, *screen),
-                    _ => unreachable!("tab_of_pane only resolves terminal tabs"),
-                }?;
+                let read = self.runtime_terminal_view(*pane_id)?.read(cx).runtime_read(
+                    self.runtime_window_id,
+                    *lines,
+                    *screen,
+                )?;
                 serde_json::to_value(read)
                     .map_err(|error| ApiError::new("serialization_failed", error.to_string()))
             },
             RuntimeCommand::ScrollPane { window_id, pane_id, lines, column, row } => {
                 self.runtime_window_requested(*window_id)?;
-                let tab_ix = self.tab_of_pane(*pane_id).ok_or_else(|| {
-                    ApiError::new("target_not_found", "scroll pane does not exist")
-                })?;
-                let view = match &self.tabs[tab_ix] {
-                    WorkspaceTab::Split { panes, .. } => panes
-                        .iter()
-                        .find(|pane| pane.id == *pane_id)
-                        .expect("resolved pane")
-                        .terminal_view()
-                        .expect("terminal-only split stage")
-                        .clone(),
-                    _ => unreachable!("tab_of_pane only resolves terminal tabs"),
-                };
+                let view = self.runtime_terminal_view(*pane_id)?;
                 view.update(cx, |view, cx| view.runtime_scroll(*lines, *column, *row, window, cx))?;
                 // 连续手势不改变窗口清单；不为每个滚轮回执重建整窗状态快照。
                 Ok(json!({"action": {"window_id": self.runtime_window_id,
@@ -582,44 +564,28 @@ impl NebulaWorkspace {
             },
             RuntimeCommand::Procs { window_id, pane_id } => {
                 self.runtime_window_requested(*window_id)?;
-                let Some(tab_ix) = self.tab_of_pane(*pane_id) else {
+                let Some(_tab_ix) = self.tab_of_pane(*pane_id) else {
                     return Err(ApiError::new(
                         "target_not_found",
                         format!("pane {pane_id} does not exist"),
                     ));
                 };
-                let processes = match self.tabs.get(tab_ix) {
-                    Some(WorkspaceTab::Split { panes, .. }) => panes
-                        .iter()
-                        .find(|pane| pane.id == *pane_id)
-                        .expect("tab_of_pane resolved a terminal pane")
-                        .terminal_view()
-                        .expect("terminal-only split stage")
-                        .read(cx)
-                        .runtime_procs(self.runtime_window_id),
-                    _ => unreachable!("tab_of_pane only resolves terminal tabs"),
-                }?;
+                let processes = self
+                    .runtime_terminal_view(*pane_id)?
+                    .read(cx)
+                    .runtime_procs(self.runtime_window_id)?;
                 serde_json::to_value(processes)
                     .map_err(|error| ApiError::new("serialization_failed", error.to_string()))
             },
             RuntimeCommand::SendKey { window_id, pane_id, key, modifiers, repeat } => {
                 self.runtime_window_requested(*window_id)?;
-                let Some(tab_ix) = self.tab_of_pane(*pane_id) else {
+                let Some(_tab_ix) = self.tab_of_pane(*pane_id) else {
                     return Err(ApiError::new(
                         "target_not_found",
                         format!("pane {pane_id} does not exist"),
                     ));
                 };
-                let view = match self.tabs.get(tab_ix) {
-                    Some(WorkspaceTab::Split { panes, .. }) => panes
-                        .iter()
-                        .find(|pane| pane.id == *pane_id)
-                        .expect("tab_of_pane resolved a terminal pane")
-                        .terminal_view()
-                        .expect("terminal-only split stage")
-                        .clone(),
-                    _ => unreachable!("tab_of_pane only resolves terminal tabs"),
-                };
+                let view = self.runtime_terminal_view(*pane_id)?;
                 let bytes_sent = view
                     .update(cx, |view, cx| view.runtime_send_key(*key, *modifiers, *repeat, cx))?;
                 self.runtime_result(
@@ -636,22 +602,13 @@ impl NebulaWorkspace {
             },
             RuntimeCommand::Run { window_id, pane_id, command, .. } => {
                 self.runtime_window_requested(*window_id)?;
-                let Some(tab_ix) = self.tab_of_pane(*pane_id) else {
+                let Some(_tab_ix) = self.tab_of_pane(*pane_id) else {
                     return Err(ApiError::new(
                         "target_not_found",
                         format!("pane {pane_id} does not exist"),
                     ));
                 };
-                let view = match self.tabs.get(tab_ix) {
-                    Some(WorkspaceTab::Split { panes, .. }) => panes
-                        .iter()
-                        .find(|pane| pane.id == *pane_id)
-                        .expect("tab_of_pane resolved a terminal pane")
-                        .terminal_view()
-                        .expect("terminal-only split stage")
-                        .clone(),
-                    _ => unreachable!("tab_of_pane only resolves terminal tabs"),
-                };
+                let view = self.runtime_terminal_view(*pane_id)?;
                 let run_id = view.update(cx, |view, cx| view.runtime_run(command.clone(), cx))?;
                 self.runtime_result(
                     json!({
@@ -682,12 +639,7 @@ impl NebulaWorkspace {
                 let created_tab = pane_id.is_none();
                 let pane_id = match pane_id {
                     Some(pane_id) => {
-                        if self.tab_of_pane(*pane_id).is_none() {
-                            return Err(ApiError::new(
-                                "target_not_found",
-                                format!("pane {pane_id} does not exist"),
-                            ));
-                        }
+                        self.runtime_terminal_view(*pane_id)?;
                         *pane_id
                     },
                     None => self.add_terminal_at(cwd.clone(), None, window, cx),
@@ -711,7 +663,7 @@ impl NebulaWorkspace {
                 if created_tab && let Some(meta) = self.tab_meta.get_mut(self.active) {
                     meta.custom_name = Some(name.clone());
                 }
-                let Some(tab_ix) = self.tab_of_pane(pane_id) else {
+                let Some(_tab_ix) = self.tab_of_pane(pane_id) else {
                     self.runtime_hub.close_agent(&agent.agent_id, "launch_failed");
                     if created_tab {
                         self.discard_runtime_agent_tab(pane_id, window, cx);
@@ -721,16 +673,7 @@ impl NebulaWorkspace {
                         "the new agent pane was not registered in the workspace",
                     ));
                 };
-                let view = match self.tabs.get(tab_ix) {
-                    Some(WorkspaceTab::Split { panes, .. }) => panes
-                        .iter()
-                        .find(|pane| pane.id == pane_id)
-                        .expect("tab_of_pane resolved a terminal pane")
-                        .terminal_view()
-                        .expect("terminal-only split stage")
-                        .clone(),
-                    _ => unreachable!("tab_of_pane only resolves terminal tabs"),
-                };
+                let view = self.runtime_terminal_view(pane_id)?;
                 if let Err(error) =
                     view.update(cx, |view, cx| view.runtime_prompt(command.clone(), true, cx))
                 {
@@ -757,44 +700,26 @@ impl NebulaWorkspace {
             RuntimeCommand::AgentPrompt { agent, generation, text, submit } => {
                 let managed = self.runtime_hub.active_agent(agent, *generation)?;
                 self.runtime_window_requested(Some(managed.window_id))?;
-                let Some(tab_ix) = self.tab_of_pane(managed.pane_id) else {
+                let Some(_tab_ix) = self.tab_of_pane(managed.pane_id) else {
                     return Err(ApiError::new(
                         "agent_closed",
                         format!("agent {:?} no longer has a live pane", managed.name),
                     ));
                 };
-                let view = match self.tabs.get(tab_ix) {
-                    Some(WorkspaceTab::Split { panes, .. }) => panes
-                        .iter()
-                        .find(|pane| pane.id == managed.pane_id)
-                        .expect("tab_of_pane resolved a terminal pane")
-                        .terminal_view()
-                        .expect("terminal-only split stage")
-                        .clone(),
-                    _ => unreachable!("tab_of_pane only resolves terminal tabs"),
-                };
+                let view = self.runtime_terminal_view(managed.pane_id)?;
                 view.update(cx, |view, cx| view.runtime_prompt(text.clone(), *submit, cx))?;
                 self.runtime_result(json!({ "agent": managed }), window, cx)
             },
             RuntimeCommand::AgentPaste { agent, generation, text, submit } => {
                 let managed = self.runtime_hub.active_agent(agent, *generation)?;
                 self.runtime_window_requested(Some(managed.window_id))?;
-                let Some(tab_ix) = self.tab_of_pane(managed.pane_id) else {
+                let Some(_tab_ix) = self.tab_of_pane(managed.pane_id) else {
                     return Err(ApiError::new(
                         "agent_closed",
                         format!("agent {:?} no longer has a live pane", managed.name),
                     ));
                 };
-                let view = match self.tabs.get(tab_ix) {
-                    Some(WorkspaceTab::Split { panes, .. }) => panes
-                        .iter()
-                        .find(|pane| pane.id == managed.pane_id)
-                        .expect("tab_of_pane resolved a terminal pane")
-                        .terminal_view()
-                        .expect("terminal-only split stage")
-                        .clone(),
-                    _ => unreachable!("tab_of_pane only resolves terminal tabs"),
-                };
+                let view = self.runtime_terminal_view(managed.pane_id)?;
                 view.update(cx, |view, cx| {
                     view.runtime_agent_paste(text.clone(), *submit, InputOrigin::Program, cx)
                 })?;
@@ -803,23 +728,17 @@ impl NebulaWorkspace {
             RuntimeCommand::AgentRead { agent, generation, lines } => {
                 let managed = self.runtime_hub.active_agent(agent, *generation)?;
                 self.runtime_window_requested(Some(managed.window_id))?;
-                let Some(tab_ix) = self.tab_of_pane(managed.pane_id) else {
+                let Some(_tab_ix) = self.tab_of_pane(managed.pane_id) else {
                     return Err(ApiError::new(
                         "agent_closed",
                         format!("agent {:?} no longer has a live pane", managed.name),
                     ));
                 };
-                let read = match self.tabs.get(tab_ix) {
-                    Some(WorkspaceTab::Split { panes, .. }) => panes
-                        .iter()
-                        .find(|pane| pane.id == managed.pane_id)
-                        .expect("tab_of_pane resolved a terminal pane")
-                        .terminal_view()
-                        .expect("terminal-only split stage")
-                        .read(cx)
-                        .runtime_read(self.runtime_window_id, *lines, None),
-                    _ => unreachable!("tab_of_pane only resolves terminal tabs"),
-                }?;
+                let read = self.runtime_terminal_view(managed.pane_id)?.read(cx).runtime_read(
+                    self.runtime_window_id,
+                    *lines,
+                    None,
+                )?;
                 Ok(json!({ "agent": managed, "read": read }))
             },
         }
@@ -878,34 +797,52 @@ impl NebulaWorkspace {
                         let runtime_panes = panes
                             .iter()
                             .map(|pane| {
-                                let view = pane
-                                    .terminal_view()
-                                    .expect("terminal-only split stage")
-                                    .read(cx);
-                                RuntimePane {
-                                    id: pane.id,
-                                    active: pane.id == *focused,
-                                    title: view.title.clone(),
-                                    cwd: view.cwd.clone(),
-                                    branch: view.branch.clone(),
-                                    ssh_destination: view.ssh_destination.clone(),
-                                    running_program: view.running_program.clone(),
-                                    agent: view.runtime_agent(),
-                                    task_state: view.runtime_task_state(),
-                                    state_change_seq: 0,
-                                    active_run: view.runtime_active_run(),
-                                    last_run: view.runtime_last_run(),
+                                if let Some(terminal) = pane.terminal_view() {
+                                    let view = terminal.read(cx);
+                                    RuntimePane {
+                                        id: pane.id,
+                                        kind: "terminal".into(),
+                                        file: None,
+                                        active: pane.id == *focused,
+                                        title: view.title.clone(),
+                                        cwd: view.cwd.clone(),
+                                        branch: view.branch.clone(),
+                                        ssh_destination: view.ssh_destination.clone(),
+                                        running_program: view.running_program.clone(),
+                                        agent: view.runtime_agent(),
+                                        task_state: view.runtime_task_state(),
+                                        state_change_seq: 0,
+                                        active_run: view.runtime_active_run(),
+                                        last_run: view.runtime_last_run(),
+                                    }
+                                } else {
+                                    RuntimePane {
+                                        id: pane.id,
+                                        kind: pane.kind().into(),
+                                        file: pane.runtime_file_info(cx),
+                                        active: pane.id == *focused,
+                                        title: pane.title(cx).to_string(),
+                                        cwd: String::new(),
+                                        branch: String::new(),
+                                        ssh_destination: None,
+                                        running_program: None,
+                                        agent: None,
+                                        task_state: RuntimeTaskState::Idle,
+                                        state_change_seq: 0,
+                                        active_run: None,
+                                        last_run: None,
+                                    }
                                 }
                             })
                             .collect();
                         (
-                            if panes.iter().any(|pane| {
-                                pane.terminal_view()
-                                    .expect("terminal-only split stage")
-                                    .read(cx)
-                                    .ssh_destination
-                                    .is_some()
-                            }) {
+                            if panes.iter().any(|pane| pane.terminal_view().is_none()) {
+                                "split"
+                            } else if panes
+                                .iter()
+                                .filter_map(|pane| pane.terminal_view())
+                                .any(|view| view.read(cx).ssh_destination.is_some())
+                            {
                                 "ssh"
                             } else {
                                 "shell"
@@ -989,22 +926,33 @@ impl NebulaWorkspace {
         })
     }
 
+    pub(super) fn runtime_terminal_view(
+        &self,
+        pane_id: u64,
+    ) -> Result<gpui::Entity<crate::gpui_shell::terminal::view::TerminalView>, ApiError> {
+        let pane = self
+            .tabs
+            .iter()
+            .find_map(|tab| match tab {
+                WorkspaceTab::Split { panes, .. } => panes.iter().find(|pane| pane.id == pane_id),
+                _ => None,
+            })
+            .ok_or_else(|| {
+                ApiError::new("target_not_found", format!("pane {pane_id} does not exist"))
+            })?;
+        pane.terminal_view().cloned().ok_or_else(|| {
+            ApiError::new("unsupported_pane", "this action requires terminal content")
+                .details(json!({ "pane_id": pane_id, "kind": pane.kind() }))
+        })
+    }
+
     pub(crate) fn runtime_exec_context(
         &self,
         pane_id: u64,
         cx: &App,
     ) -> Result<(crate::runtime_exec::PaneExecContext, String), ApiError> {
-        let tab_ix = self.tab_of_pane(pane_id).ok_or_else(|| {
-            ApiError::new("target_not_found", format!("pane {pane_id} does not exist"))
-        })?;
-        let WorkspaceTab::Split { panes, .. } = &self.tabs[tab_ix] else {
-            return Err(ApiError::new(
-                "exec_context_unavailable",
-                "pane.exec requires a terminal pane",
-            ));
-        };
-        let pane = panes.iter().find(|pane| pane.id == pane_id).expect("tab owns pane");
-        let view = pane.terminal_view().expect("terminal-only split stage").read(cx);
+        let terminal = self.runtime_terminal_view(pane_id)?;
+        let view = terminal.read(cx);
         if view.ssh_destination.is_some() {
             return Err(ApiError::new(
                 "remote_exec_unsupported",
@@ -1055,7 +1003,7 @@ impl NebulaWorkspace {
         let can_hide = crate::platform::CAPABILITIES.hide_window_on_close;
         if residency_close_action(
             runtime.keep_session && can_hide,
-            self.has_live_terminal_panes(),
+            self.has_live_workspace_content(),
             self.tabs.is_empty(),
             runtime.tray,
         ) != ResidencyCloseAction::Hide
@@ -1086,10 +1034,14 @@ impl NebulaWorkspace {
         self.window_hidden
     }
 
-    fn has_live_terminal_panes(&self) -> bool {
-        self.tabs
-            .iter()
-            .any(|tab| matches!(tab, WorkspaceTab::Split { panes, .. } if !panes.is_empty()))
+    fn has_live_workspace_content(&self) -> bool {
+        self.tabs.iter().any(|tab| match tab {
+            WorkspaceTab::Split { panes, .. } => !panes.is_empty(),
+            WorkspaceTab::Code { .. }
+            | WorkspaceTab::Document { .. }
+            | WorkspaceTab::Image { .. } => true,
+            WorkspaceTab::Settings { .. } => false,
+        })
     }
 
     pub(super) fn publish_tray_agents(&self, cx: &App) {
@@ -1102,7 +1054,8 @@ impl NebulaWorkspace {
         for tab in &self.tabs {
             let WorkspaceTab::Split { panes, .. } = tab else { continue };
             for pane in panes {
-                let view = pane.terminal_view().expect("terminal-only split stage").read(cx);
+                let Some(terminal) = pane.terminal_view() else { continue };
+                let view = terminal.read(cx);
                 let Some(agent) = view.runtime_agent() else {
                     continue;
                 };

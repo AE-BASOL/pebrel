@@ -899,6 +899,8 @@ mod tests {
                     zoomed_pane_id: None,
                     layout: Some(RuntimeLayout::Pane { pane_id }),
                     panes: vec![RuntimePane {
+                        kind: "terminal".into(),
+                        file: None,
                         id: pane_id,
                         active: true,
                         title: "shell".into(),

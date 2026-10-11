@@ -78,6 +78,8 @@ impl WindowContext {
                     .iter()
                     .filter_map(|id| self.pane(*id))
                     .map(|pane| RuntimePane {
+                        kind: "terminal".into(),
+                        file: None,
                         id: pane.id,
                         active: pane.id == tab.active_pane,
                         title: pane.title.clone(),

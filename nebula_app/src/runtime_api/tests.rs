@@ -5,6 +5,34 @@ use super::*;
 pub(crate) mod file_pane_fixture;
 pub(crate) mod git_fixture;
 
+#[path = "agent_api/fork_tests.rs"]
+mod file_fork_tests;
+
+#[test]
+fn pane_snapshot_preserves_old_terminal_contract_and_identifies_files() {
+    let original = snapshot(RuntimeTaskState::Idle).windows[0].tabs[0].panes[0].clone();
+    let mut old = serde_json::to_value(&original).unwrap();
+    old.as_object_mut().unwrap().remove("kind");
+    old.as_object_mut().unwrap().remove("file");
+    assert_eq!(serde_json::from_value::<RuntimePane>(old).unwrap(), original);
+
+    let mut file = original;
+    file.kind = "file_error".into();
+    file.file = Some(tabs::FileInfo {
+        path: "/合成/readme.md".into(),
+        remote: true,
+        dirty: false,
+        saving: false,
+        ready: false,
+        revision: None,
+    });
+    let value = serde_json::to_value(&file).unwrap();
+    assert_eq!(value["kind"], "file_error");
+    assert_eq!(value["file"]["path"], "/合成/readme.md");
+    assert_eq!(value["file"]["ready"], false);
+    assert_eq!(serde_json::from_value::<RuntimePane>(value).unwrap(), file);
+}
+
 #[test]
 fn conversation_mutations_require_current_identity_and_read_cannot_smuggle_input() {
     let identity = json!({"kind":"codex","session_id":"thread","epoch":3});
@@ -105,6 +133,8 @@ fn snapshot(state: RuntimeTaskState) -> RuntimeSnapshot {
                 zoomed_pane_id: None,
                 layout: Some(RuntimeLayout::Pane { pane_id: 3 }),
                 panes: vec![RuntimePane {
+                    kind: "terminal".into(),
+                    file: None,
                     id: 3,
                     active: true,
                     title: "shell".into(),
@@ -150,6 +180,8 @@ fn delegation_snapshot(
                 title: &str,
                 agent: Option<RuntimeAgent>,
                 task_state: RuntimeTaskState| RuntimePane {
+        kind: "terminal".into(),
+        file: None,
         id,
         active,
         title: title.into(),
@@ -466,6 +498,12 @@ fn agent_start_exposes_only_verified_launch_contracts() {
 
 #[test]
 fn agent_fork_prepares_a_runtime_agent_start_with_provenance() {
+    if git_fixture::isolated_child(
+        module_path!(),
+        "agent_fork_prepares_a_runtime_agent_start_with_provenance",
+    ) {
+        return;
+    }
     let repository = test_git_repository();
     let target = repository.path().join("isolated-review");
     let request = ApiRequest::new(
@@ -494,6 +532,7 @@ fn agent_fork_prepares_a_runtime_agent_start_with_provenance() {
         .expect("agent.fork owns a transaction")
         .rollback()
         .expect("prepared resources should roll back");
+    git_fixture::completed("agent_fork_prepares_a_runtime_agent_start_with_provenance");
 }
 
 #[test]
@@ -533,6 +572,9 @@ fn managed_agent_names_are_unique_and_generations_are_stable() {
 
 #[test]
 fn agent_fork_rolls_back_when_ui_launch_fails() {
+    if git_fixture::isolated_child(module_path!(), "agent_fork_rolls_back_when_ui_launch_fails") {
+        return;
+    }
     let repository = test_git_repository();
     let target = repository.path().join("failed-agent");
     let request = ApiRequest::new(
@@ -578,6 +620,7 @@ fn agent_fork_rolls_back_when_ui_launch_fails() {
             .expect("query branch")
             .success()
     );
+    git_fixture::completed("agent_fork_rolls_back_when_ui_launch_fails");
 }
 
 #[test]

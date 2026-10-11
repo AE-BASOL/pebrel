@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use gpui::{Context, Window};
+use gpui::{Context, Entity, Window};
 use nebula_split::SplitTree;
 
 use super::{
@@ -200,7 +200,7 @@ impl NebulaWorkspace {
                     workspace.tabs.iter().filter_map(|tab| match tab {
                         WorkspaceTab::Split { panes, .. } => Some(panes),
                         _ => None,
-                    }).flatten().map(|pane| pane.terminal_view().expect("terminal-only split stage").downgrade()).collect::<Vec<_>>()
+                    }).flatten().filter_map(|pane| pane.terminal_view().map(Entity::downgrade)).collect::<Vec<_>>()
                 }) else { return };
                 let batches = views.len().div_ceil(4).max(1);
                 let interval = Duration::from_millis((1000 / batches as u64).max(1));
@@ -239,14 +239,18 @@ impl NebulaWorkspace {
             .tabs
             .iter()
             .flat_map(|tab| match tab {
-                WorkspaceTab::Split { panes, .. } => {
-                    panes.iter().map(|pane| pane.id).collect::<Vec<_>>()
-                },
+                WorkspaceTab::Split { panes, .. } => panes
+                    .iter()
+                    .filter(|pane| pane.terminal_view().is_some())
+                    .map(|pane| pane.id)
+                    .collect::<Vec<_>>(),
                 _ => Vec::new(),
             })
             .collect();
         let active_focused = self.tabs.get(self.active).and_then(|tab| match tab {
-            WorkspaceTab::Split { focused, .. } => Some(*focused),
+            WorkspaceTab::Split { .. } => {
+                tab.focused_pane().filter(|pane| pane.terminal_view().is_some()).map(|pane| pane.id)
+            },
             _ => None,
         });
         let Some(target_id) = ai_hook_target_pane(&pane_ids, event.pane, active_focused) else {
@@ -256,7 +260,7 @@ impl NebulaWorkspace {
             WorkspaceTab::Split { panes, .. } => panes
                 .iter()
                 .find(|pane| pane.id == target_id)
-                .map(|pane| pane.terminal_view().expect("terminal-only split stage").clone()),
+                .and_then(|pane| pane.terminal_view().cloned()),
             _ => None,
         });
         target.is_some_and(|view| view.update(cx, |view, cx| view.handle_ai_hook(&event, cx)))
@@ -268,22 +272,13 @@ impl NebulaWorkspace {
         cx: &mut Context<Self>,
     ) -> Result<(), crate::runtime_api::ApiError> {
         let pane_id = callback.origin.pane_id;
-        let Some(tab_ix) = self.tab_of_pane(pane_id) else {
+        let Some(_tab_ix) = self.tab_of_pane(pane_id) else {
             return Err(crate::runtime_api::ApiError::new(
                 "origin_closed",
                 format!("delegation origin pane {pane_id} no longer exists"),
             ));
         };
-        let view = match self.tabs.get(tab_ix) {
-            Some(WorkspaceTab::Split { panes, .. }) => panes
-                .iter()
-                .find(|pane| pane.id == pane_id)
-                .expect("tab_of_pane resolved a terminal pane")
-                .terminal_view()
-                .expect("terminal-only split stage")
-                .clone(),
-            _ => unreachable!("tab_of_pane only resolves terminal tabs"),
-        };
+        let view = self.runtime_terminal_view(pane_id)?;
         view.update(cx, |view, cx| {
             let agent = view.runtime_chat_agent().ok_or_else(|| {
                 crate::runtime_api::ApiError::new(

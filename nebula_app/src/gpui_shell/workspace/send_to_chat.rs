@@ -298,7 +298,8 @@ impl NebulaWorkspace {
             let WorkspaceTab::Split { panes, .. } = tab else { continue };
             let tab_title = self.tab_title(tab_ix, cx);
             for pane in panes {
-                let view = pane.terminal_view().expect("terminal-only split stage").read(cx);
+                let Some(terminal) = pane.terminal_view() else { continue };
+                let view = terminal.read(cx);
                 let Some(agent) = view.runtime_chat_agent() else { continue };
                 let title: SharedString = if panes.len() == 1 {
                     tab_title.clone()
@@ -536,20 +537,7 @@ impl NebulaWorkspace {
         message: String,
         cx: &mut Context<Self>,
     ) -> Result<(), crate::runtime_api::ApiError> {
-        let Some(tab_ix) = self.tab_of_pane(pane_id) else {
-            return Err(crate::runtime_api::ApiError::new(
-                "target_not_found",
-                format!("pane {pane_id} does not exist"),
-            ));
-        };
-        let view = match self.tabs.get(tab_ix) {
-            Some(WorkspaceTab::Split { panes, .. }) => panes
-                .iter()
-                .find(|pane| pane.id == pane_id)
-                .map(|pane| pane.terminal_view().expect("terminal-only split stage").clone()),
-            _ => None,
-        }
-        .expect("tab_of_pane resolved a terminal pane");
+        let view = self.runtime_terminal_view(pane_id)?;
         // 用户在对话框里当场选定了这个 pane，属于知情选择：远端目标也放行，
         // 但对话框必须已经把它标成远端主机（见 `send_to_chat_targets`）。
         view.update(cx, |view, cx| view.runtime_chat_message(message, InputOrigin::User, cx))

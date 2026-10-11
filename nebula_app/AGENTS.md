@@ -11,6 +11,7 @@
 - GPUI SplitTree 的几何、焦点与 divider adapter 提取见 [`split layout`](../architecture/notes/nebula_app/gpui_shell/workspace/2026-10-11-split-layout-authority.md)。
 - 结构性 split 与叶 capability 的命名边界见 [`split leaf identity`](../architecture/notes/nebula_app/gpui_shell/workspace/2026-10-11-split-leaf-identity.md)。
 - 叶 content 与 TerminalView 访问/rebind 所有权见 [`terminal content`](../architecture/notes/nebula_app/gpui_shell/workspace/2026-10-11-terminal-content-capability.md)。
+- RPC/AI/clipboard 的 terminal capability 路由见 [`terminal routing`](../architecture/notes/nebula_app/gpui_shell/workspace/2026-10-11-terminal-routing-capability.md)。
 - 操作形成“触发 → 执行 → 可感知结果”的闭环。成功只能在操作真实完成或底层接口明确接受后显示，不能把回调触发当成平台级成功。
 - 异步工作必须有所有者、取消/过期策略和视图销毁清理；旧结果不得覆盖新状态。渲染回调不得同步等待磁盘、网络、子进程或长锁。
 - 新 UI 文案使用现有 typed message ID、命名占位符和回退合同，遵循 [`../docs/internationalization.md`](../docs/internationalization.md)。

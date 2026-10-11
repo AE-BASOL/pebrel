@@ -28,3 +28,49 @@ impl WorkspacePane {
         }
     }
 }
+
+impl WorkspacePane {
+    pub(super) fn kind(&self) -> &'static str {
+        match self.content {
+            PaneContent::Terminal { .. } => "terminal",
+        }
+    }
+
+    pub(super) fn file_editor(
+        &self,
+        _cx: &App,
+    ) -> Option<Entity<crate::gpui_shell::file_editor::TextFileView>> {
+        match self.content {
+            PaneContent::Terminal { .. } => None,
+        }
+    }
+
+    pub(super) fn runtime_file_info(
+        &self,
+        _cx: &App,
+    ) -> Option<crate::runtime_api::tabs::FileInfo> {
+        match self.content {
+            PaneContent::Terminal { .. } => None,
+        }
+    }
+
+    pub(super) fn title(&self, cx: &App) -> SharedString {
+        match &self.content {
+            PaneContent::Terminal { view, .. } => view.read(cx).tab_label().into(),
+        }
+    }
+}
+
+impl WorkspaceTab {
+    pub(super) fn focused_pane(&self) -> Option<&WorkspacePane> {
+        let Self::Split { panes, focused, .. } = self else { return None };
+        panes.iter().find(|pane| pane.id == *focused).or_else(|| panes.first())
+    }
+
+    pub(super) fn file_editors(
+        &self,
+        cx: &App,
+    ) -> Vec<Entity<crate::gpui_shell::file_editor::TextFileView>> {
+        self.file_editor(cx).into_iter().collect()
+    }
+}

@@ -6,7 +6,10 @@ impl WorkspaceTab {
     /// Shared with the zoomed/single-pane renderer, including its empty-focus fallback.
     pub(super) fn primary_terminal_pane(&self) -> Option<&WorkspacePane> {
         let Self::Split { panes, focused, .. } = self else { return None };
-        panes.iter().find(|pane| pane.id == *focused).or_else(|| panes.first())
+        panes
+            .iter()
+            .find(|pane| pane.id == *focused && pane.terminal_view().is_some())
+            .or_else(|| panes.iter().find(|pane| pane.terminal_view().is_some()))
     }
 }
 
@@ -136,12 +139,12 @@ impl NebulaWorkspace {
         for (index, tab) in self.tabs.iter().enumerate() {
             let WorkspaceTab::Split { panes, tree, zoomed, .. } = tab else { continue };
             let active = index == self.active && !self.settings_open && !self.window_hidden;
-            let primary = tab.primary_terminal_pane().map(|pane| pane.id);
+            let primary = tab.focused_pane().map(|pane| pane.id);
             for pane in panes {
                 let visible = active && (!*zoomed && !tree.is_leaf() || primary == Some(pane.id));
-                pane.terminal_view()
-                    .expect("terminal-only split stage")
-                    .update(cx, |view, cx| view.set_output_visible(visible, cx));
+                if let Some(view) = pane.terminal_view() {
+                    view.update(cx, |view, cx| view.set_output_visible(visible, cx));
+                }
             }
         }
     }
@@ -204,9 +207,7 @@ mod tests {
                             )
                         })
                         .collect();
-                    terminals.extend(panes.iter().map(|pane| {
-                        pane.terminal_view().expect("terminal-only split stage").clone()
-                    }));
+                    terminals.extend(panes.iter().filter_map(|pane| pane.terminal_view().cloned()));
                     let focused = panes[0].id;
                     let mut tree = SplitTree::Leaf(focused);
                     if panes.len() == 2 {

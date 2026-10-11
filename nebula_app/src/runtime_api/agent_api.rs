@@ -247,6 +247,17 @@ pub(super) fn prepare_dispatch_command(
                 )
             })?;
             let (resolved_window, pane) = snapshot.pane_target(window_id, pane_id)?;
+            if pane.kind != "terminal" {
+                return Err(ApiError::new(
+                    "unsupported_pane",
+                    "agent.fork requires a terminal source pane",
+                )
+                .details(json!({
+                    "window_id": resolved_window,
+                    "pane_id": pane_id,
+                    "kind": pane.kind,
+                })));
+            }
             if pane.ssh_destination.is_some() {
                 return Err(ApiError::new(
                     "remote_worktree_unsupported",
