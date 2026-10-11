@@ -185,14 +185,8 @@ pub fn init(cx: &mut App) {
 
 /// 一个终端 pane：视图实体 + 宿主订阅。id 即 `TerminalView::pane_id`
 /// （AI hook 的 `NEBULA_PANE_ID` 同源），全工作区唯一、终生不复用。
-struct WorkspacePane {
-    id: u64,
-    custom_name: Option<String>,
-    /// Recent committed names; follows the live pane without retaining window-bound inputs.
-    name_history: Vec<Option<String>>,
-    view: Entity<TerminalView>,
-    _subscription: Subscription,
-}
+mod pane_content;
+use pane_content::{PaneContent, WorkspacePane};
 
 enum WorkspaceTab {
     Split {
@@ -250,7 +244,7 @@ impl WorkspaceTab {
     fn focused_view(&self) -> Option<&Entity<TerminalView>> {
         match self {
             Self::Split { panes, focused, .. } => {
-                panes.iter().find(|pane| pane.id == *focused).map(|pane| &pane.view)
+                panes.iter().find(|pane| pane.id == *focused).and_then(WorkspacePane::terminal_view)
             },
             _ => None,
         }
@@ -1119,7 +1113,9 @@ impl NebulaWorkspace {
         for tab in &self.tabs {
             if let WorkspaceTab::Split { panes, .. } = tab {
                 for pane in panes {
-                    pane.view.update(cx, |view, cx| view.apply_settings(cx));
+                    pane.terminal_view()
+                        .expect("terminal-only split stage")
+                        .update(cx, |view, cx| view.apply_settings(cx));
                 }
             }
         }
@@ -1173,8 +1169,7 @@ impl NebulaWorkspace {
             id: pane_id,
             custom_name: None,
             name_history: Vec::new(),
-            view,
-            _subscription: subscription,
+            content: PaneContent::Terminal { view, _subscription: subscription },
         }
     }
 
@@ -1325,7 +1320,7 @@ impl NebulaWorkspace {
         let custom_name = old.custom_name.clone();
         let name_history = old.name_history.clone();
         let (grid, remote_cwd) = {
-            let view = old.view.read(cx);
+            let view = old.terminal_view().expect("terminal-only split stage").read(cx);
             if view.ssh_destination.as_deref() != Some(destination.as_str()) {
                 return;
             }
@@ -1347,15 +1342,15 @@ impl NebulaWorkspace {
         let old = {
             let Some(WorkspaceTab::Split { panes, tree, focused, .. }) = self.tabs.get_mut(tab_ix)
             else {
-                replacement.view.read(cx).shutdown();
+                replacement.terminal_view().expect("terminal-only split stage").read(cx).shutdown();
                 return;
             };
             let Some(index) = panes.iter().position(|pane| pane.id == pane_id) else {
-                replacement.view.read(cx).shutdown();
+                replacement.terminal_view().expect("terminal-only split stage").read(cx).shutdown();
                 return;
             };
             if !tree.replace_leaf(pane_id, replacement_id) {
-                replacement.view.read(cx).shutdown();
+                replacement.terminal_view().expect("terminal-only split stage").read(cx).shutdown();
                 return;
             }
             if *focused == pane_id {
@@ -1366,7 +1361,7 @@ impl NebulaWorkspace {
 
         self.runtime_hub.record_pane_closed(self.runtime_window_id, pane_id);
         self.pane_bounds.borrow_mut().remove(&pane_id);
-        old.view.read(cx).shutdown();
+        old.terminal_view().expect("terminal-only split stage").read(cx).shutdown();
         if tab_ix == self.active {
             self.focus_active(window, cx);
             self.sync_side_panel_to_active(true, cx);
@@ -1377,10 +1372,9 @@ impl NebulaWorkspace {
     /// 与旧壳 `busy_process_in` 同一判据，只把查询落到 GPUI 的 Pane 实体。
     fn busy_process_in_tab(&self, tab_ix: usize, pane_id: Option<u64>, cx: &App) -> Option<String> {
         let WorkspaceTab::Split { panes, .. } = self.tabs.get(tab_ix)? else { return None };
-        panes
-            .iter()
-            .filter(|pane| pane_id.is_none_or(|id| pane.id == id))
-            .find_map(|pane| pane.view.read(cx).busy_process())
+        panes.iter().filter(|pane| pane_id.is_none_or(|id| pane.id == id)).find_map(|pane| {
+            pane.terminal_view().expect("terminal-only split stage").read(cx).busy_process()
+        })
     }
 
     /// 系统标题栏关闭的是整个窗口，必须把所有 Tab/Pane 都纳入同一份旧壳
@@ -1402,7 +1396,10 @@ impl NebulaWorkspace {
         self.tabs.iter().enumerate().find_map(|(ix, tab)| match tab {
             WorkspaceTab::Split { panes, .. } => panes
                 .iter()
-                .find(|pane| pane.view.entity_id() == entity_id)
+                .find(|pane| {
+                    pane.terminal_view().expect("terminal-only split stage").entity_id()
+                        == entity_id
+                })
                 .map(|pane| (ix, pane.id)),
             _ => None,
         })
@@ -1427,7 +1424,7 @@ impl NebulaWorkspace {
             let mut bounds = self.pane_bounds.borrow_mut();
             for pane in panes {
                 self.runtime_hub.record_pane_closed(self.runtime_window_id, pane.id);
-                pane.view.read(cx).shutdown();
+                pane.terminal_view().expect("terminal-only split stage").read(cx).shutdown();
                 self.remote_browser.forget(pane.id);
                 bounds.remove(&pane.id);
             }

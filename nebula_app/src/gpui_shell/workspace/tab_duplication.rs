@@ -155,7 +155,7 @@ impl NebulaWorkspace {
         let meta = self.meta(ix);
         let layout = crate::gpui_shell::session_restore::layout_from_tree(tree, &|id| {
             let pane = panes.iter().find(|pane| pane.id == id).expect("split leaf owns a pane");
-            let view = pane.view.read(cx);
+            let view = pane.terminal_view().expect("terminal-only split stage").read(cx);
             let mut launch = view.session_launch.clone();
             // 完整布局逐 pane 固定已运行的发行版；目录转换仍由恢复入口负责。
             if let Some(distro) = view.wsl_distro() {

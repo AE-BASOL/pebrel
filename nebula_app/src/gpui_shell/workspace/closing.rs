@@ -229,7 +229,7 @@ impl NebulaWorkspace {
                 _ => None,
             })
             .flatten()
-            .map(|pane| pane.view.clone())
+            .map(|pane| pane.terminal_view().expect("terminal-only split stage").clone())
             .collect::<Vec<_>>();
         for pane in &panes {
             pane.update(cx, |view, cx| view.prepare_ai_session_save(cx));

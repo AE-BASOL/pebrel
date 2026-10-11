@@ -78,7 +78,7 @@ fn tab_rows(
 
         let WorkspaceTab::Split { panes, focused, .. } = tab else { continue };
         for pane in panes {
-            let view = pane.view.read(cx);
+            let view = pane.terminal_view().expect("terminal-only split stage").read(cx);
             let pane_title = view.tab_label();
             let location = view
                 .ssh_destination

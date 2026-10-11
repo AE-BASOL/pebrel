@@ -141,17 +141,21 @@ impl NebulaWorkspace {
             let mut pane = self.new_pane(grid, launch, None, window, cx);
             pane.custom_name = custom_name.as_deref().and_then(rename::normalized_name);
             if !matches!(launch_session, LaunchSession::Default) {
-                pane.view.update(cx, |view, _| view.session_launch = launch_session);
+                pane.terminal_view()
+                    .expect("terminal-only split stage")
+                    .update(cx, |view, _| view.session_launch = launch_session);
             }
             // Display and persist the restored location while the guest shell
             // starts; subsequent OSC reports remain authoritative.
             if guest_directory {
-                pane.view.update(cx, |view, cx| {
+                pane.terminal_view().expect("terminal-only split stage").update(cx, |view, cx| {
                     view.seed_restored_cwd(cwd.clone(), cx);
                 });
             }
             if resume_ai && let Some(agent) = agent {
-                pane.view.update(cx, |view, cx| view.restore_agent(agent.clone(), cx));
+                pane.terminal_view()
+                    .expect("terminal-only split stage")
+                    .update(cx, |view, cx| view.restore_agent(agent.clone(), cx));
             }
             panes.push(pane);
         }
@@ -210,7 +214,7 @@ impl NebulaWorkspace {
                 let Some(pane) = panes.iter().find(|pane| pane.id == id) else {
                     return (String::new(), None, None, None);
                 };
-                let view = pane.view.read(cx);
+                let view = pane.terminal_view().expect("terminal-only split stage").read(cx);
                 let agent = view.session_agent();
                 (
                     view.cwd.clone(),
@@ -223,7 +227,9 @@ impl NebulaWorkspace {
             let cwd = panes
                 .iter()
                 .find(|pane| pane.id == *focused)
-                .map(|pane| pane.view.read(cx).cwd.clone())
+                .map(|pane| {
+                    pane.terminal_view().expect("terminal-only split stage").read(cx).cwd.clone()
+                })
                 .unwrap_or_default();
             let meta = self.meta(ix);
             let first_leaf = tree.first_leaf();
@@ -233,7 +239,13 @@ impl NebulaWorkspace {
                 panes
                     .iter()
                     .find(|pane| pane.id == first_leaf)
-                    .and_then(|pane| pane.view.read(cx).ssh_destination.clone())
+                    .and_then(|pane| {
+                        pane.terminal_view()
+                            .expect("terminal-only split stage")
+                            .read(cx)
+                            .ssh_destination
+                            .clone()
+                    })
                     .map(|host| LaunchSession::Ssh { host })
                     .unwrap_or(LaunchSession::Default)
             });

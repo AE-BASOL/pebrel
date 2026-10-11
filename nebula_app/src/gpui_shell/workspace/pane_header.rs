@@ -545,7 +545,7 @@ impl NebulaWorkspace {
         let views: Vec<Entity<TerminalView>> = targets
             .iter()
             .filter_map(|id| panes.iter().find(|pane| pane.id == *id))
-            .map(|pane| pane.view.clone())
+            .map(|pane| pane.terminal_view().expect("terminal-only split stage").clone())
             .collect();
         for view in views {
             view.update(cx, |view, cx| match input {

@@ -20,9 +20,10 @@ impl NebulaWorkspace {
         self.tabs
             .iter()
             .find_map(|tab| match tab {
-                WorkspaceTab::Split { panes, .. } => {
-                    panes.iter().find(|pane| pane.id == pane_id).map(|pane| pane.view.clone())
-                },
+                WorkspaceTab::Split { panes, .. } => panes
+                    .iter()
+                    .find(|pane| pane.id == pane_id)
+                    .map(|pane| pane.terminal_view().expect("terminal-only split stage").clone()),
                 _ => None,
             })
             .filter(|view| view.read(cx).runtime_conversation_identity().is_ok())

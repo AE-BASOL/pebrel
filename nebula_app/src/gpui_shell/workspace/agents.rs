@@ -200,7 +200,7 @@ impl NebulaWorkspace {
                     workspace.tabs.iter().filter_map(|tab| match tab {
                         WorkspaceTab::Split { panes, .. } => Some(panes),
                         _ => None,
-                    }).flatten().map(|pane| pane.view.downgrade()).collect::<Vec<_>>()
+                    }).flatten().map(|pane| pane.terminal_view().expect("terminal-only split stage").downgrade()).collect::<Vec<_>>()
                 }) else { return };
                 let batches = views.len().div_ceil(4).max(1);
                 let interval = Duration::from_millis((1000 / batches as u64).max(1));
@@ -253,9 +253,10 @@ impl NebulaWorkspace {
             return false;
         };
         let target = self.tabs.iter().find_map(|tab| match tab {
-            WorkspaceTab::Split { panes, .. } => {
-                panes.iter().find(|pane| pane.id == target_id).map(|pane| pane.view.clone())
-            },
+            WorkspaceTab::Split { panes, .. } => panes
+                .iter()
+                .find(|pane| pane.id == target_id)
+                .map(|pane| pane.terminal_view().expect("terminal-only split stage").clone()),
             _ => None,
         });
         target.is_some_and(|view| view.update(cx, |view, cx| view.handle_ai_hook(&event, cx)))
@@ -278,7 +279,8 @@ impl NebulaWorkspace {
                 .iter()
                 .find(|pane| pane.id == pane_id)
                 .expect("tab_of_pane resolved a terminal pane")
-                .view
+                .terminal_view()
+                .expect("terminal-only split stage")
                 .clone(),
             _ => unreachable!("tab_of_pane only resolves terminal tabs"),
         };

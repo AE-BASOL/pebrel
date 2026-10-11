@@ -489,7 +489,9 @@ impl NebulaWorkspace {
                 };
                 let view = match self.tabs.get(tab_ix) {
                     Some(WorkspaceTab::Split { panes, .. }) => {
-                        panes.iter().find(|pane| pane.id == *pane_id).map(|pane| pane.view.clone())
+                        panes.iter().find(|pane| pane.id == *pane_id).map(|pane| {
+                            pane.terminal_view().expect("terminal-only split stage").clone()
+                        })
                     },
                     _ => None,
                 }
@@ -515,7 +517,9 @@ impl NebulaWorkspace {
                 };
                 let view = match self.tabs.get(tab_ix) {
                     Some(WorkspaceTab::Split { panes, .. }) => {
-                        panes.iter().find(|pane| pane.id == *pane_id).map(|pane| pane.view.clone())
+                        panes.iter().find(|pane| pane.id == *pane_id).map(|pane| {
+                            pane.terminal_view().expect("terminal-only split stage").clone()
+                        })
                     },
                     _ => None,
                 }
@@ -547,7 +551,8 @@ impl NebulaWorkspace {
                         .iter()
                         .find(|pane| pane.id == *pane_id)
                         .expect("tab_of_pane resolved a terminal pane")
-                        .view
+                        .terminal_view()
+                        .expect("terminal-only split stage")
                         .read(cx)
                         .runtime_read(self.runtime_window_id, *lines, *screen),
                     _ => unreachable!("tab_of_pane only resolves terminal tabs"),
@@ -565,7 +570,8 @@ impl NebulaWorkspace {
                         .iter()
                         .find(|pane| pane.id == *pane_id)
                         .expect("resolved pane")
-                        .view
+                        .terminal_view()
+                        .expect("terminal-only split stage")
                         .clone(),
                     _ => unreachable!("tab_of_pane only resolves terminal tabs"),
                 };
@@ -587,7 +593,8 @@ impl NebulaWorkspace {
                         .iter()
                         .find(|pane| pane.id == *pane_id)
                         .expect("tab_of_pane resolved a terminal pane")
-                        .view
+                        .terminal_view()
+                        .expect("terminal-only split stage")
                         .read(cx)
                         .runtime_procs(self.runtime_window_id),
                     _ => unreachable!("tab_of_pane only resolves terminal tabs"),
@@ -608,7 +615,8 @@ impl NebulaWorkspace {
                         .iter()
                         .find(|pane| pane.id == *pane_id)
                         .expect("tab_of_pane resolved a terminal pane")
-                        .view
+                        .terminal_view()
+                        .expect("terminal-only split stage")
                         .clone(),
                     _ => unreachable!("tab_of_pane only resolves terminal tabs"),
                 };
@@ -639,7 +647,8 @@ impl NebulaWorkspace {
                         .iter()
                         .find(|pane| pane.id == *pane_id)
                         .expect("tab_of_pane resolved a terminal pane")
-                        .view
+                        .terminal_view()
+                        .expect("terminal-only split stage")
                         .clone(),
                     _ => unreachable!("tab_of_pane only resolves terminal tabs"),
                 };
@@ -717,7 +726,8 @@ impl NebulaWorkspace {
                         .iter()
                         .find(|pane| pane.id == pane_id)
                         .expect("tab_of_pane resolved a terminal pane")
-                        .view
+                        .terminal_view()
+                        .expect("terminal-only split stage")
                         .clone(),
                     _ => unreachable!("tab_of_pane only resolves terminal tabs"),
                 };
@@ -758,7 +768,8 @@ impl NebulaWorkspace {
                         .iter()
                         .find(|pane| pane.id == managed.pane_id)
                         .expect("tab_of_pane resolved a terminal pane")
-                        .view
+                        .terminal_view()
+                        .expect("terminal-only split stage")
                         .clone(),
                     _ => unreachable!("tab_of_pane only resolves terminal tabs"),
                 };
@@ -779,7 +790,8 @@ impl NebulaWorkspace {
                         .iter()
                         .find(|pane| pane.id == managed.pane_id)
                         .expect("tab_of_pane resolved a terminal pane")
-                        .view
+                        .terminal_view()
+                        .expect("terminal-only split stage")
                         .clone(),
                     _ => unreachable!("tab_of_pane only resolves terminal tabs"),
                 };
@@ -802,7 +814,8 @@ impl NebulaWorkspace {
                         .iter()
                         .find(|pane| pane.id == managed.pane_id)
                         .expect("tab_of_pane resolved a terminal pane")
-                        .view
+                        .terminal_view()
+                        .expect("terminal-only split stage")
                         .read(cx)
                         .runtime_read(self.runtime_window_id, *lines, None),
                     _ => unreachable!("tab_of_pane only resolves terminal tabs"),
@@ -865,7 +878,10 @@ impl NebulaWorkspace {
                         let runtime_panes = panes
                             .iter()
                             .map(|pane| {
-                                let view = pane.view.read(cx);
+                                let view = pane
+                                    .terminal_view()
+                                    .expect("terminal-only split stage")
+                                    .read(cx);
                                 RuntimePane {
                                     id: pane.id,
                                     active: pane.id == *focused,
@@ -883,8 +899,13 @@ impl NebulaWorkspace {
                             })
                             .collect();
                         (
-                            if panes.iter().any(|pane| pane.view.read(cx).ssh_destination.is_some())
-                            {
+                            if panes.iter().any(|pane| {
+                                pane.terminal_view()
+                                    .expect("terminal-only split stage")
+                                    .read(cx)
+                                    .ssh_destination
+                                    .is_some()
+                            }) {
                                 "ssh"
                             } else {
                                 "shell"
@@ -983,7 +1004,7 @@ impl NebulaWorkspace {
             ));
         };
         let pane = panes.iter().find(|pane| pane.id == pane_id).expect("tab owns pane");
-        let view = pane.view.read(cx);
+        let view = pane.terminal_view().expect("terminal-only split stage").read(cx);
         if view.ssh_destination.is_some() {
             return Err(ApiError::new(
                 "remote_exec_unsupported",
@@ -1081,7 +1102,7 @@ impl NebulaWorkspace {
         for tab in &self.tabs {
             let WorkspaceTab::Split { panes, .. } = tab else { continue };
             for pane in panes {
-                let view = pane.view.read(cx);
+                let view = pane.terminal_view().expect("terminal-only split stage").read(cx);
                 let Some(agent) = view.runtime_agent() else {
                     continue;
                 };

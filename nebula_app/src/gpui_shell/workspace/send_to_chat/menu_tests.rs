@@ -59,7 +59,7 @@ fn terminal_menu_renders_without_a_selection_and_escape_restores_focus(cx: &mut 
                 window,
                 cx,
             );
-            let source = pane.view.clone();
+            let source = pane.terminal_view().expect("terminal-only split stage").clone();
             let id = pane.id;
             workspace.insert_tab_at(
                 0,

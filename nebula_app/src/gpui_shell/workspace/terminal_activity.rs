@@ -139,7 +139,9 @@ impl NebulaWorkspace {
             let primary = tab.primary_terminal_pane().map(|pane| pane.id);
             for pane in panes {
                 let visible = active && (!*zoomed && !tree.is_leaf() || primary == Some(pane.id));
-                pane.view.update(cx, |view, cx| view.set_output_visible(visible, cx));
+                pane.terminal_view()
+                    .expect("terminal-only split stage")
+                    .update(cx, |view, cx| view.set_output_visible(visible, cx));
             }
         }
     }
@@ -202,7 +204,9 @@ mod tests {
                             )
                         })
                         .collect();
-                    terminals.extend(panes.iter().map(|pane| pane.view.clone()));
+                    terminals.extend(panes.iter().map(|pane| {
+                        pane.terminal_view().expect("terminal-only split stage").clone()
+                    }));
                     let focused = panes[0].id;
                     let mut tree = SplitTree::Leaf(focused);
                     if panes.len() == 2 {

@@ -298,7 +298,7 @@ impl NebulaWorkspace {
             let WorkspaceTab::Split { panes, .. } = tab else { continue };
             let tab_title = self.tab_title(tab_ix, cx);
             for pane in panes {
-                let view = pane.view.read(cx);
+                let view = pane.terminal_view().expect("terminal-only split stage").read(cx);
                 let Some(agent) = view.runtime_chat_agent() else { continue };
                 let title: SharedString = if panes.len() == 1 {
                     tab_title.clone()
@@ -543,9 +543,10 @@ impl NebulaWorkspace {
             ));
         };
         let view = match self.tabs.get(tab_ix) {
-            Some(WorkspaceTab::Split { panes, .. }) => {
-                panes.iter().find(|pane| pane.id == pane_id).map(|pane| pane.view.clone())
-            },
+            Some(WorkspaceTab::Split { panes, .. }) => panes
+                .iter()
+                .find(|pane| pane.id == pane_id)
+                .map(|pane| pane.terminal_view().expect("terminal-only split stage").clone()),
             _ => None,
         }
         .expect("tab_of_pane resolved a terminal pane");

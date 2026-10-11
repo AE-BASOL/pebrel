@@ -38,9 +38,10 @@ impl NebulaWorkspace {
     ) {
         if notification.is_attention()
             && let Some(source) = self.tabs.iter().find_map(|tab| match tab {
-                WorkspaceTab::Split { panes, .. } => {
-                    panes.iter().find(|pane| pane.id == pane_id).map(|pane| pane.view.clone())
-                },
+                WorkspaceTab::Split { panes, .. } => panes
+                    .iter()
+                    .find(|pane| pane.id == pane_id)
+                    .map(|pane| pane.terminal_view().expect("terminal-only split stage").clone()),
                 _ => None,
             })
             && source.update(cx, |view, _| view.capture_confirmation()).is_none()
@@ -88,10 +89,9 @@ impl NebulaWorkspace {
         let Some(WorkspaceTab::Split { panes, focused, .. }) = self.tabs.get(tab_index) else {
             return;
         };
-        let reader_open = panes
-            .iter()
-            .find(|pane| pane.id == pane_id)
-            .is_some_and(|pane| pane.view.read(cx).is_reading_answer());
+        let reader_open = panes.iter().find(|pane| pane.id == pane_id).is_some_and(|pane| {
+            pane.terminal_view().expect("terminal-only split stage").read(cx).is_reading_answer()
+        });
         let visible = source_is_visible(
             window.is_window_active() && !self.window_hidden,
             tab_index == self.active && *focused == pane_id,
@@ -102,8 +102,10 @@ impl NebulaWorkspace {
             visible,
             crate::gpui_shell::config::ai_toasts_enabled(cx),
         );
-        let source_view =
-            panes.iter().find(|pane| pane.id == pane_id).map(|pane| pane.view.clone());
+        let source_view = panes
+            .iter()
+            .find(|pane| pane.id == pane_id)
+            .map(|pane| pane.terminal_view().expect("terminal-only split stage").clone());
         if !visible && let Some(meta) = self.tab_meta.get_mut(tab_index) {
             meta.has_bell = true;
         }

@@ -147,19 +147,22 @@ fn duplicate_rebuilds_nested_mixed_layout_with_fresh_sessions(cx: &mut TestAppCo
                 *zoomed = true;
                 *broadcast = true;
                 for pane in panes {
-                    pane.view.update(cx, |view, cx| {
-                        if view.ssh_destination.is_none() {
-                            view.cwd = cwd.clone();
-                            view.restore_agent(
-                                AgentSession {
-                                    source: "codex".into(),
-                                    session_id: Some("source-only".into()),
-                                    session_file: None,
-                                },
-                                cx,
-                            );
-                        }
-                    });
+                    pane.terminal_view().expect("terminal-only split stage").update(
+                        cx,
+                        |view, cx| {
+                            if view.ssh_destination.is_none() {
+                                view.cwd = cwd.clone();
+                                view.restore_agent(
+                                    AgentSession {
+                                        source: "codex".into(),
+                                        session_id: Some("source-only".into()),
+                                        session_file: None,
+                                    },
+                                    cx,
+                                );
+                            }
+                        },
+                    );
                 }
             }
             // Duplicate an inactive tab, as the context menu can do.
@@ -190,12 +193,25 @@ fn duplicate_rebuilds_nested_mixed_layout_with_fresh_sessions(cx: &mut TestAppCo
                 let old = source.iter().find(|pane| pane.id == *old).unwrap();
                 let new = panes.iter().find(|pane| pane.id == new).unwrap();
                 assert_ne!(old.id, new.id);
-                assert_ne!(old.view.entity_id(), new.view.entity_id());
+                assert_ne!(
+                    old.terminal_view().expect("terminal-only split stage").entity_id(),
+                    new.terminal_view().expect("terminal-only split stage").entity_id()
+                );
                 assert_eq!(old.custom_name, new.custom_name);
-                assert_eq!(old.view.read(cx).cwd, new.view.read(cx).cwd);
-                assert!(!new.view.read(cx).recovery_pending());
-                if let Some(old_session) = &old.view.read(cx).session {
-                    let new_view = new.view.read(cx);
+                assert_eq!(
+                    old.terminal_view().expect("terminal-only split stage").read(cx).cwd,
+                    new.terminal_view().expect("terminal-only split stage").read(cx).cwd
+                );
+                assert!(
+                    !new.terminal_view()
+                        .expect("terminal-only split stage")
+                        .read(cx)
+                        .recovery_pending()
+                );
+                if let Some(old_session) =
+                    &old.terminal_view().expect("terminal-only split stage").read(cx).session
+                {
+                    let new_view = new.terminal_view().expect("terminal-only split stage").read(cx);
                     let new_session = new_view.session.as_ref().unwrap();
                     assert!(!Arc::ptr_eq(&old_session.term, &new_session.term));
                 }

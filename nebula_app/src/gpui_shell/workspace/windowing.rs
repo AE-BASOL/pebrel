@@ -1213,9 +1213,10 @@ pub(crate) fn notification_view(
     cx.global::<WindowRegistry>().entries.iter().find_map(|entry| {
         let workspace = entry.workspace.upgrade()?;
         workspace.read(cx).tabs.iter().find_map(|tab| match tab {
-            WorkspaceTab::Split { panes, .. } => {
-                panes.iter().find(|pane| pane.id == pane_id).map(|pane| pane.view.clone())
-            },
+            WorkspaceTab::Split { panes, .. } => panes
+                .iter()
+                .find(|pane| pane.id == pane_id)
+                .map(|pane| pane.terminal_view().expect("terminal-only split stage").clone()),
             _ => None,
         })
     })
@@ -1415,9 +1416,9 @@ pub(crate) fn autosave_tick(cx: &mut App) {
         .collect::<Vec<_>>();
     let ready = workspaces.iter().all(|workspace| {
         workspace.read(cx).tabs.iter().all(|tab| match tab {
-            WorkspaceTab::Split { panes, .. } => {
-                panes.iter().all(|pane| pane.view.read(cx).recovery_ready())
-            },
+            WorkspaceTab::Split { panes, .. } => panes.iter().all(|pane| {
+                pane.terminal_view().expect("terminal-only split stage").read(cx).recovery_ready()
+            }),
             _ => true,
         })
     });
@@ -1631,7 +1632,7 @@ impl NebulaWorkspace {
         let mut tab = detached.tab;
         if let WorkspaceTab::Split { panes, .. } = &mut tab {
             for pane in panes {
-                pane._subscription = cx.subscribe_in(&pane.view, window, Self::on_terminal_event);
+                pane.rebind(window, cx);
             }
         }
         self.runtime_hub.move_panes_to_window(source_window_id, self.runtime_window_id, &pane_ids);
@@ -1754,7 +1755,7 @@ impl NebulaWorkspace {
         for tab in &self.tabs {
             let WorkspaceTab::Split { panes, .. } = tab else { continue };
             for pane in panes {
-                pane.view.read(cx).shutdown();
+                pane.terminal_view().expect("terminal-only split stage").read(cx).shutdown();
             }
         }
     }

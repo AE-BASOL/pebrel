@@ -27,7 +27,7 @@ impl NebulaWorkspace {
             ));
         };
         let (cols, rows, launch) = {
-            let view = anchor.view.read(cx);
+            let view = anchor.terminal_view().expect("terminal-only split stage").read(cx);
             let (launch, cwd) = tab_duplication::copy_launch(
                 view.session_launch.clone(),
                 tab_duplication::CopyKind::Split,
@@ -47,14 +47,14 @@ impl NebulaWorkspace {
         else {
             // new_pane 之后 tab 结构不可能已变（同一同步调用栈），但防御住：
             // 树上挂不进去就立即回收，不留孤儿 PTY。
-            pane.view.read(cx).shutdown();
+            pane.terminal_view().expect("terminal-only split stage").read(cx).shutdown();
             return Err(crate::runtime_api::ApiError::new(
                 "action_failed",
                 "the active terminal tab changed while creating a split",
             ));
         };
         if !tree.split_leaf(*focused, new_id, direction, 0.5) {
-            pane.view.read(cx).shutdown();
+            pane.terminal_view().expect("terminal-only split stage").read(cx).shutdown();
             return Err(crate::runtime_api::ApiError::new(
                 "action_failed",
                 "the focused pane could not be attached to the split tree",
@@ -83,7 +83,10 @@ impl NebulaWorkspace {
         let Some(WorkspaceTab::Split { panes, .. }) = self.tabs.get(tab_ix) else {
             return;
         };
-        let views: Vec<_> = panes.iter().map(|pane| pane.view.clone()).collect();
+        let views: Vec<_> = panes
+            .iter()
+            .map(|pane| pane.terminal_view().expect("terminal-only split stage").clone())
+            .collect();
         for view in views {
             view.update(cx, |view, _| view.mark_structural_resize());
         }
@@ -126,7 +129,10 @@ impl NebulaWorkspace {
                 {
                     if let Some(pos) = panes.iter().position(|pane| pane.id == pane_id) {
                         let pane = panes.remove(pos);
-                        pane.view.read(cx).shutdown();
+                        pane.terminal_view()
+                            .expect("terminal-only split stage")
+                            .read(cx)
+                            .shutdown();
                     }
                     if *focused == pane_id {
                         *focused = next_focus;
@@ -242,7 +248,8 @@ impl NebulaWorkspace {
         };
         if *zoomed || tree.is_leaf() {
             let pane = self.tabs[tab_ix].primary_terminal_pane();
-            let view = pane.map(|pane| pane.view.clone());
+            let view =
+                pane.map(|pane| pane.terminal_view().expect("terminal-only split stage").clone());
             let probe = pane.map(|pane| {
                 let pane_id = pane.id;
                 let store = self.pane_bounds.clone();
@@ -268,7 +275,7 @@ impl NebulaWorkspace {
                     tab_ix,
                     pane.id,
                     ordinal,
-                    &pane.view,
+                    pane.terminal_view().expect("terminal-only split stage"),
                     pane.custom_name.as_deref(),
                     true,
                     *zoomed,
@@ -327,7 +334,8 @@ impl NebulaWorkspace {
             SplitTree::Leaf(id) => {
                 let id = *id;
                 let pane = panes.iter().find(|pane| pane.id == id);
-                let view = pane.map(|pane| pane.view.clone());
+                let view = pane
+                    .map(|pane| pane.terminal_view().expect("terminal-only split stage").clone());
                 let store = self.pane_bounds.clone();
                 let is_focused = id == focused;
                 let dim = gpui::black().opacity(crate::display::NEBULA_UNFOCUSED_SPLIT_DIM);
@@ -338,7 +346,7 @@ impl NebulaWorkspace {
                         tab_ix,
                         id,
                         ordinal,
-                        &pane.view,
+                        pane.terminal_view().expect("terminal-only split stage"),
                         pane.custom_name.as_deref(),
                         is_focused,
                         false,
