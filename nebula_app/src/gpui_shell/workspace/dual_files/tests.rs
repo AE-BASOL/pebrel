@@ -1,4 +1,4 @@
-use super::*;
+use super::{file_tree::display_path, *};
 use gpui::{Modifiers, TestAppContext, VisualTestContext, point, size};
 use std::path::PathBuf;
 
@@ -368,7 +368,7 @@ fn source_drawers_keep_distinct_paths_search_selection_and_scroll(cx: &mut TestA
         assert_eq!(drawer_focus(&workspace, source, window), (true, false));
         replace_input(window, browsed[index].file_name().unwrap().to_str().unwrap());
         window.simulate_keystrokes("enter");
-        let canonical = browsed[index].canonicalize().unwrap();
+        let canonical = PathBuf::from(display_path(&browsed[index].canonicalize().unwrap()));
         wait_drawer(&workspace, source, window, |state| {
             state.0.as_ref() == Some(&canonical) && !state.5 && state.3.len() >= 100
         });
