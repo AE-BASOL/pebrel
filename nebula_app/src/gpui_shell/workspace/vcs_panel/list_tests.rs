@@ -20,6 +20,24 @@ fn snapshot(count: usize) -> Arc<GitInfo> {
     })
 }
 
+#[test]
+fn git_rows_retain_local_and_guest_snapshot_origins_while_the_panel_root_changes() {
+    use crate::display::side_panel::GitLocation;
+    for location in [
+        GitLocation::Local { root: "/first".into() },
+        GitLocation::Wsl { distro: "fixture".into(), root: "/first".into() },
+    ] {
+        let data = Arc::new(GitInfo { location: Some(location.clone()), ..GitInfo::default() });
+        let mut list = VcsList::default();
+        list.sync(Some(data.clone()), GitPanelView::Changes, Some("/first".into()));
+        list.sync(Some(data), GitPanelView::Changes, Some("/second".into()));
+        if let GitLocation::Local { root } = &location {
+            assert_eq!(list.root(), Some(root));
+        }
+        assert_eq!(list.git_location(), Some(location));
+    }
+}
+
 #[gpui::test]
 fn git_list_repaints_visible_rows_and_clicks_the_scrolled_path(cx: &mut TestAppContext) {
     cx.update(|cx| {

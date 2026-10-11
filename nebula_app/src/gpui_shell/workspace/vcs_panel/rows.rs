@@ -178,6 +178,9 @@ impl NebulaWorkspace {
                 let merge_open_path = relative_path.clone();
                 let keyboard_path = relative_path.clone();
                 let keyboard_open_path = open_path.clone();
+                let click_diff_path = relative_path.clone();
+                let diff_location = self.vcs_list.git_location();
+                let keyboard_location = diff_location.clone();
                 let tree_active = self.vcs_list.tree_active();
                 let row_focus = window
                     .use_keyed_state(
@@ -200,6 +203,11 @@ impl NebulaWorkspace {
                 let svn_add = ops == RowOps::Svn && *status == '?';
                 let svn_resolve = ops == RowOps::Svn && *status == 'C';
                 let svn_diff = ops == RowOps::Svn && !matches!(*status, '?' | '!');
+                let hint = language.text(if ops == RowOps::Conflict {
+                    Message::VcsDiffOpenConflictHint
+                } else {
+                    Message::VcsDiffOpenFileHint
+                });
                 h_flex()
                     .id(SharedString::from(format!(
                         "git-tree-row-{section_id}-{index}-{relative_path}"
@@ -208,7 +216,11 @@ impl NebulaWorkspace {
                     .group(row_group.clone())
                     .track_focus(&row_focus)
                     .role(if tree_active { gpui::Role::TreeItem } else { gpui::Role::Button })
-                    .aria_label(SharedString::from(relative_path.clone()))
+                    .aria_label(SharedString::from(if is_git {
+                        format!("{relative_path}. {hint}")
+                    } else {
+                        relative_path.clone()
+                    }))
                     .aria_selected(selected_row)
                     .aria_level(depth + 1)
                     .h(px(30.0))
@@ -221,6 +233,14 @@ impl NebulaWorkspace {
                     .when(selected_row, |row| row.bg(selected_bg))
                     .hover(|row| row.bg(hover))
                     .focus_visible(|row| row.bg(selected_bg))
+                    .when(is_git, |row| {
+                        row.tooltip(move |window, cx| {
+                            Tooltip::element(move |_, _| {
+                                div().debug_selector(|| "git-diff-row-hint".into()).child(hint)
+                            })
+                            .build(window, cx)
+                        })
+                    })
                     .child(
                         div()
                             .w(px(14.0))
@@ -280,6 +300,7 @@ impl NebulaWorkspace {
                             })
                             .on_click(cx.listener(
                                 move |this, _, _, cx| {
+                                    cx.stop_propagation();
                                     if this.vcs_discard_confirm.as_deref()
                                         == Some(discard_path.as_str())
                                     {
@@ -314,6 +335,7 @@ impl NebulaWorkspace {
                             })
                             .on_click(cx.listener(
                                 move |this, _, _, cx| {
+                                    cx.stop_propagation();
                                     this.vcs_discard_confirm = None;
                                     this.side_panel.git_stage_path(&stage_path);
                                     cx.notify();
@@ -337,6 +359,7 @@ impl NebulaWorkspace {
                             })
                             .on_click(cx.listener(
                                 move |this, _, _, cx| {
+                                    cx.stop_propagation();
                                     this.vcs_discard_confirm = None;
                                     this.side_panel.svn_add_path(&svn_add_path);
                                     cx.notify();
@@ -360,6 +383,7 @@ impl NebulaWorkspace {
                             })
                             .on_click(cx.listener(
                                 move |this, _, _, cx| {
+                                    cx.stop_propagation();
                                     this.vcs_discard_confirm = None;
                                     this.side_panel.svn_resolve_path(&resolve_path);
                                     cx.notify();
@@ -390,6 +414,7 @@ impl NebulaWorkspace {
                             })
                             .on_click(cx.listener(
                                 move |this, _, _, cx| {
+                                    cx.stop_propagation();
                                     this.vcs_discard_confirm = None;
                                     this.side_panel.git_unstage_path(&unstage_path);
                                     cx.notify();
@@ -402,6 +427,7 @@ impl NebulaWorkspace {
                             Button::new(SharedString::from(format!(
                                 "git-resolve-{section_id}-{index}"
                             )))
+                            .debug_selector(move || format!("git-resolve-{section_id}-{index}"))
                             .icon(
                                 Icon::new(Icon::empty())
                                     .path(crate::gpui_shell::assets::nav::VCS_CONFLICT),
@@ -411,13 +437,26 @@ impl NebulaWorkspace {
                             .tooltip(language.text(Message::VcsResolveInMergeEditor))
                             .on_click(cx.listener(
                                 move |this, _, window, cx| {
+                                    cx.stop_propagation();
                                     this.open_git_merge_tab(merge_button_path.clone(), window, cx);
                                 },
                             )),
                         )
                     })
-                    .on_click(cx.listener(move |this, _, _, cx| {
+                    .on_click(cx.listener(move |this, event: &gpui::ClickEvent, window, cx| {
                         this.side_panel.selected = Some(path.clone());
+                        if is_git && event.click_count() == 1 {
+                            if let Some(location) = diff_location.clone() {
+                                this.open_git_diff_tab(
+                                    location,
+                                    click_diff_path.clone(),
+                                    ops == RowOps::Staged,
+                                    false,
+                                    window,
+                                    cx,
+                                );
+                            }
+                        }
                         cx.notify();
                     }))
                     .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
@@ -426,8 +465,17 @@ impl NebulaWorkspace {
                             && keyboard_focus.is_focused(window)
                         {
                             cx.stop_propagation();
-                            if ops == RowOps::Conflict && is_git {
-                                this.open_git_merge_tab(keyboard_path.clone(), window, cx);
+                            if is_git {
+                                if let Some(location) = keyboard_location.clone() {
+                                    this.open_git_diff_tab(
+                                        location,
+                                        keyboard_path.clone(),
+                                        ops == RowOps::Staged,
+                                        true,
+                                        window,
+                                        cx,
+                                    );
+                                }
                             } else if !svn_diff || !this.side_panel.svn_diff_path(&keyboard_path) {
                                 this.open_document_path(keyboard_open_path.clone(), window, cx);
                             }

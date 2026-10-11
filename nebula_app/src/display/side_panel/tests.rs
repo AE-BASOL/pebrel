@@ -552,6 +552,7 @@ mod tests {
         let mut panel = SidePanel::new();
         panel.view = PanelView::Git;
         panel.git = Some(std::sync::Arc::new(GitInfo {
+            location: None,
             vcs: VcsKind::Git,
             branch: "main".into(),
             plus: 0,

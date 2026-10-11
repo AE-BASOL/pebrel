@@ -1,6 +1,6 @@
 //! Stable presentation data derived once per repository snapshot or selected view.
 use super::*;
-use crate::display::side_panel::{GitCommit, GitInfo, GitPanelView, VcsKind};
+use crate::display::side_panel::{GitCommit, GitInfo, GitLocation, GitPanelView, VcsKind};
 use std::collections::HashSet;
 
 mod tree;
@@ -200,7 +200,17 @@ impl VcsList {
         self.rows.get(index)
     }
     pub(super) fn root(&self) -> Option<&PathBuf> {
-        self.root.as_ref()
+        match self.snapshot.as_ref().and_then(|info| info.location.as_ref()) {
+            Some(GitLocation::Local { root }) => Some(root),
+            _ => self.root.as_ref(),
+        }
+    }
+    pub(super) fn git_location(&self) -> Option<GitLocation> {
+        let snapshot = self.snapshot.as_ref().filter(|info| info.vcs == VcsKind::Git)?;
+        snapshot
+            .location
+            .clone()
+            .or_else(|| self.root.as_ref().map(|root| GitLocation::Local { root: root.clone() }))
     }
     pub(super) fn lane_layout(&self) -> (f32, f32) {
         self.lane_layout

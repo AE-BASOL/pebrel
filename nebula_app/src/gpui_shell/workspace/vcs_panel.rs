@@ -11,6 +11,7 @@ use gpui_component::menu::PopupMenuItem;
 use std::path::{Path, PathBuf};
 
 mod commit_input;
+mod diff;
 mod list_model;
 mod rows;
 mod tree_view;

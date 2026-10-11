@@ -21,6 +21,8 @@ use crate::gpui_shell::prelude::*;
 /// 增长；8MB 已覆盖常见源码文件，超限的普通文件截断，冲突文件则拒绝写回。
 const MAX_CODE_BYTES: usize = 8 * 1024 * 1024;
 
+mod diff;
+
 /// 扩展名 -> tree-sitter 语言 id（组件库 highlighter 的注册名）。
 fn language_for_extension(extension: &str) -> Option<&'static str> {
     Some(match extension.to_ascii_lowercase().as_str() {
@@ -141,6 +143,7 @@ pub struct CodeTabView {
     notice: Option<String>,
     lines: usize,
     merge: Option<MergeEditor>,
+    diff: Option<Entity<diff::GitDiffView>>,
     file: Option<Entity<super::file_editor::TextFileView>>,
     _file_subscription: Option<gpui::Subscription>,
 }
@@ -165,6 +168,7 @@ impl CodeTabView {
             notice: None,
             lines: 0,
             merge: None,
+            diff: None,
             file: Some(file),
             _file_subscription: Some(subscription),
         }
@@ -180,6 +184,9 @@ impl CodeTabView {
 
     pub(super) fn focus_handle(&self, cx: &gpui::App) -> gpui::FocusHandle {
         use gpui::Focusable as _;
+        if let Some(diff) = &self.diff {
+            return diff.read(cx).focus_handle(cx);
+        }
         self.file.as_ref().map_or_else(
             || self.input.read(cx).focus_handle(cx),
             |file| file.read(cx).focus_handle(cx),
@@ -220,13 +227,14 @@ impl CodeTabView {
                 theirs_missing: false,
                 state: MergeState::Loading,
             }),
+            diff: None,
         };
         this.reload_git_merge(window, cx);
         this
     }
 
     pub fn is_regular_path(&self, path: &Path) -> bool {
-        self.merge.is_none() && self.path == path
+        self.file.is_some() && self.path == path
     }
 
     pub fn matches_git_merge(&self, location: &GitLocation, relative_path: &str) -> bool {
@@ -235,6 +243,10 @@ impl CodeTabView {
 
     /// 重新读盘（文件树再次双击同一路径时宿主调用）。
     pub fn reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(diff) = &self.diff {
+            diff.update(cx, |diff, cx| diff.refresh(cx));
+            return;
+        }
         if self.merge.is_some() {
             self.reload_git_merge(window, cx);
             return;
@@ -503,6 +515,9 @@ impl CodeTabView {
 
 impl Render for CodeTabView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if let Some(diff) = &self.diff {
+            return div().size_full().child(diff.clone()).into_any_element();
+        }
         if self.merge.is_some() { self.render_merge(cx) } else { self.render_file(cx) }
     }
 }

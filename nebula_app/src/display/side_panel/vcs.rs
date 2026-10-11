@@ -806,6 +806,10 @@ pub(crate) fn read_git(root: &Path) -> Option<GitInfo> {
         cmd.args(["-c", &safe_directory, "--no-optional-locks"]).args(args).current_dir(root);
         run_git(cmd, args, &location, None)
     })
+    .map(|mut info| {
+        info.location = Some(GitLocation::Local { root: root.to_path_buf() });
+        info
+    })
 }
 
 /// 在 WSL 来宾里读 git 状态：`wsl.exe -d <发行版> -- git -C <来宾目录> …`。
@@ -830,6 +834,11 @@ pub(crate) fn read_git_wsl(located: &crate::shell_detect::WslCwd) -> Option<GitI
         cmd.args(["git", "-C", &located.guest, "--no-optional-locks"]).args(args);
         run_git(cmd, args, &location, Some(WSL_COMMAND_TIMEOUT))
     })
+    .map(|mut info| {
+        info.location =
+            Some(GitLocation::Wsl { distro: located.distro.clone(), root: located.guest.clone() });
+        info
+    })
 }
 
 /// 跑一条已配好的 git 命令，取 stdout。`location` 只用于失败日志。
@@ -839,6 +848,12 @@ pub(crate) fn run_git(
     location: &str,
     timeout: Option<Duration>,
 ) -> Option<String> {
+    // Actual-Git control fixtures also reach this snapshot boundary. Keep their
+    // configuration alive until the synchronous child has been fully reaped.
+    #[cfg(test)]
+    let test_configuration = super::diff::test_fixture::GitTestConfig::new();
+    #[cfg(test)]
+    test_configuration.configure(&mut cmd);
     // 从 GUI 进程起子进程时闪的那个控制台窗口，见 `platform::process`。
     crate::platform::process::hidden_command(&mut cmd);
     let out = match command_output_with_timeout(cmd, timeout) {

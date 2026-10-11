@@ -422,7 +422,7 @@ impl NebulaWorkspace {
         true
     }
 
-    fn on_code_tab_event(
+    pub(super) fn on_code_tab_event(
         &mut self,
         _: Entity<crate::gpui_shell::code_tab::CodeTabView>,
         event: &CodeTabViewEvent,

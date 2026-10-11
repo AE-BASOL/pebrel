@@ -22,6 +22,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use unicode_width::UnicodeWidthChar;
 
+pub(crate) mod diff;
 mod enumerate;
 mod gitignore;
 mod icons;
@@ -119,6 +120,8 @@ pub enum VcsKind {
 /// Parsed `git status` snapshot.
 #[derive(Debug, Clone, Default)]
 pub struct GitInfo {
+    /// Origin of these status paths, retained while a different cwd refreshes.
+    pub location: Option<GitLocation>,
     /// Which VCS this snapshot came from（SVN 时 `branch` 放 `rNNN` 修订号，
     /// `staged` 恒空、`ahead` 恒 0——SVN 集中式，提交即发布）。
     pub vcs: VcsKind,
