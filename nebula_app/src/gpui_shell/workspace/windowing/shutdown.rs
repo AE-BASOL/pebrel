@@ -80,7 +80,7 @@ fn request_quit(update: Option<crate::update_check::UpdateAsset>, cx: &mut App) 
                 .filter_map(|entry| entry.workspace.upgrade())
                 .all(|workspace| {
                     workspace.read(cx).tabs.iter().all(|tab| match tab {
-                        WorkspaceTab::Terminal { panes, .. } => {
+                        WorkspaceTab::Split { panes, .. } => {
                             panes.iter().all(|pane| !pane.view.read(cx).ai_session_save_pending())
                         },
                         _ => true,

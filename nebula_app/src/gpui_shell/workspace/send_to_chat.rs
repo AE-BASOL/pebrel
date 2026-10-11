@@ -295,7 +295,7 @@ impl NebulaWorkspace {
     fn send_to_chat_targets(&self, cx: &App) -> Vec<SendToChatTarget> {
         let mut targets = Vec::new();
         for (tab_ix, tab) in self.tabs.iter().enumerate() {
-            let WorkspaceTab::Terminal { panes, .. } = tab else { continue };
+            let WorkspaceTab::Split { panes, .. } = tab else { continue };
             let tab_title = self.tab_title(tab_ix, cx);
             for pane in panes {
                 let view = pane.view.read(cx);
@@ -543,7 +543,7 @@ impl NebulaWorkspace {
             ));
         };
         let view = match self.tabs.get(tab_ix) {
-            Some(WorkspaceTab::Terminal { panes, .. }) => {
+            Some(WorkspaceTab::Split { panes, .. }) => {
                 panes.iter().find(|pane| pane.id == pane_id).map(|pane| pane.view.clone())
             },
             _ => None,

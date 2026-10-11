@@ -141,8 +141,7 @@ fn duplicate_rebuilds_nested_mixed_layout_with_fresh_sessions(cx: &mut TestAppCo
                 cx,
             );
             assert!(workspace.restore_tab(&original, false, window, cx));
-            if let WorkspaceTab::Terminal { panes, zoomed, broadcast, .. } = &mut workspace.tabs[0]
-            {
+            if let WorkspaceTab::Split { panes, zoomed, broadcast, .. } = &mut workspace.tabs[0] {
                 // Storage order is independent of layout order; the focused pane isn't the first leaf.
                 panes.reverse();
                 *zoomed = true;
@@ -175,12 +174,11 @@ fn duplicate_rebuilds_nested_mixed_layout_with_fresh_sessions(cx: &mut TestAppCo
             let target = workspace.active;
             assert_eq!(workspace.tabs.len(), 3);
             assert_ne!(target, 0);
-            let WorkspaceTab::Terminal { panes: source, tree: source_tree, .. } =
-                &workspace.tabs[0]
+            let WorkspaceTab::Split { panes: source, tree: source_tree, .. } = &workspace.tabs[0]
             else {
                 panic!("source tab lost");
             };
-            let WorkspaceTab::Terminal { panes, tree, focused, zoomed, broadcast } =
+            let WorkspaceTab::Split { panes, tree, focused, zoomed, broadcast } =
                 &workspace.tabs[target]
             else {
                 panic!("duplicate must be a terminal tab");

@@ -92,7 +92,7 @@ impl NebulaWorkspace {
     /// `tab_label()`（cwd 末级，对齐 `chrome_tab_label`），其它 tab 用标题。
     pub(super) fn rename_prefill(&self, ix: usize, cx: &App) -> String {
         match self.tabs.get(ix) {
-            Some(tab @ WorkspaceTab::Terminal { .. }) => tab
+            Some(tab @ WorkspaceTab::Split { .. }) => tab
                 .focused_view()
                 .map(|view| view.read(cx).tab_label())
                 .unwrap_or_else(|| self.tab_title(ix, cx).to_string()),
@@ -128,7 +128,7 @@ impl NebulaWorkspace {
     ) {
         self.commit_pane_rename(false, window, cx);
         let Some(ix) = self.tab_of_pane(pane_id) else { return };
-        let Some(WorkspaceTab::Terminal { panes, .. }) = self.tabs.get(ix) else { return };
+        let Some(WorkspaceTab::Split { panes, .. }) = self.tabs.get(ix) else { return };
         let Some(pane) = panes.iter().find(|pane| pane.id == pane_id) else { return };
         let current = pane.custom_name.clone().unwrap_or_default();
         let mut saved_names = pane.name_history.clone();
@@ -190,7 +190,7 @@ impl NebulaWorkspace {
         let name = normalized_name(&edit.input.read(cx).value());
         let editor_focus = edit.input.read(cx).focus_handle(cx);
         if let Some(ix) = self.tab_of_pane(edit.pane_id)
-            && let WorkspaceTab::Terminal { panes, .. } = &mut self.tabs[ix]
+            && let WorkspaceTab::Split { panes, .. } = &mut self.tabs[ix]
             && let Some(pane) = panes.iter_mut().find(|pane| pane.id == edit.pane_id)
         {
             if pane.custom_name != name {

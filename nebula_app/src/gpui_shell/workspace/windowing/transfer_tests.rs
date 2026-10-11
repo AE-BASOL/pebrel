@@ -13,6 +13,7 @@ fn initialize_test(cx: &mut TestAppContext) {
 }
 
 fn open_test_window(cx: &mut App, count: usize) -> (u64, Entity<NebulaWorkspace>) {
+    let directory = tempfile::tempdir().unwrap();
     let (id, workspace) =
         open_workspace_window(cx, WorkspaceStartup::Empty, None, None, false, WindowRole::Regular)
             .unwrap();
@@ -25,9 +26,13 @@ fn open_test_window(cx: &mut App, count: usize) -> (u64, Entity<NebulaWorkspace>
                     let pane = workspace.new_pane(
                         (80, 24),
                         TerminalLaunch::Local {
-                            cwd: Some(PathBuf::from(format!("test-project-{index}"))),
+                            cwd: Some(directory.path().to_path_buf()),
                             shell: Some(nebula_terminal::tty::Shell::new(
-                                "pebrel-test-missing-shell-executable".into(),
+                                directory
+                                    .path()
+                                    .join("missing-transfer-shell")
+                                    .to_string_lossy()
+                                    .into_owned(),
                                 vec![],
                             )),
                             shell_name: None,
@@ -38,7 +43,7 @@ fn open_test_window(cx: &mut App, count: usize) -> (u64, Entity<NebulaWorkspace>
                     );
                     workspace.insert_tab_at(
                         index,
-                        WorkspaceTab::Terminal {
+                        WorkspaceTab::Split {
                             tree: SplitTree::leaf(pane.id),
                             focused: pane.id,
                             panes: vec![pane],
@@ -56,6 +61,10 @@ fn open_test_window(cx: &mut App, count: usize) -> (u64, Entity<NebulaWorkspace>
 
 #[gpui::test]
 fn moving_last_tab_closes_only_source_after_transfer(cx: &mut TestAppContext) {
+    let name = "moving_last_tab_closes_only_source_after_transfer";
+    if crate::runtime_api::tests::file_pane_fixture::isolated_child(module_path!(), name) {
+        return;
+    }
     initialize_test(cx);
     let (source_id, source, other_id, other, moved_view) = cx.update(|cx| {
         let (source_id, source) = open_test_window(cx, 1);
@@ -82,10 +91,15 @@ fn moving_last_tab_closes_only_source_after_transfer(cx: &mut TestAppContext) {
         assert_eq!(target.read(cx).tabs[0].focused_view().unwrap(), &moved_view);
         assert_eq!(combined_session(None, cx).unwrap().tabs.len(), 2);
     });
+    crate::runtime_api::tests::file_pane_fixture::completed(name);
 }
 
 #[gpui::test]
 fn moving_one_of_two_tabs_preserves_source_and_identity(cx: &mut TestAppContext) {
+    let name = "moving_one_of_two_tabs_preserves_source_and_identity";
+    if crate::runtime_api::tests::file_pane_fixture::isolated_child(module_path!(), name) {
+        return;
+    }
     initialize_test(cx);
     let (source_id, source, moved_view) = cx.update(|cx| {
         let (id, source) = open_test_window(cx, 2);
@@ -109,4 +123,5 @@ fn moving_one_of_two_tabs_preserves_source_and_identity(cx: &mut TestAppContext)
         assert_eq!(target.read(cx).tabs[0].focused_view().unwrap(), &moved_view);
         assert_eq!(combined_session(None, cx).unwrap().tabs.len(), 2);
     });
+    crate::runtime_api::tests::file_pane_fixture::completed(name);
 }

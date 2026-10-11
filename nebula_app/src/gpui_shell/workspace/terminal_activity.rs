@@ -4,8 +4,8 @@ use super::*;
 
 impl WorkspaceTab {
     /// Shared with the zoomed/single-pane renderer, including its empty-focus fallback.
-    pub(super) fn primary_terminal_pane(&self) -> Option<&TerminalPane> {
-        let Self::Terminal { panes, focused, .. } = self else { return None };
+    pub(super) fn primary_terminal_pane(&self) -> Option<&WorkspacePane> {
+        let Self::Split { panes, focused, .. } = self else { return None };
         panes.iter().find(|pane| pane.id == *focused).or_else(|| panes.first())
     }
 }
@@ -73,7 +73,7 @@ impl NebulaWorkspace {
                     && tab_ix == self.active
                     && matches!(
                         self.tabs.get(tab_ix),
-                        Some(WorkspaceTab::Terminal { focused, .. }) if *focused == pane_id
+                        Some(WorkspaceTab::Split { focused, .. }) if *focused == pane_id
                     )
                 {
                     crate::taskbar::apply(windowing::native_hwnd(window).unwrap_or(0), *progress);
@@ -134,7 +134,7 @@ impl NebulaWorkspace {
 
     pub(super) fn sync_terminal_activity(&self, cx: &mut Context<Self>) {
         for (index, tab) in self.tabs.iter().enumerate() {
-            let WorkspaceTab::Terminal { panes, tree, zoomed, .. } = tab else { continue };
+            let WorkspaceTab::Split { panes, tree, zoomed, .. } = tab else { continue };
             let active = index == self.active && !self.settings_open && !self.window_hidden;
             let primary = tab.primary_terminal_pane().map(|pane| pane.id);
             for pane in panes {
@@ -208,7 +208,7 @@ mod tests {
                     if panes.len() == 2 {
                         tree.split_leaf(focused, panes[1].id, SplitDirection::LeftRight, 0.5);
                     }
-                    workspace.tabs.push(WorkspaceTab::Terminal {
+                    workspace.tabs.push(WorkspaceTab::Split {
                         panes,
                         tree,
                         focused,
@@ -243,7 +243,7 @@ mod tests {
                 workspace.active = active;
                 workspace.settings_open = settings_open;
                 workspace.window_hidden = hidden;
-                if let WorkspaceTab::Terminal { zoomed: value, .. } = &mut workspace.tabs[0] {
+                if let WorkspaceTab::Split { zoomed: value, .. } = &mut workspace.tabs[0] {
                     *value = zoomed;
                 }
                 cx.notify();

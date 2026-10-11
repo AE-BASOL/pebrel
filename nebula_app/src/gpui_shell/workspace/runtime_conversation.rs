@@ -20,7 +20,7 @@ impl NebulaWorkspace {
         self.tabs
             .iter()
             .find_map(|tab| match tab {
-                WorkspaceTab::Terminal { panes, .. } => {
+                WorkspaceTab::Split { panes, .. } => {
                     panes.iter().find(|pane| pane.id == pane_id).map(|pane| pane.view.clone())
                 },
                 _ => None,

@@ -38,7 +38,7 @@ impl NebulaWorkspace {
     ) {
         if notification.is_attention()
             && let Some(source) = self.tabs.iter().find_map(|tab| match tab {
-                WorkspaceTab::Terminal { panes, .. } => {
+                WorkspaceTab::Split { panes, .. } => {
                     panes.iter().find(|pane| pane.id == pane_id).map(|pane| pane.view.clone())
                 },
                 _ => None,
@@ -85,7 +85,7 @@ impl NebulaWorkspace {
         cx: &mut Context<Self>,
     ) {
         let Some(tab_index) = self.tab_of_pane(pane_id) else { return };
-        let Some(WorkspaceTab::Terminal { panes, focused, .. }) = self.tabs.get(tab_index) else {
+        let Some(WorkspaceTab::Split { panes, focused, .. }) = self.tabs.get(tab_index) else {
             return;
         };
         let reader_open = panes

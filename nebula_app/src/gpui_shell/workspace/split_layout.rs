@@ -13,7 +13,7 @@ impl NebulaWorkspace {
         cx: &mut Context<Self>,
     ) -> Result<u64, crate::runtime_api::ApiError> {
         let active = self.active;
-        let Some(WorkspaceTab::Terminal { panes, focused, .. }) = self.tabs.get(active) else {
+        let Some(WorkspaceTab::Split { panes, focused, .. }) = self.tabs.get(active) else {
             return Err(crate::runtime_api::ApiError::new(
                 "invalid_state",
                 "the active tab cannot be split",
@@ -42,7 +42,7 @@ impl NebulaWorkspace {
         };
         let pane = self.new_pane(grid, launch, None, window, cx);
         let new_id = pane.id;
-        let Some(WorkspaceTab::Terminal { panes, tree, focused, zoomed, .. }) =
+        let Some(WorkspaceTab::Split { panes, tree, focused, zoomed, .. }) =
             self.tabs.get_mut(active)
         else {
             // new_pane 之后 tab 结构不可能已变（同一同步调用栈），但防御住：
@@ -80,7 +80,7 @@ impl NebulaWorkspace {
     /// 旧壳 `window_context/split.rs` 的 `resize_active_layout()` 在同样的路径
     /// 上同步下发 grid + PTY，这里复刻同一条合同。
     pub(super) fn mark_structural_resize(&mut self, tab_ix: usize, cx: &mut App) {
-        let Some(WorkspaceTab::Terminal { panes, .. }) = self.tabs.get(tab_ix) else {
+        let Some(WorkspaceTab::Split { panes, .. }) = self.tabs.get(tab_ix) else {
             return;
         };
         let views: Vec<_> = panes.iter().map(|pane| pane.view.clone()).collect();
@@ -100,7 +100,7 @@ impl NebulaWorkspace {
     ) {
         if let Some(edit) = self.pane_rename.as_ref()
             && self.tab_of_pane(edit.pane_id) == Some(tab_ix)
-            && let Some(WorkspaceTab::Terminal { panes, .. }) = self.tabs.get(tab_ix)
+            && let Some(WorkspaceTab::Split { panes, .. }) = self.tabs.get(tab_ix)
             && panes.iter().any(|pane| pane.id == pane_id)
         {
             if edit.pane_id == pane_id {
@@ -111,7 +111,7 @@ impl NebulaWorkspace {
             }
         }
         let outcome = match self.tabs.get_mut(tab_ix) {
-            Some(WorkspaceTab::Terminal { tree, .. }) => tree.remove_leaf(pane_id),
+            Some(WorkspaceTab::Split { tree, .. }) => tree.remove_leaf(pane_id),
             _ => return,
         };
         if !matches!(outcome, RemoveOutcome::NotFound) {
@@ -121,7 +121,7 @@ impl NebulaWorkspace {
             RemoveOutcome::NotFound => {},
             RemoveOutcome::WasRoot => self.close_tab(tab_ix, window, cx),
             RemoveOutcome::Collapsed(next_focus) => {
-                if let Some(WorkspaceTab::Terminal { panes, focused, zoomed, broadcast, .. }) =
+                if let Some(WorkspaceTab::Split { panes, focused, zoomed, broadcast, .. }) =
                     self.tabs.get_mut(tab_ix)
                 {
                     if let Some(pos) = panes.iter().position(|pane| pane.id == pane_id) {
@@ -161,8 +161,7 @@ impl NebulaWorkspace {
         cx: &mut Context<Self>,
     ) {
         {
-            let Some(WorkspaceTab::Terminal { panes, focused, .. }) = self.tabs.get_mut(tab_ix)
-            else {
+            let Some(WorkspaceTab::Split { panes, focused, .. }) = self.tabs.get_mut(tab_ix) else {
                 return;
             };
             if *focused == pane_id || !panes.iter().any(|pane| pane.id == pane_id) {
@@ -187,7 +186,7 @@ impl NebulaWorkspace {
         cx: &mut Context<Self>,
     ) {
         let active = self.active;
-        let Some(WorkspaceTab::Terminal { panes, focused, zoomed, .. }) = self.tabs.get_mut(active)
+        let Some(WorkspaceTab::Split { panes, focused, zoomed, .. }) = self.tabs.get_mut(active)
         else {
             return;
         };
@@ -213,7 +212,7 @@ impl NebulaWorkspace {
     pub(super) fn toggle_zoom(&mut self, cx: &mut Context<Self>) {
         let active = self.active;
         let toggled = match self.tabs.get_mut(active) {
-            Some(WorkspaceTab::Terminal { panes, zoomed, .. }) if panes.len() > 1 => {
+            Some(WorkspaceTab::Split { panes, zoomed, .. }) if panes.len() > 1 => {
                 *zoomed = !*zoomed;
                 true
             },
@@ -236,7 +235,7 @@ impl NebulaWorkspace {
         tab_ix: usize,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
-        let Some(WorkspaceTab::Terminal { tree, panes, focused, zoomed, broadcast }) =
+        let Some(WorkspaceTab::Split { tree, panes, focused, zoomed, broadcast }) =
             self.tabs.get(tab_ix)
         else {
             return div().into_any_element();
@@ -317,7 +316,7 @@ impl NebulaWorkspace {
         tab_ix: usize,
         node: &SplitTree<u64>,
         path: &mut Vec<bool>,
-        panes: &[TerminalPane],
+        panes: &[WorkspacePane],
         focused: u64,
         order: &[u64],
         broadcast: bool,
@@ -466,7 +465,7 @@ impl NebulaWorkspace {
                                 close_target: None,
                                 last_notified: std::time::Instant::now(),
                             });
-                            if let Some(WorkspaceTab::Terminal { tree, .. }) =
+                            if let Some(WorkspaceTab::Split { tree, .. }) =
                                 this.tabs.get_mut(tab_ix)
                                 && let Some(SplitTree::Split { preview_ratio, dragging, .. }) =
                                     tree.node_mut(&drag_path)
@@ -633,7 +632,7 @@ impl NebulaWorkspace {
 
         // 先裁定拖拽关闭；借用两段式（close_pane 需要 &mut self）。
         let mut close_target: Option<u64> = None;
-        if let (Some(raw), Some(WorkspaceTab::Terminal { tree, .. })) =
+        if let (Some(raw), Some(WorkspaceTab::Split { tree, .. })) =
             (raw, self.tabs.get_mut(drag.tab))
         {
             if let Some(squeezed_second) = nebula_split::drag_close_target(raw) {
@@ -648,7 +647,7 @@ impl NebulaWorkspace {
         if let Some(pane_id) = close_target {
             // 繁忙 pane 会先弹确认框而不会立刻 remove_leaf；必须先清掉拖拽态，
             // 否则确认框背后会残留一条永久高亮的分隔线。
-            if let Some(WorkspaceTab::Terminal { tree, .. }) = self.tabs.get_mut(drag.tab)
+            if let Some(WorkspaceTab::Split { tree, .. }) = self.tabs.get_mut(drag.tab)
                 && let Some(SplitTree::Split { preview_ratio, dragging, .. }) =
                     tree.node_mut(&drag.path)
             {
@@ -660,7 +659,7 @@ impl NebulaWorkspace {
             return;
         }
 
-        if let Some(WorkspaceTab::Terminal { tree, .. }) = self.tabs.get_mut(drag.tab) {
+        if let Some(WorkspaceTab::Split { tree, .. }) = self.tabs.get_mut(drag.tab) {
             if let Some(SplitTree::Split { ratio, preview_ratio, dragging, .. }) =
                 tree.node_mut(&drag.path)
             {

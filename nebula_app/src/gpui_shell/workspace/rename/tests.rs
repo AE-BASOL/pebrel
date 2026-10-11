@@ -72,7 +72,7 @@ impl RenameFixture {
                 assert!(tree.split_leaf(ids[0], ids[1], SplitDirection::LeftRight, 0.5));
                 workspace.insert_tab_at(
                     0,
-                    WorkspaceTab::Terminal {
+                    WorkspaceTab::Split {
                         panes,
                         tree,
                         focused: ids[0],
@@ -130,7 +130,7 @@ impl RenameFixture {
 
     fn name(&self, index: usize, cx: &VisualTestContext) -> Option<String> {
         self.workspace.read_with(cx, |w, _| {
-            let WorkspaceTab::Terminal { panes, .. } = &w.tabs[0] else { panic!() };
+            let WorkspaceTab::Split { panes, .. } = &w.tabs[0] else { panic!() };
             panes.iter().find(|pane| pane.id == self.ids[index]).unwrap().custom_name.clone()
         })
     }
@@ -239,7 +239,7 @@ fn custom_pane_names_survive_snapshot_json_and_workspace_restore(cx: &mut TestAp
         });
     });
     fixture.workspace.read_with(&cx, |w, cx| {
-        let WorkspaceTab::Terminal { panes, tree, .. } = &w.tabs[1] else { panic!() };
+        let WorkspaceTab::Split { panes, tree, .. } = &w.tabs[1] else { panic!() };
         let names = tree
             .leaves()
             .iter()

@@ -1213,7 +1213,7 @@ pub(crate) fn notification_view(
     cx.global::<WindowRegistry>().entries.iter().find_map(|entry| {
         let workspace = entry.workspace.upgrade()?;
         workspace.read(cx).tabs.iter().find_map(|tab| match tab {
-            WorkspaceTab::Terminal { panes, .. } => {
+            WorkspaceTab::Split { panes, .. } => {
                 panes.iter().find(|pane| pane.id == pane_id).map(|pane| pane.view.clone())
             },
             _ => None,
@@ -1243,7 +1243,7 @@ pub(crate) fn focus_notification(pane_id: Option<u64>, cx: &mut App) {
                 .tabs
                 .iter()
                 .filter_map(|tab| match tab {
-                    WorkspaceTab::Terminal { panes, .. } => Some(panes.iter().map(|pane| pane.id)),
+                    WorkspaceTab::Split { panes, .. } => Some(panes.iter().map(|pane| pane.id)),
                     _ => None,
                 })
                 .flatten()
@@ -1310,8 +1310,7 @@ pub(crate) fn focus_notification(pane_id: Option<u64>, cx: &mut App) {
             focus_workspace_window(workspace, window);
             workspace.activate_tab(tab_ix, window, cx);
             if let Some(pane_id) = pane_id {
-                if let Some(WorkspaceTab::Terminal { zoomed, .. }) = workspace.tabs.get_mut(tab_ix)
-                {
+                if let Some(WorkspaceTab::Split { zoomed, .. }) = workspace.tabs.get_mut(tab_ix) {
                     *zoomed = false;
                 }
                 workspace.focus_pane(tab_ix, pane_id, window, cx);
@@ -1336,7 +1335,7 @@ fn focus_entry(entry: &WindowEntry, pane_id: Option<u64>, cx: &mut App) {
                 && let Some(tab_ix) = workspace.tab_of_pane(pane_id)
             {
                 workspace.active = tab_ix;
-                if let Some(WorkspaceTab::Terminal { focused, zoomed, .. }) =
+                if let Some(WorkspaceTab::Split { focused, zoomed, .. }) =
                     workspace.tabs.get_mut(tab_ix)
                 {
                     *focused = pane_id;
@@ -1416,7 +1415,7 @@ pub(crate) fn autosave_tick(cx: &mut App) {
         .collect::<Vec<_>>();
     let ready = workspaces.iter().all(|workspace| {
         workspace.read(cx).tabs.iter().all(|tab| match tab {
-            WorkspaceTab::Terminal { panes, .. } => {
+            WorkspaceTab::Split { panes, .. } => {
                 panes.iter().all(|pane| pane.view.read(cx).recovery_ready())
             },
             _ => true,
@@ -1587,7 +1586,7 @@ impl NebulaWorkspace {
         ix: usize,
         cx: &Context<Self>,
     ) -> Option<CrossWindowTabDrag> {
-        let WorkspaceTab::Terminal { focused, .. } = self.tabs.get(ix)? else { return None };
+        let WorkspaceTab::Split { focused, .. } = self.tabs.get(ix)? else { return None };
         Some(CrossWindowTabDrag {
             source: cx.entity().downgrade(),
             source_window_id: self.runtime_window_id,
@@ -1630,7 +1629,7 @@ impl NebulaWorkspace {
         let source_handle = detached.source_handle;
         let source_became_empty = detached.source_became_empty;
         let mut tab = detached.tab;
-        if let WorkspaceTab::Terminal { panes, .. } = &mut tab {
+        if let WorkspaceTab::Split { panes, .. } = &mut tab {
             for pane in panes {
                 pane._subscription = cx.subscribe_in(&pane.view, window, Self::on_terminal_event);
             }
@@ -1666,7 +1665,7 @@ impl NebulaWorkspace {
     fn detach_terminal_tab(&mut self, pane_id: u64) -> Option<DetachedTerminalTab> {
         let ix = self.tab_of_pane(pane_id)?;
         let (tab, meta) = self.remove_tab_at(ix)?;
-        let WorkspaceTab::Terminal { panes, .. } = &tab else {
+        let WorkspaceTab::Split { panes, .. } = &tab else {
             self.insert_tab_at(ix, tab, meta);
             return None;
         };
@@ -1703,10 +1702,10 @@ impl NebulaWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let can_dock = dock.is_some_and(|target| matches!(self.tabs.get(self.active), Some(WorkspaceTab::Terminal { tree, .. }) if target.pane.is_none_or(|pane| tree.contains(pane))));
+        let can_dock = dock.is_some_and(|target| matches!(self.tabs.get(self.active), Some(WorkspaceTab::Split { tree, .. }) if target.pane.is_none_or(|pane| tree.contains(pane))));
         if can_dock {
             let Some(target) = dock else { unreachable!("can_dock requires a direction") };
-            let WorkspaceTab::Terminal {
+            let WorkspaceTab::Split {
                 panes: source_panes,
                 tree: source_tree,
                 focused: source_focused,
@@ -1715,7 +1714,7 @@ impl NebulaWorkspace {
             else {
                 unreachable!("cross-window drag payloads only contain terminal tabs")
             };
-            let Some(WorkspaceTab::Terminal { panes, tree, focused, zoomed, broadcast, .. }) =
+            let Some(WorkspaceTab::Split { panes, tree, focused, zoomed, broadcast, .. }) =
                 self.tabs.get_mut(self.active)
             else {
                 unreachable!("can_dock checked the active terminal tab")
@@ -1746,14 +1745,14 @@ impl NebulaWorkspace {
 
     pub(crate) fn active_terminal_pane_id(&self) -> Option<u64> {
         match self.tabs.get(self.active) {
-            Some(WorkspaceTab::Terminal { focused, .. }) => Some(*focused),
+            Some(WorkspaceTab::Split { focused, .. }) => Some(*focused),
             _ => None,
         }
     }
 
     fn shutdown_terminal_panes(&self, cx: &App) {
         for tab in &self.tabs {
-            let WorkspaceTab::Terminal { panes, .. } = tab else { continue };
+            let WorkspaceTab::Split { panes, .. } = tab else { continue };
             for pane in panes {
                 pane.view.read(cx).shutdown();
             }

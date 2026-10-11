@@ -102,7 +102,7 @@ impl NebulaWorkspace {
             return;
         }
         self.activate_tab(ix, window, cx);
-        let terminal = self.tabs.get(ix).is_some_and(WorkspaceTab::is_terminal);
+        let terminal = self.tabs.get(ix).is_some_and(WorkspaceTab::is_split);
         let language = crate::gpui_shell::config::ui_language(cx);
         let ai_fork = tab_ai_fork_enabled(self, ix, cx);
         let color = self.meta(ix).color;

@@ -149,7 +149,7 @@ impl NebulaWorkspace {
     }
 
     pub(super) fn duplicate_tab(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(WorkspaceTab::Terminal { panes, tree, focused, .. }) = self.tabs.get(ix) else {
+        let Some(WorkspaceTab::Split { panes, tree, focused, .. }) = self.tabs.get(ix) else {
             return;
         };
         let meta = self.meta(ix);

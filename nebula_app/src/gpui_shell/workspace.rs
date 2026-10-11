@@ -185,7 +185,7 @@ pub fn init(cx: &mut App) {
 
 /// 一个终端 pane：视图实体 + 宿主订阅。id 即 `TerminalView::pane_id`
 /// （AI hook 的 `NEBULA_PANE_ID` 同源），全工作区唯一、终生不复用。
-struct TerminalPane {
+struct WorkspacePane {
     id: u64,
     custom_name: Option<String>,
     /// Recent committed names; follows the live pane without retaining window-bound inputs.
@@ -195,9 +195,9 @@ struct TerminalPane {
 }
 
 enum WorkspaceTab {
-    Terminal {
+    Split {
         /// pane 实体属主（无序存储，按 id 查找）。见模块头的生命周期合同。
-        panes: Vec<TerminalPane>,
+        panes: Vec<WorkspacePane>,
         /// 分屏布局树（`nebula_split` 共享权威实现），叶 = pane id。
         tree: SplitTree<u64>,
         /// 聚焦 pane：键盘输入焦点与 split/close 动作的作用对象。
@@ -242,14 +242,14 @@ impl WorkspaceTab {
         matches!(self, Self::Settings { .. })
     }
 
-    fn is_terminal(&self) -> bool {
-        matches!(self, Self::Terminal { .. })
+    fn is_split(&self) -> bool {
+        matches!(self, Self::Split { .. })
     }
 
     /// 聚焦 pane 的视图（Terminal tab）；其余 tab 类型返回 None。
     fn focused_view(&self) -> Option<&Entity<TerminalView>> {
         match self {
-            Self::Terminal { panes, focused, .. } => {
+            Self::Split { panes, focused, .. } => {
                 panes.iter().find(|pane| pane.id == *focused).map(|pane| &pane.view)
             },
             _ => None,
@@ -1117,7 +1117,7 @@ impl NebulaWorkspace {
         let (runtime, settings) = crate::gpui_shell::config::Settings::load_current_snapshot(cx);
         cx.set_global(settings);
         for tab in &self.tabs {
-            if let WorkspaceTab::Terminal { panes, .. } = tab {
+            if let WorkspaceTab::Split { panes, .. } = tab {
                 for pane in panes {
                     pane.view.update(cx, |view, cx| view.apply_settings(cx));
                 }
@@ -1161,7 +1161,7 @@ impl NebulaWorkspace {
         command: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> TerminalPane {
+    ) -> WorkspacePane {
         let pane_id = self.next_pane_id;
         self.next_pane_id = self.next_pane_id.saturating_add(1);
         let view = cx.new(|cx| TerminalView::new(pane_id, grid, launch, window, cx));
@@ -1169,7 +1169,7 @@ impl NebulaWorkspace {
         if let Some(command) = command {
             view.update(cx, |view, cx| view.run_command(command, cx));
         }
-        TerminalPane {
+        WorkspacePane {
             id: pane_id,
             custom_name: None,
             name_history: Vec::new(),
@@ -1224,7 +1224,7 @@ impl NebulaWorkspace {
         let launch = Self::terminal_launch_from_session(&launch_session, cwd);
         let pane = self.new_pane(grid, launch, command, window, cx);
         let focused = pane.id;
-        let tab = WorkspaceTab::Terminal {
+        let tab = WorkspaceTab::Split {
             tree: SplitTree::leaf(pane.id),
             panes: vec![pane],
             focused,
@@ -1284,7 +1284,7 @@ impl NebulaWorkspace {
         };
         let pane = self.new_pane(grid, launch, None, window, cx);
         let focused = pane.id;
-        let tab = WorkspaceTab::Terminal {
+        let tab = WorkspaceTab::Split {
             tree: SplitTree::leaf(pane.id),
             panes: vec![pane],
             focused,
@@ -1320,7 +1320,7 @@ impl NebulaWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(WorkspaceTab::Terminal { panes, .. }) = self.tabs.get(tab_ix) else { return };
+        let Some(WorkspaceTab::Split { panes, .. }) = self.tabs.get(tab_ix) else { return };
         let Some(old) = panes.iter().find(|pane| pane.id == pane_id) else { return };
         let custom_name = old.custom_name.clone();
         let name_history = old.name_history.clone();
@@ -1345,8 +1345,7 @@ impl NebulaWorkspace {
         self.forget_pane_rename(pane_id);
         let replacement_id = replacement.id;
         let old = {
-            let Some(WorkspaceTab::Terminal { panes, tree, focused, .. }) =
-                self.tabs.get_mut(tab_ix)
+            let Some(WorkspaceTab::Split { panes, tree, focused, .. }) = self.tabs.get_mut(tab_ix)
             else {
                 replacement.view.read(cx).shutdown();
                 return;
@@ -1377,7 +1376,7 @@ impl NebulaWorkspace {
 
     /// 与旧壳 `busy_process_in` 同一判据，只把查询落到 GPUI 的 Pane 实体。
     fn busy_process_in_tab(&self, tab_ix: usize, pane_id: Option<u64>, cx: &App) -> Option<String> {
-        let WorkspaceTab::Terminal { panes, .. } = self.tabs.get(tab_ix)? else { return None };
+        let WorkspaceTab::Split { panes, .. } = self.tabs.get(tab_ix)? else { return None };
         panes
             .iter()
             .filter(|pane| pane_id.is_none_or(|id| pane.id == id))
@@ -1401,7 +1400,7 @@ impl NebulaWorkspace {
 
     fn locate_pane(&self, entity_id: gpui::EntityId) -> Option<(usize, u64)> {
         self.tabs.iter().enumerate().find_map(|(ix, tab)| match tab {
-            WorkspaceTab::Terminal { panes, .. } => panes
+            WorkspaceTab::Split { panes, .. } => panes
                 .iter()
                 .find(|pane| pane.view.entity_id() == entity_id)
                 .map(|pane| (ix, pane.id)),
@@ -1424,7 +1423,7 @@ impl NebulaWorkspace {
         // next active tab in an immersive layout.
         self.clear_reader_focus(cx);
         let Some((tab, _meta)) = self.remove_tab_at(ix) else { return };
-        if let WorkspaceTab::Terminal { panes, .. } = &tab {
+        if let WorkspaceTab::Split { panes, .. } = &tab {
             let mut bounds = self.pane_bounds.borrow_mut();
             for pane in panes {
                 self.runtime_hub.record_pane_closed(self.runtime_window_id, pane.id);
@@ -1486,11 +1485,11 @@ impl NebulaWorkspace {
             return;
         }
         match self.tabs.get(self.active) {
-            Some(WorkspaceTab::Terminal { panes, focused, .. }) if panes.len() > 1 => {
+            Some(WorkspaceTab::Split { panes, focused, .. }) if panes.len() > 1 => {
                 let (tab_ix, pane_id) = (self.active, *focused);
                 self.request_close_pane(tab_ix, pane_id, window, cx);
             },
-            Some(WorkspaceTab::Terminal { .. }) => {
+            Some(WorkspaceTab::Split { .. }) => {
                 self.request_close_tab(self.active, window, cx);
             },
             Some(_) => self.close_tab(self.active, window, cx),
@@ -1507,7 +1506,7 @@ impl NebulaWorkspace {
             return;
         }
         let focus = match self.tabs.get(self.active) {
-            Some(tab @ WorkspaceTab::Terminal { .. }) => match tab.focused_view() {
+            Some(tab @ WorkspaceTab::Split { .. }) => match tab.focused_view() {
                 Some(view) => view.read(cx).focus_handle(cx),
                 None => return,
             },
@@ -2043,7 +2042,7 @@ impl NebulaWorkspace {
             .tabs
             .iter()
             .take(ix)
-            .filter(|tab| matches!(tab, WorkspaceTab::Terminal { .. }))
+            .filter(|tab| matches!(tab, WorkspaceTab::Split { .. }))
             .count();
         let Some(tab) = session.tabs.get(exportable_before).cloned() else { return };
         let stem = tab

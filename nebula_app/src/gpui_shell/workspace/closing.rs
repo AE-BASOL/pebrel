@@ -225,7 +225,7 @@ impl NebulaWorkspace {
             .tabs
             .iter()
             .filter_map(|tab| match tab {
-                WorkspaceTab::Terminal { panes, .. } => Some(panes),
+                WorkspaceTab::Split { panes, .. } => Some(panes),
                 _ => None,
             })
             .flatten()

@@ -200,12 +200,12 @@ impl NebulaWorkspace {
 
     fn dock_allowed(&self, source: usize) -> bool {
         source != self.active
-            && self.tabs.get(source).is_some_and(WorkspaceTab::is_terminal)
-            && self.tabs.get(self.active).is_some_and(WorkspaceTab::is_terminal)
+            && self.tabs.get(source).is_some_and(WorkspaceTab::is_split)
+            && self.tabs.get(self.active).is_some_and(WorkspaceTab::is_split)
     }
 
     pub(super) fn active_terminal_area(&self) -> Option<nebula_split::Rect> {
-        let Some(WorkspaceTab::Terminal { panes, tree, focused, zoomed, .. }) =
+        let Some(WorkspaceTab::Split { panes, tree, focused, zoomed, .. }) =
             self.tabs.get(self.active)
         else {
             return None;
@@ -258,7 +258,7 @@ impl NebulaWorkspace {
 
     fn dock_pane_areas(&self) -> Vec<(u64, nebula_split::Rect)> {
         let Some(area) = self.active_terminal_area() else { return vec![] };
-        let Some(WorkspaceTab::Terminal { tree, zoomed, .. }) = self.tabs.get(self.active) else {
+        let Some(WorkspaceTab::Split { tree, zoomed, .. }) = self.tabs.get(self.active) else {
             return vec![];
         };
         // A zoomed tree must be restored before adding a split, otherwise its post-drop
@@ -291,13 +291,11 @@ impl NebulaWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.dock_allowed(source) || !self.tabs.get(self.active).is_some_and(|tab| matches!(tab, WorkspaceTab::Terminal { tree, .. } if target.pane.is_none_or(|pane| tree.contains(pane)))) {
+        if !self.dock_allowed(source) || !self.tabs.get(self.active).is_some_and(|tab| matches!(tab, WorkspaceTab::Split { tree, .. } if target.pane.is_none_or(|pane| tree.contains(pane)))) {
             return;
         }
         let Some((
-            WorkspaceTab::Terminal {
-                panes: src_panes, tree: src_tree, focused: src_focused, ..
-            },
+            WorkspaceTab::Split { panes: src_panes, tree: src_tree, focused: src_focused, .. },
             _meta,
         )) = self.remove_tab_at(source)
         else {
@@ -306,7 +304,7 @@ impl NebulaWorkspace {
         if source < self.active {
             self.active -= 1;
         }
-        let Some(WorkspaceTab::Terminal { panes, tree, focused, zoomed, broadcast, .. }) =
+        let Some(WorkspaceTab::Split { panes, tree, focused, zoomed, broadcast, .. }) =
             self.tabs.get_mut(self.active)
         else {
             unreachable!("dock_allowed 已保证 active 是 Terminal");

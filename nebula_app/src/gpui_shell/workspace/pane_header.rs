@@ -477,8 +477,7 @@ impl NebulaWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(WorkspaceTab::Terminal { panes, broadcast, .. }) = self.tabs.get_mut(tab_ix)
-        else {
+        let Some(WorkspaceTab::Split { panes, broadcast, .. }) = self.tabs.get_mut(tab_ix) else {
             return;
         };
         if panes.len() < 2 {
@@ -512,7 +511,7 @@ impl NebulaWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(WorkspaceTab::Terminal { tree, focused, .. }) = self.tabs.get(tab_ix) else {
+        let Some(WorkspaceTab::Split { tree, focused, .. }) = self.tabs.get(tab_ix) else {
             return;
         };
         let order = pane_order(tree);
@@ -536,8 +535,7 @@ impl NebulaWorkspace {
         cx: &mut Context<Self>,
     ) {
         let Some(tab_ix) = self.tab_of_pane(source) else { return };
-        let Some(WorkspaceTab::Terminal { panes, tree, broadcast, .. }) = self.tabs.get(tab_ix)
-        else {
+        let Some(WorkspaceTab::Split { panes, tree, broadcast, .. }) = self.tabs.get(tab_ix) else {
             return;
         };
         if !*broadcast || panes.len() < 2 {
@@ -569,7 +567,7 @@ impl NebulaWorkspace {
         // 单 pane 没有「拉出去」的语义（它本来就是独立 tab）。
         let splittable = matches!(
             self.tabs.get(tab_ix),
-            Some(WorkspaceTab::Terminal { panes, .. }) if panes.len() > 1
+            Some(WorkspaceTab::Split { panes, .. }) if panes.len() > 1
         );
         if !splittable {
             return;
@@ -672,12 +670,12 @@ impl NebulaWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(WorkspaceTab::Terminal { panes, .. }) = self.tabs.get(tab_ix) else { return };
+        let Some(WorkspaceTab::Split { panes, .. }) = self.tabs.get(tab_ix) else { return };
         if panes.len() < 2 {
             return;
         }
         let outcome = match self.tabs.get_mut(tab_ix) {
-            Some(WorkspaceTab::Terminal { tree, .. }) => tree.remove_leaf(pane_id),
+            Some(WorkspaceTab::Split { tree, .. }) => tree.remove_leaf(pane_id),
             _ => return,
         };
         let nebula_split::RemoveOutcome::Collapsed(next_focus) = outcome else {
@@ -687,7 +685,7 @@ impl NebulaWorkspace {
             log::warn!("detach_pane_to_new_tab: unexpected remove outcome for pane {pane_id}");
             return;
         };
-        let Some(WorkspaceTab::Terminal { panes, focused, zoomed, broadcast, .. }) =
+        let Some(WorkspaceTab::Split { panes, focused, zoomed, broadcast, .. }) =
             self.tabs.get_mut(tab_ix)
         else {
             return;
@@ -704,7 +702,7 @@ impl NebulaWorkspace {
         }
         // 标签元数据不继承：`custom_name` / `color` 描述的是**那个 tab**，
         // `shell_tag` 也可能记的是另一个 pane 的 shell。新 tab 从默认起。
-        let tab = WorkspaceTab::Terminal {
+        let tab = WorkspaceTab::Split {
             tree: SplitTree::leaf(pane_id),
             panes: vec![pane],
             focused: pane_id,

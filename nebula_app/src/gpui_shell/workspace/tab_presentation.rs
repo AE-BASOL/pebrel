@@ -58,7 +58,7 @@ impl NebulaWorkspace {
             WorkspaceTab::Image { view } => view.read(cx).title.clone().into(),
             WorkspaceTab::Document { view, .. } => view.read(cx).tab_title().into(),
             WorkspaceTab::Code { view, .. } => view.read(cx).tab_title(cx).into(),
-            tab @ WorkspaceTab::Terminal { .. } => {
+            tab @ WorkspaceTab::Split { .. } => {
                 // 标签 = 聚焦 pane 的 cwd 末级目录名（旧壳 chrome_tab_label
                 // 规则）。分屏计数**不拼在这里**：这份字符串还要喂给 runtime
                 // API 的 tab label、跨窗拖拽标题和重命名预填，掺进 "⊞2" 会
@@ -77,13 +77,13 @@ impl NebulaWorkspace {
         let active = ix == self.active;
         let title = self.tab_title(ix, cx);
         let is_settings = self.tabs[ix].is_settings();
-        let is_terminal = self.tabs[ix].is_terminal();
+        let is_terminal = self.tabs[ix].is_split();
         let local_administrator = crate::platform::elevation::is_elevated().unwrap_or(false)
             && self.tabs[ix]
                 .focused_view()
                 .is_some_and(|view| view.read(cx).inherits_windows_host_token());
         let pane_count = match &self.tabs[ix] {
-            WorkspaceTab::Terminal { panes, .. } => panes.len(),
+            WorkspaceTab::Split { panes, .. } => panes.len(),
             _ => 0,
         };
         let (program, activity) = self.tabs[ix]

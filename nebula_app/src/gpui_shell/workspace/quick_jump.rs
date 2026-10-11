@@ -46,7 +46,7 @@ fn tab_rows(
     for (tab_ix, tab) in workspace.tabs.iter().enumerate() {
         let title = workspace.tab_title(tab_ix, cx).to_string();
         let (kind, icon_path) = match tab {
-            WorkspaceTab::Terminal { .. } => {
+            WorkspaceTab::Split { .. } => {
                 (language.pick("终端", "Terminal"), IconName::SquareTerminal.path())
             },
             WorkspaceTab::Settings { .. } => {
@@ -76,7 +76,7 @@ fn tab_rows(
             icon_path: Some(icon_path),
         });
 
-        let WorkspaceTab::Terminal { panes, focused, .. } = tab else { continue };
+        let WorkspaceTab::Split { panes, focused, .. } = tab else { continue };
         for pane in panes {
             let view = pane.view.read(cx);
             let pane_title = view.tab_label();

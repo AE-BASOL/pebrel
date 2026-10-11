@@ -63,7 +63,7 @@ fn terminal_menu_renders_without_a_selection_and_escape_restores_focus(cx: &mut 
             let id = pane.id;
             workspace.insert_tab_at(
                 0,
-                WorkspaceTab::Terminal {
+                WorkspaceTab::Split {
                     panes: vec![pane],
                     tree: SplitTree::leaf(id),
                     focused: id,

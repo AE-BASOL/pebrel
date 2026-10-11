@@ -108,7 +108,7 @@ impl NebulaWorkspace {
         // v4 的 Shell/Profile/Ssh 必须原样用于首 Pane，不能再次读取当前默认。
         let saved_launch = tab.launch.clone().unwrap_or(LaunchSession::Default);
         let grid = self.initial_grid;
-        let mut panes: Vec<TerminalPane> = Vec::new();
+        let mut panes: Vec<WorkspacePane> = Vec::new();
         for (index, leaf) in layout.leaves().into_iter().enumerate() {
             let LayoutSession::Pane { cwd, agent, launch, custom_name } = leaf else { continue };
             let mut launch_session = launch.clone().unwrap_or_else(|| {
@@ -168,7 +168,7 @@ impl NebulaWorkspace {
         // 重命名与色标随会话一起回来（旧壳同合同）。
         self.insert_tab_at(
             at,
-            WorkspaceTab::Terminal { panes, tree, focused, zoomed: false, broadcast: false },
+            WorkspaceTab::Split { panes, tree, focused, zoomed: false, broadcast: false },
             TabMeta {
                 runtime_id: Default::default(),
                 custom_name: tab.custom_name.clone(),
@@ -197,7 +197,7 @@ impl NebulaWorkspace {
         let mut tabs = Vec::new();
         let mut active_out = 0usize;
         for (ix, tab) in self.tabs.iter().enumerate() {
-            let WorkspaceTab::Terminal { panes, tree, focused, .. } = tab else { continue };
+            let WorkspaceTab::Split { panes, tree, focused, .. } = tab else { continue };
             if ix == self.active {
                 active_out = tabs.len();
             }

@@ -80,7 +80,7 @@ impl NebulaWorkspace {
     fn file_tree_path_origin(&self) -> PathOrigin {
         use super::super::WorkspaceTab;
         let view = self.tabs.get(self.active).and_then(|tab| match tab {
-            WorkspaceTab::Terminal { .. } => tab.focused_view().map(Entity::entity_id),
+            WorkspaceTab::Split { .. } => tab.focused_view().map(Entity::entity_id),
             WorkspaceTab::Document { view, .. } => Some(view.entity_id()),
             WorkspaceTab::Code { view, .. } => Some(view.entity_id()),
             WorkspaceTab::Image { view } => Some(view.entity_id()),

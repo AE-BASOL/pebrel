@@ -238,7 +238,7 @@ impl NebulaWorkspace {
                         ));
                     };
                     self.active = tab_ix;
-                    if let Some(WorkspaceTab::Terminal { focused, zoomed, .. }) =
+                    if let Some(WorkspaceTab::Split { focused, zoomed, .. }) =
                         self.tabs.get_mut(tab_ix)
                     {
                         *focused = *pane_id;
@@ -337,7 +337,7 @@ impl NebulaWorkspace {
                             ));
                         };
                         self.active = tab_ix;
-                        let Some(WorkspaceTab::Terminal { focused, zoomed, .. }) =
+                        let Some(WorkspaceTab::Split { focused, zoomed, .. }) =
                             self.tabs.get_mut(tab_ix)
                         else {
                             return Err(ApiError::new(
@@ -350,7 +350,7 @@ impl NebulaWorkspace {
                         *pane_id
                     },
                     None => match self.tabs.get(self.active) {
-                        Some(WorkspaceTab::Terminal { focused, .. }) => *focused,
+                        Some(WorkspaceTab::Split { focused, .. }) => *focused,
                         _ => {
                             return Err(ApiError::new(
                                 "invalid_state",
@@ -414,7 +414,7 @@ impl NebulaWorkspace {
                     ));
                 };
                 let changed = {
-                    let Some(WorkspaceTab::Terminal { panes, focused, zoomed: current, .. }) =
+                    let Some(WorkspaceTab::Split { panes, focused, zoomed: current, .. }) =
                         self.tabs.get_mut(tab_ix)
                     else {
                         return Err(ApiError::new("invalid_state", "only terminal panes can zoom"));
@@ -456,7 +456,7 @@ impl NebulaWorkspace {
                     ));
                 };
                 let resized = match self.tabs.get_mut(tab_ix) {
-                    Some(WorkspaceTab::Terminal { tree, .. }) => {
+                    Some(WorkspaceTab::Split { tree, .. }) => {
                         tree.set_leaf_parent_ratio(*pane_id, *ratio)
                     },
                     _ => false,
@@ -488,7 +488,7 @@ impl NebulaWorkspace {
                     ));
                 };
                 let view = match self.tabs.get(tab_ix) {
-                    Some(WorkspaceTab::Terminal { panes, .. }) => {
+                    Some(WorkspaceTab::Split { panes, .. }) => {
                         panes.iter().find(|pane| pane.id == *pane_id).map(|pane| pane.view.clone())
                     },
                     _ => None,
@@ -514,7 +514,7 @@ impl NebulaWorkspace {
                     ));
                 };
                 let view = match self.tabs.get(tab_ix) {
-                    Some(WorkspaceTab::Terminal { panes, .. }) => {
+                    Some(WorkspaceTab::Split { panes, .. }) => {
                         panes.iter().find(|pane| pane.id == *pane_id).map(|pane| pane.view.clone())
                     },
                     _ => None,
@@ -543,7 +543,7 @@ impl NebulaWorkspace {
                     ));
                 };
                 let read = match self.tabs.get(tab_ix) {
-                    Some(WorkspaceTab::Terminal { panes, .. }) => panes
+                    Some(WorkspaceTab::Split { panes, .. }) => panes
                         .iter()
                         .find(|pane| pane.id == *pane_id)
                         .expect("tab_of_pane resolved a terminal pane")
@@ -561,7 +561,7 @@ impl NebulaWorkspace {
                     ApiError::new("target_not_found", "scroll pane does not exist")
                 })?;
                 let view = match &self.tabs[tab_ix] {
-                    WorkspaceTab::Terminal { panes, .. } => panes
+                    WorkspaceTab::Split { panes, .. } => panes
                         .iter()
                         .find(|pane| pane.id == *pane_id)
                         .expect("resolved pane")
@@ -583,7 +583,7 @@ impl NebulaWorkspace {
                     ));
                 };
                 let processes = match self.tabs.get(tab_ix) {
-                    Some(WorkspaceTab::Terminal { panes, .. }) => panes
+                    Some(WorkspaceTab::Split { panes, .. }) => panes
                         .iter()
                         .find(|pane| pane.id == *pane_id)
                         .expect("tab_of_pane resolved a terminal pane")
@@ -604,7 +604,7 @@ impl NebulaWorkspace {
                     ));
                 };
                 let view = match self.tabs.get(tab_ix) {
-                    Some(WorkspaceTab::Terminal { panes, .. }) => panes
+                    Some(WorkspaceTab::Split { panes, .. }) => panes
                         .iter()
                         .find(|pane| pane.id == *pane_id)
                         .expect("tab_of_pane resolved a terminal pane")
@@ -635,7 +635,7 @@ impl NebulaWorkspace {
                     ));
                 };
                 let view = match self.tabs.get(tab_ix) {
-                    Some(WorkspaceTab::Terminal { panes, .. }) => panes
+                    Some(WorkspaceTab::Split { panes, .. }) => panes
                         .iter()
                         .find(|pane| pane.id == *pane_id)
                         .expect("tab_of_pane resolved a terminal pane")
@@ -713,7 +713,7 @@ impl NebulaWorkspace {
                     ));
                 };
                 let view = match self.tabs.get(tab_ix) {
-                    Some(WorkspaceTab::Terminal { panes, .. }) => panes
+                    Some(WorkspaceTab::Split { panes, .. }) => panes
                         .iter()
                         .find(|pane| pane.id == pane_id)
                         .expect("tab_of_pane resolved a terminal pane")
@@ -754,7 +754,7 @@ impl NebulaWorkspace {
                     ));
                 };
                 let view = match self.tabs.get(tab_ix) {
-                    Some(WorkspaceTab::Terminal { panes, .. }) => panes
+                    Some(WorkspaceTab::Split { panes, .. }) => panes
                         .iter()
                         .find(|pane| pane.id == managed.pane_id)
                         .expect("tab_of_pane resolved a terminal pane")
@@ -775,7 +775,7 @@ impl NebulaWorkspace {
                     ));
                 };
                 let view = match self.tabs.get(tab_ix) {
-                    Some(WorkspaceTab::Terminal { panes, .. }) => panes
+                    Some(WorkspaceTab::Split { panes, .. }) => panes
                         .iter()
                         .find(|pane| pane.id == managed.pane_id)
                         .expect("tab_of_pane resolved a terminal pane")
@@ -798,7 +798,7 @@ impl NebulaWorkspace {
                     ));
                 };
                 let read = match self.tabs.get(tab_ix) {
-                    Some(WorkspaceTab::Terminal { panes, .. }) => panes
+                    Some(WorkspaceTab::Split { panes, .. }) => panes
                         .iter()
                         .find(|pane| pane.id == managed.pane_id)
                         .expect("tab_of_pane resolved a terminal pane")
@@ -821,7 +821,7 @@ impl NebulaWorkspace {
         let Some(tab_ix) = self.tab_of_pane(pane_id) else { return };
         let owned = matches!(
             self.tabs.get(tab_ix),
-            Some(WorkspaceTab::Terminal { panes, tree, .. })
+            Some(WorkspaceTab::Split { panes, tree, .. })
                 if panes.len() == 1 && panes[0].id == pane_id && tree.leaves() == vec![pane_id]
         );
         if owned {
@@ -861,7 +861,7 @@ impl NebulaWorkspace {
             .enumerate()
             .map(|(index, tab)| {
                 let (kind, focused_pane_id, zoomed_pane_id, layout, panes) = match tab {
-                    WorkspaceTab::Terminal { panes, tree, focused, zoomed, .. } => {
+                    WorkspaceTab::Split { panes, tree, focused, zoomed, .. } => {
                         let runtime_panes = panes
                             .iter()
                             .map(|pane| {
@@ -916,7 +916,7 @@ impl NebulaWorkspace {
             })
             .collect();
         let focused_pane_id = self.tabs.get(self.active).and_then(|tab| match tab {
-            WorkspaceTab::Terminal { focused, .. } => Some(*focused),
+            WorkspaceTab::Split { focused, .. } => Some(*focused),
             _ => None,
         });
         (
@@ -945,7 +945,7 @@ impl NebulaWorkspace {
             && let Some(tab_ix) = self.tab_of_pane(pane_id)
         {
             self.active = tab_ix;
-            if let Some(WorkspaceTab::Terminal { focused, .. }) = self.tabs.get_mut(tab_ix) {
+            if let Some(WorkspaceTab::Split { focused, .. }) = self.tabs.get_mut(tab_ix) {
                 *focused = pane_id;
             }
         }
@@ -963,7 +963,7 @@ impl NebulaWorkspace {
 
     pub(crate) fn tab_of_pane(&self, pane_id: u64) -> Option<usize> {
         self.tabs.iter().position(|tab| match tab {
-            WorkspaceTab::Terminal { panes, .. } => panes.iter().any(|pane| pane.id == pane_id),
+            WorkspaceTab::Split { panes, .. } => panes.iter().any(|pane| pane.id == pane_id),
             _ => false,
         })
     }
@@ -976,7 +976,7 @@ impl NebulaWorkspace {
         let tab_ix = self.tab_of_pane(pane_id).ok_or_else(|| {
             ApiError::new("target_not_found", format!("pane {pane_id} does not exist"))
         })?;
-        let WorkspaceTab::Terminal { panes, .. } = &self.tabs[tab_ix] else {
+        let WorkspaceTab::Split { panes, .. } = &self.tabs[tab_ix] else {
             return Err(ApiError::new(
                 "exec_context_unavailable",
                 "pane.exec requires a terminal pane",
@@ -1068,7 +1068,7 @@ impl NebulaWorkspace {
     fn has_live_terminal_panes(&self) -> bool {
         self.tabs
             .iter()
-            .any(|tab| matches!(tab, WorkspaceTab::Terminal { panes, .. } if !panes.is_empty()))
+            .any(|tab| matches!(tab, WorkspaceTab::Split { panes, .. } if !panes.is_empty()))
     }
 
     pub(super) fn publish_tray_agents(&self, cx: &App) {
@@ -1079,7 +1079,7 @@ impl NebulaWorkspace {
         let window = winit::window::WindowId::dummy();
         let mut agents = Vec::new();
         for tab in &self.tabs {
-            let WorkspaceTab::Terminal { panes, .. } = tab else { continue };
+            let WorkspaceTab::Split { panes, .. } = tab else { continue };
             for pane in panes {
                 let view = pane.view.read(cx);
                 let Some(agent) = view.runtime_agent() else {

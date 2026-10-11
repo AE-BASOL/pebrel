@@ -198,7 +198,7 @@ impl NebulaWorkspace {
             loop {
                 let Ok(views) = this.update(cx, |workspace, _| {
                     workspace.tabs.iter().filter_map(|tab| match tab {
-                        WorkspaceTab::Terminal { panes, .. } => Some(panes),
+                        WorkspaceTab::Split { panes, .. } => Some(panes),
                         _ => None,
                     }).flatten().map(|pane| pane.view.downgrade()).collect::<Vec<_>>()
                 }) else { return };
@@ -239,21 +239,21 @@ impl NebulaWorkspace {
             .tabs
             .iter()
             .flat_map(|tab| match tab {
-                WorkspaceTab::Terminal { panes, .. } => {
+                WorkspaceTab::Split { panes, .. } => {
                     panes.iter().map(|pane| pane.id).collect::<Vec<_>>()
                 },
                 _ => Vec::new(),
             })
             .collect();
         let active_focused = self.tabs.get(self.active).and_then(|tab| match tab {
-            WorkspaceTab::Terminal { focused, .. } => Some(*focused),
+            WorkspaceTab::Split { focused, .. } => Some(*focused),
             _ => None,
         });
         let Some(target_id) = ai_hook_target_pane(&pane_ids, event.pane, active_focused) else {
             return false;
         };
         let target = self.tabs.iter().find_map(|tab| match tab {
-            WorkspaceTab::Terminal { panes, .. } => {
+            WorkspaceTab::Split { panes, .. } => {
                 panes.iter().find(|pane| pane.id == target_id).map(|pane| pane.view.clone())
             },
             _ => None,
@@ -274,7 +274,7 @@ impl NebulaWorkspace {
             ));
         };
         let view = match self.tabs.get(tab_ix) {
-            Some(WorkspaceTab::Terminal { panes, .. }) => panes
+            Some(WorkspaceTab::Split { panes, .. }) => panes
                 .iter()
                 .find(|pane| pane.id == pane_id)
                 .expect("tab_of_pane resolved a terminal pane")
@@ -363,7 +363,7 @@ impl NebulaWorkspace {
         let launch = Self::terminal_launch_from_session(&launch_session, cwd);
         let pane = self.new_pane(grid, launch, Some(command), window, cx);
         let focused = pane.id;
-        let tab = WorkspaceTab::Terminal {
+        let tab = WorkspaceTab::Split {
             tree: SplitTree::leaf(pane.id),
             panes: vec![pane],
             focused,

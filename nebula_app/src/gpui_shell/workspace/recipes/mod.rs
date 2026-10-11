@@ -27,8 +27,8 @@ pub(super) fn palette_row(language: crate::display::UiLanguage) -> WorkspacePale
 impl NebulaWorkspace {
     pub(super) fn open_layout_recipes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let snapshot = self.snapshot_session(cx);
-        let tab = self.tabs.get(self.active).filter(|tab| tab.is_terminal()).and_then(|_| {
-            let index = self.tabs.iter().take(self.active).filter(|tab| tab.is_terminal()).count();
+        let tab = self.tabs.get(self.active).filter(|tab| tab.is_split()).and_then(|_| {
+            let index = self.tabs.iter().take(self.active).filter(|tab| tab.is_split()).count();
             snapshot.tabs.get(index).cloned().map(|tab| Session::new(0, vec![tab]))
         });
         let library = cx.new(|cx| RecipeLibrary::new(snapshot, tab, window, cx));
