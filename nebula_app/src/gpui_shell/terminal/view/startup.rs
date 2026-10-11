@@ -21,6 +21,26 @@ fn startup_history_directory(
         .and_then(|path| std::path::absolute(path).ok())
 }
 
+/// 会话种类：本地 shell 或 SSH 直连（russh，共享旧壳业务层）。
+///
+/// `shell` 是 Tab 创建/恢复时已经裁定好的启动命令。不能只传 cwd 再在
+/// `TerminalView::new` 里读取“此刻的默认 Shell”，否则恢复混合的 PowerShell /
+/// WSL 工作区时，每个 Tab 都会被重新解释成同一个当前默认值。
+pub enum TerminalLaunch {
+    Local {
+        cwd: Option<std::path::PathBuf>,
+        shell: Option<nebula_terminal::tty::Shell>,
+        /// 只用于欢迎屏选择 PowerShell/Bash 形态，不参与 PTY 启动。
+        shell_name: Option<String>,
+    },
+    Ssh {
+        destination: String,
+        /// Remote cwd inherited by duplicate-tab. `None` starts in the
+        /// account's ordinary login directory.
+        cwd: Option<String>,
+    },
+}
+
 impl TerminalView {
     /// `spawn_grid`：PTY 出生网格（宿主已把窗口定形到该几何）。首帧布局
     /// 与之相同则零下发；见 `set_layout` 的启动稳定闸。
@@ -28,6 +48,17 @@ impl TerminalView {
         pane_id: u64,
         spawn_grid: (u16, u16),
         launch: TerminalLaunch,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self::new_with_local_options(pane_id, spawn_grid, launch, None, window, cx)
+    }
+
+    pub(super) fn new_with_local_options(
+        pane_id: u64,
+        spawn_grid: (u16, u16),
+        launch: TerminalLaunch,
+        retry_options: Option<nebula_terminal::tty::Options>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -63,11 +94,15 @@ impl TerminalView {
                 // 设置选定的默认 shell（旧壳 default_shell_launch 同径：
                 // resolve 失败或 PTY 集成 id 落回引擎默认）。WSL id 在
                 // 这里换上 bash 集成注入，cwd/git 分支经 NEBULA| 标题回流。
-                settings
-                    .shell_id
-                    .as_deref()
-                    .and_then(crate::shell_detect::resolve_id)
-                    .map(|detected| detected.shell()),
+                if retry_options.is_some() {
+                    None
+                } else {
+                    settings
+                        .shell_id
+                        .as_deref()
+                        .and_then(crate::shell_detect::resolve_id)
+                        .map(|detected| detected.shell())
+                },
             ),
             None => (
                 std::array::from_fn(|_| REQUIRED_FONT_FAMILY.to_owned()),
@@ -107,6 +142,7 @@ impl TerminalView {
         // WSL 的启动目录属于宿主，必须保持空值，直到来宾自己报告 cwd。
         let mut completion_cwd = String::new();
         let mut startup_intro = false;
+        let mut failed_local_options = None;
         let (
             ssh_destination,
             initial_title,
@@ -119,23 +155,26 @@ impl TerminalView {
             TerminalLaunch::Local { cwd, shell: launch_shell, shell_name } => {
                 // 显式 launch（会话恢复/创建时冻结）优先；只有旧会话没有
                 // 身份时才回退当前设置。这正是共享 v4 的 Default 语义。
-                let effective = launch_shell.or(shell);
-                startup_intro = accepts_startup_intro(effective.as_ref());
-                let snapshot_shell = crate::platform::shell::snapshot_shell(effective.clone());
-                // The WSL distribution is resolved once, at spawn, and pinned into
-                // the spawn while `session_launch` stays as configured.
-                let wsl_distro = snapshot_shell.as_ref().and_then(|shell| {
-                    crate::shell_detect::wsl_spawn_distro(shell.program(), shell.args())
-                });
-                let spawn_shell = crate::shell_detect::spawn_shell(
-                    effective,
-                    snapshot_shell.as_ref(),
-                    wsl_distro.as_deref(),
-                );
-                // 补齐要知道这个 pane 面对**哪台机器**：`wsl.exe -d <发行版>`
-                // 启动的 tab，文件系统和命令集都在来宾里，本进程的 `std::fs`
-                // 和 PATH 描述的是另一台机器。
-                let suggest_env = spawn_shell
+                let (snapshot_shell, options) = if let Some(options) = retry_options {
+                    // Retry keeps the original resolved program, arguments, cwd and
+                    // environment overrides, including a complete Windows environment.
+                    (options.shell.clone(), options)
+                } else {
+                    let effective = launch_shell.or(shell);
+                    let snapshot = crate::platform::shell::snapshot_shell(effective.clone());
+                    let wsl_distro = snapshot.as_ref().and_then(|shell| {
+                        crate::shell_detect::wsl_spawn_distro(shell.program(), shell.args())
+                    });
+                    let spawn_shell = crate::shell_detect::spawn_shell(
+                        effective,
+                        snapshot.as_ref(),
+                        wsl_distro.as_deref(),
+                    );
+                    (snapshot, session::local_options(spawn_shell, pane_id, cwd))
+                };
+                startup_intro = accepts_startup_intro(options.shell.as_ref());
+                let suggest_env = options
+                    .shell
                     .as_ref()
                     .map(|shell| {
                         crate::completion_context::launch_environment(shell.program(), shell.args())
@@ -149,14 +188,17 @@ impl TerminalView {
                         args: shell.args().to_vec(),
                     },
                 );
-                let options = session::local_options(spawn_shell, pane_id, cwd);
                 let history_cwd = startup_history_directory(&options, &suggest_env);
                 completion_cwd = history_cwd
                     .as_ref()
                     .map(|path| path.to_string_lossy().into_owned())
                     .unwrap_or_default();
                 let exec_context = crate::runtime_exec::PaneExecContext::from_pty_options(&options);
+                let original_options = options.clone();
                 let spawned = session::spawn(initial, term_config, options);
+                if spawned.is_err() {
+                    failed_local_options = Some(original_options);
+                }
                 if spawned.is_ok()
                     && let Some(cwd) = history_cwd
                 {
@@ -327,6 +369,7 @@ impl TerminalView {
             ai_session_probe_epoch: 0,
             last_ai_session_probe: None,
             error,
+            failed_local_options,
             exited: None,
             scrollbar_drag: None,
             scrollbar_hovered: false,

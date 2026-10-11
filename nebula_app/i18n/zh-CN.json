@@ -972,6 +972,13 @@
   "files.search_narrow": "选择更小的目录，或输入更具体的关键词。",
   "files.search_empty": "没有匹配的文件",
   "files.search_empty_reason": "当前目录中没有符合查询条件的文件或文件夹。",
+  "terminal_startup.failed": "无法启动此终端",
+  "terminal_startup.retry": "重试此启动配置",
+  "terminal_startup.choose": "打开其他 Shell…",
+  "session.restore_launch_failed": "已重新打开 {tabs} 个标签；{failed} 个终端启动失败。可重试或打开其他 Shell。",
+  "session.restore_crashed_launch_failed": "上次未正常退出。已重新打开 {tabs} 个标签；{failed} 个终端启动失败。可重试或打开其他 Shell。",
+  "session.reopened": "已重新打开 {tabs} 个标签",
+  "session.reopened_after_crash": "上次未正常退出。已重新打开 {tabs} 个标签",
   "session": {
     "choose_conversation": "选择要继续的对话…",
     "exit_incomplete_title": "仍有 AI 会话未能识别，继续关闭？",

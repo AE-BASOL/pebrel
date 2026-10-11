@@ -14,6 +14,7 @@ mod cwd_report;
 mod editor;
 mod image_paste;
 mod layout;
+mod local_startup;
 #[cfg(all(test, windows, feature = "gpui-test-support"))]
 mod native_cmd_tests;
 mod notifications;
@@ -173,6 +174,10 @@ pub enum TerminalViewEvent {
     RequestClose,
     /// 失败后在当前分屏叶原位重建同一 SSH 目标。
     RetrySsh(String),
+    /// Retry an explicit local spawn error, retaining the original launch snapshot.
+    RetryLocal,
+    /// Open the existing local Shell picker without discarding the failed pane.
+    ChooseLocalShell,
     /// Ctrl+滚轮改了终端字号：宿主应对所有 pane 热应用并写盘。
     FontSizeChanged,
     /// BEL（`^G`）。后台 tab 记铃点；本 tab 的闪烁/声音由视图自己处理。
@@ -195,25 +200,7 @@ pub enum TerminalViewEvent {
     ProgressChanged(crate::taskbar::TaskProgress),
 }
 
-/// 会话种类：本地 shell 或 SSH 直连（russh，共享旧壳业务层）。
-///
-/// `shell` 是 Tab 创建/恢复时已经裁定好的启动命令。不能只传 cwd 再在
-/// `TerminalView::new` 里读取“此刻的默认 Shell”，否则恢复混合的 PowerShell /
-/// WSL 工作区时，每个 Tab 都会被重新解释成同一个当前默认值。
-pub enum TerminalLaunch {
-    Local {
-        cwd: Option<std::path::PathBuf>,
-        shell: Option<nebula_terminal::tty::Shell>,
-        /// 只用于欢迎屏选择 PowerShell/Bash 形态，不参与 PTY 启动。
-        shell_name: Option<String>,
-    },
-    Ssh {
-        destination: String,
-        /// Remote cwd inherited by duplicate-tab. `None` starts in the
-        /// account's ordinary login directory.
-        cwd: Option<String>,
-    },
-}
+pub use startup::TerminalLaunch;
 
 pub(crate) fn last_path_component(path: &str) -> Option<String> {
     let name = path
@@ -367,6 +354,7 @@ pub struct TerminalView {
     pub(super) ai_session_probe_epoch: u64,
     pub(super) last_ai_session_probe: Option<std::time::Instant>,
     error: Option<String>,
+    failed_local_options: Option<nebula_terminal::tty::Options>,
     exited: Option<String>,
     /// 滚动条拖拽中：按下时记下的「指针在拇指内的 y 偏移」，拖动全程据此
     /// 反算 `display_offset`，拇指不会在按下那一刻跳到指针中心。
@@ -1115,7 +1103,7 @@ impl TerminalView {
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if self.exited.is_some() || self.answer_reader.is_some() {
+        if self.local_startup_failed() || self.exited.is_some() || self.answer_reader.is_some() {
             return;
         }
         // IME 组合和 Windows 原生窗口快捷键不编码、不拦截。GPUI Windows
@@ -1216,6 +1204,15 @@ impl TerminalView {
     /// 截住组件 Root 的 Tab 焦点遍历后回灌既有终端按键路径；有补齐时只接受补齐，
     /// 否则仍由原编码器发送 Tab，避免产生第二套按键语义。
     fn dispatch_terminal_tab(&mut self, shift: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.local_startup_failed() {
+            if shift {
+                window.focus_prev(cx);
+            } else {
+                window.focus_next(cx);
+            }
+            cx.stop_propagation();
+            return;
+        }
         let mut modifiers = gpui::Modifiers::default();
         modifiers.shift = shift;
         self.on_key_down(
@@ -1442,7 +1439,7 @@ impl Render for TerminalView {
             }));
 
         if let Some(error) = &self.error {
-            root = root.child(div().p_4().text_color(gpui::red()).child(error.clone()));
+            root = root.child(self.local_startup_error(error, cx));
         } else {
             root = root.child(TerminalElement::new(cx.entity()));
             // SSH 连接卡片（旧壳 `display::ssh_connect` 的 GPUI 形态）：

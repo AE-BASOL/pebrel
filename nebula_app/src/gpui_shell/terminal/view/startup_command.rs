@@ -149,6 +149,31 @@ impl TerminalView {
         })
     }
 
+    /// Capture only a request already authorized for this failed local pane.
+    pub(crate) fn local_startup_requests(
+        &self,
+    ) -> (Option<String>, Option<crate::session::AgentSession>) {
+        (
+            self.pending_shell_command.as_ref().map(|request| request.text.clone()),
+            self.recovery.target.clone(),
+        )
+    }
+
+    pub(crate) fn resume_local_startup_requests(
+        &mut self,
+        (command, agent): (Option<String>, Option<crate::session::AgentSession>),
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(agent) = agent {
+            self.restore_agent(agent, cx);
+            if self.local_startup_failed() {
+                self.pending_shell_command = command.map(|text| PendingShellCommand { text });
+            }
+        } else if let Some(command) = command {
+            self.run_command(command, cx);
+        }
+    }
+
     pub fn run_command(&mut self, text: String, cx: &mut Context<Self>) {
         if text.is_empty() || self.exited.is_some() {
             return;
@@ -189,6 +214,13 @@ impl TerminalView {
             awaiting_confirmation: true,
             ..SessionRecovery::default()
         };
+        if self.local_startup_failed() {
+            // The normalized intent belongs to this pane, but no shell can
+            // accept it. Cold/update restoration and failed manual Retry share
+            // this guard, before provider lookup or command construction.
+            cx.notify();
+            return;
+        }
         if agent.source != "pi" || self.ssh_destination.is_some() {
             if let Some(command) = agent.resume_command() {
                 self.run_command(command, cx);
@@ -262,6 +294,11 @@ impl TerminalView {
             });
         })
         .detach();
+    }
+
+    #[cfg(all(test, feature = "gpui-test-support"))]
+    pub(crate) fn startup_recovery_resolving_for_test(&self) -> bool {
+        self.recovery.resolving
     }
 
     pub(crate) fn recovery_pending(&self) -> bool {

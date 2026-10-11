@@ -8,6 +8,15 @@ use crate::session::AgentSession;
 const MAX_HEADER: u64 = 16 * 1024;
 const MAX_ENTRIES: usize = 16_384;
 
+#[cfg(all(test, feature = "gpui-test-support"))]
+static RESOLVE_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Observation only: test fixtures still exercise the unmodified resolver.
+#[cfg(all(test, feature = "gpui-test-support"))]
+pub(crate) fn test_resolve_calls() -> usize {
+    RESOLVE_CALLS.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ResolveError {
     Missing,
@@ -115,6 +124,8 @@ pub(crate) fn resolve(
     context: Option<&crate::runtime_exec::PaneExecContext>,
     cwd: &str,
 ) -> Result<AgentSession, ResolveError> {
+    #[cfg(all(test, feature = "gpui-test-support"))]
+    RESOLVE_CALLS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     if let Some(context) = context.filter(|context| context.wsl_distribution().is_some()) {
         return resolve_guest(saved, context, cwd);
     }

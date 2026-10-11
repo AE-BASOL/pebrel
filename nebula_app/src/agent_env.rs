@@ -72,10 +72,7 @@ pub fn apply(env: &mut HashMap<String, String>, pane_id: impl Display) {
             insert_env(env, &name, value);
         }
     }
-    let pane_id = pane_id.to_string();
-    insert_env(env, PANE_ENV, pane_id.clone());
-    insert_env(env, crate::ai_hook::LEGACY_PANE_ENV, pane_id);
-    insert_env(env, PROCESS_ENV, std::process::id().to_string());
+    refresh_identity(env, pane_id);
     insert_env(env, TERM_PROGRAM_ENV, TERM_PROGRAM.to_owned());
     insert_env(env, TERM_PROGRAM_VERSION_ENV, env!("VERSION").to_owned());
 
@@ -94,6 +91,15 @@ pub fn apply(env: &mut HashMap<String, String>, pane_id: impl Display) {
     crate::runtime_api::apply_child_endpoint(env);
     crate::ai_hook::apply_child_environment(env);
     merge_wslenv(env);
+}
+
+/// Refresh ownership when retrying frozen PTY options, without regenerating
+/// aliases, control endpoints, hooks, PATH or any explicit environment override.
+pub(crate) fn refresh_identity(env: &mut HashMap<String, String>, pane_id: impl Display) {
+    let pane_id = pane_id.to_string();
+    insert_env(env, PANE_ENV, pane_id.clone());
+    insert_env(env, crate::ai_hook::LEGACY_PANE_ENV, pane_id);
+    insert_env(env, PROCESS_ENV, std::process::id().to_string());
 }
 
 fn env_value<'a>(env: &'a HashMap<String, String>, name: &str) -> Option<&'a str> {
@@ -221,6 +227,28 @@ fn merge_wslenv(_env: &mut HashMap<String, String>) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retry_identity_keeps_frozen_aliases_and_control_environment() {
+        let mut env = HashMap::from([
+            (PANE_ENV.into(), "old-pane".into()),
+            (crate::ai_hook::LEGACY_PANE_ENV.into(), "old-pane".into()),
+            (PROCESS_ENV.into(), "old-process".into()),
+            ("PEBREL_FROZEN".into(), "explicit-current".into()),
+            ("NEBULA_FROZEN".into(), "explicit-legacy".into()),
+            (crate::runtime_api::ENDPOINT_ENV.into(), "synthetic-endpoint".into()),
+            ("PATH".into(), "synthetic-path".into()),
+            ("WSLENV".into(), "OWNED/u".into()),
+        ]);
+        let mut expected = env.clone();
+        expected.insert(PANE_ENV.into(), "37".into());
+        expected.insert(crate::ai_hook::LEGACY_PANE_ENV.into(), "37".into());
+        expected.insert(PROCESS_ENV.into(), std::process::id().to_string());
+
+        refresh_identity(&mut env, 37);
+
+        assert_eq!(env, expected);
+    }
 
     fn applied(pane_id: u64) -> HashMap<String, String> {
         let mut env = HashMap::new();

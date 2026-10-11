@@ -65,6 +65,25 @@ impl NebulaWorkspace {
                     self.retry_ssh_pane(tab_ix, pane_id, destination.clone(), window, cx);
                 }
             },
+            TerminalViewEvent::RetryLocal => {
+                if let Some((tab_ix, pane_id)) = self.locate_pane(view.entity_id()) {
+                    self.retry_local_pane(tab_ix, pane_id, window, cx);
+                }
+            },
+            TerminalViewEvent::ChooseLocalShell => {
+                if self.locate_pane(view.entity_id()).is_some()
+                    && view.read(cx).local_startup_failed()
+                {
+                    self.open_shell_palette(window, cx);
+                    self.set_workspace_palette_filter(
+                        WorkspacePaletteFilter::Launcher(
+                            crate::display::command_palette::LauncherFilter::Shell,
+                        ),
+                        window,
+                        cx,
+                    );
+                }
+            },
             TerminalViewEvent::FontSizeChanged => self.apply_runtime_settings(cx),
             // 任务栏是窗口级的，只反映**正被看着的那个 pane**：后台 tab 里的
             // 构建进度投到同一个按钮上只会互相覆盖，读数还不如没有。

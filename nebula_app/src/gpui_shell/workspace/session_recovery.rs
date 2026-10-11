@@ -2,6 +2,37 @@
 
 use super::*;
 
+#[derive(Default, Debug, PartialEq, Eq)]
+pub(super) struct RestoreSummary {
+    pub opened_tabs: usize,
+    pub failed_local_panes: usize,
+}
+
+impl RestoreSummary {
+    fn notice(
+        &self,
+        crashed: bool,
+        language: crate::display::UiLanguage,
+    ) -> (crate::display::ToastKind, String) {
+        use crate::display::ToastKind;
+        use crate::i18n::Message;
+        let message = match (crashed, self.failed_local_panes > 0) {
+            (false, false) => Message::SessionReopened,
+            (true, false) => Message::SessionReopenedAfterCrash,
+            (false, true) => Message::SessionRestoreLaunchFailed,
+            (true, true) => Message::SessionRestoreCrashedLaunchFailed,
+        };
+        let text = language.format(
+            message,
+            &[
+                ("tabs", &self.opened_tabs.to_string()),
+                ("failed", &self.failed_local_panes.to_string()),
+            ],
+        );
+        (if self.failed_local_panes > 0 { ToastKind::Warning } else { ToastKind::Success }, text)
+    }
+}
+
 impl NebulaWorkspace {
     /// 冷启动回退（没有恢复出任何标签）时首个终端的 cwd：与 `add_terminal`
     /// 同一合同，设置页「启动目录」优先，未设置或失效时才继承进程启动目录。
@@ -16,15 +47,56 @@ impl NebulaWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let mut restored = false;
-        for tab in &session.tabs {
-            restored |= self.restore_tab(tab, resume_ai, window, cx);
-        }
-        if restored {
+        let summary = self.restore_session_tabs(session, resume_ai, window, cx);
+        if summary.opened_tabs > 0 {
             self.active = session.active_tab.min(self.tabs.len().saturating_sub(1));
             self.focus_active(window, cx);
+            if summary.failed_local_panes > 0 {
+                self.show_restore_notice(&summary, false, window, cx);
+            }
         }
-        restored
+        summary.opened_tabs > 0
+    }
+
+    /// A created tab can contain an explicit spawn failure. Count that outcome
+    /// separately from rebuilding its layout; asynchronous SSH readiness is not
+    /// inferred here. Failed panes retain their saved launch and recovery surface.
+    pub(super) fn restore_session_tabs(
+        &mut self,
+        session: &crate::session::Session,
+        resume_ai: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> RestoreSummary {
+        let mut summary = RestoreSummary::default();
+        for tab in &session.tabs {
+            let at = self.tabs.len();
+            if self.restore_tab(tab, resume_ai, window, cx) {
+                summary.opened_tabs += 1;
+                if let Some(WorkspaceTab::Terminal { panes, .. }) = self.tabs.get(at) {
+                    summary.failed_local_panes += panes
+                        .iter()
+                        .filter(|pane| pane.view.read(cx).local_startup_failed())
+                        .count();
+                }
+            }
+        }
+        summary
+    }
+
+    fn show_restore_notice(
+        &self,
+        summary: &RestoreSummary,
+        crashed: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (kind, text) = summary.notice(crashed, crate::gpui_shell::config::ui_language(cx));
+        if summary.failed_local_panes > 0 {
+            crate::gpui_shell::toast::banner(window, cx, kind, text);
+        } else {
+            crate::gpui_shell::toast::toast(window, cx, kind, text);
+        }
     }
 
     /// 启动恢复：断路器跳闸就隔离现场并走干净路径；恢复成功弹一条
@@ -55,23 +127,13 @@ impl NebulaWorkspace {
         }
         let crashed = crate::session::was_crash(&session);
         crate::session::mark_boot_attempt(&mut session);
-        let mut restored = 0usize;
-        for tab in &session.tabs {
-            if self.restore_tab(tab, resume_ai, window, cx) {
-                restored += 1;
-            }
-        }
-        if restored == 0 {
+        let summary = self.restore_session_tabs(&session, resume_ai, window, cx);
+        if summary.opened_tabs == 0 {
             return false;
         }
         self.active = session.active_tab.min(self.tabs.len().saturating_sub(1));
         self.focus_active(window, cx);
-        let text = if crashed {
-            format!("上次未正常退出，已恢复 {restored} 个标签")
-        } else {
-            format!("已恢复 {restored} 个标签")
-        };
-        crate::gpui_shell::toast::toast(window, cx, ToastKind::Success, text);
+        self.show_restore_notice(&summary, crashed, window, cx);
         cx.notify();
         true
     }
@@ -277,5 +339,30 @@ mod cold_start_tests {
         let home = PathBuf::from("C:/Users/fixture");
         assert_eq!(cold_start_cwd(None, Some(home.clone())), Some(home));
         assert_eq!(cold_start_cwd(None, None), None);
+    }
+}
+
+#[cfg(test)]
+mod startup_notice_tests {
+    use super::*;
+
+    #[test]
+    fn local_startup_notice_distinguishes_opened_tabs_from_failed_launches() {
+        use crate::display::{ToastKind, UiLanguage};
+        for language in [UiLanguage::EnUs, UiLanguage::ZhCn] {
+            for crashed in [false, true] {
+                let (kind, text) = RestoreSummary { opened_tabs: 3, failed_local_panes: 2 }
+                    .notice(crashed, language);
+                assert_eq!(kind, ToastKind::Warning);
+                assert!(text.contains('3') && text.contains('2'));
+                assert!(!text.contains('{'));
+                assert_eq!(
+                    RestoreSummary { opened_tabs: 3, failed_local_panes: 0 }
+                        .notice(crashed, language)
+                        .0,
+                    ToastKind::Success
+                );
+            }
+        }
     }
 }

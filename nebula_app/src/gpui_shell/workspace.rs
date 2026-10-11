@@ -77,6 +77,7 @@ mod runtime_tabs;
 mod send_to_chat;
 mod session_persistence;
 mod session_recovery;
+mod session_retry;
 pub(crate) mod shell_launch;
 mod shell_picker;
 mod sidebar_resize;
@@ -1151,32 +1152,6 @@ impl NebulaWorkspace {
         nebula_settings::RuntimeSettings::load().startup_directory_path()
     }
 
-    /// 创建一个 pane 实体（分配 id、spawn 会话、挂宿主订阅）；调用方决定
-    /// 它进新 tab 还是接进某棵分屏树。
-    fn new_pane(
-        &mut self,
-        grid: (u16, u16),
-        launch: crate::gpui_shell::terminal::view::TerminalLaunch,
-        command: Option<String>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> TerminalPane {
-        let pane_id = self.next_pane_id;
-        self.next_pane_id = self.next_pane_id.saturating_add(1);
-        let view = cx.new(|cx| TerminalView::new(pane_id, grid, launch, window, cx));
-        let subscription = cx.subscribe_in(&view, window, Self::on_terminal_event);
-        if let Some(command) = command {
-            view.update(cx, |view, cx| view.run_command(command, cx));
-        }
-        TerminalPane {
-            id: pane_id,
-            custom_name: None,
-            name_history: Vec::new(),
-            view,
-            _subscription: subscription,
-        }
-    }
-
     /// 现网格（聚焦终端）或开窗反推的目标网格：让新 pane 的 PTY 出生即
     /// 接近最终几何，启动接近零 resize。
     fn inherited_grid(&self, cx: &App) -> (u16, u16) {
@@ -1305,72 +1280,6 @@ impl NebulaWorkspace {
         self.reveal_active_tab();
         self.focus_active(window, cx);
         self.sync_side_panel_to_active(true, cx);
-        cx.notify();
-    }
-
-    /// 在同一 tab、同一分屏位置替换失败的 SSH pane。先把新实体及订阅完整
-    /// 建好，再原子替换树叶和 pane 所有权；旧实体的异步泵只会更新旧 Entity，
-    /// 因而无法把迟到的 Failed/Ready 写进新连接。
-    fn retry_ssh_pane(
-        &mut self,
-        tab_ix: usize,
-        pane_id: u64,
-        destination: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(WorkspaceTab::Terminal { panes, .. }) = self.tabs.get(tab_ix) else { return };
-        let Some(old) = panes.iter().find(|pane| pane.id == pane_id) else { return };
-        let custom_name = old.custom_name.clone();
-        let name_history = old.name_history.clone();
-        let (grid, remote_cwd) = {
-            let view = old.view.read(cx);
-            if view.ssh_destination.as_deref() != Some(destination.as_str()) {
-                return;
-            }
-            (
-                (view.grid_cols() as u16, view.grid_rows() as u16),
-                (!view.cwd.is_empty()).then(|| view.cwd.clone()),
-            )
-        };
-
-        let launch = crate::gpui_shell::terminal::view::TerminalLaunch::Ssh {
-            destination: destination.clone(),
-            cwd: remote_cwd,
-        };
-        let mut replacement = self.new_pane(grid, launch, None, window, cx);
-        replacement.custom_name = custom_name;
-        replacement.name_history = name_history;
-        self.forget_pane_rename(pane_id);
-        let replacement_id = replacement.id;
-        let old = {
-            let Some(WorkspaceTab::Terminal { panes, tree, focused, .. }) =
-                self.tabs.get_mut(tab_ix)
-            else {
-                replacement.view.read(cx).shutdown();
-                return;
-            };
-            let Some(index) = panes.iter().position(|pane| pane.id == pane_id) else {
-                replacement.view.read(cx).shutdown();
-                return;
-            };
-            if !tree.replace_leaf(pane_id, replacement_id) {
-                replacement.view.read(cx).shutdown();
-                return;
-            }
-            if *focused == pane_id {
-                *focused = replacement_id;
-            }
-            std::mem::replace(&mut panes[index], replacement)
-        };
-
-        self.runtime_hub.record_pane_closed(self.runtime_window_id, pane_id);
-        self.pane_bounds.borrow_mut().remove(&pane_id);
-        old.view.read(cx).shutdown();
-        if tab_ix == self.active {
-            self.focus_active(window, cx);
-            self.sync_side_panel_to_active(true, cx);
-        }
         cx.notify();
     }
 

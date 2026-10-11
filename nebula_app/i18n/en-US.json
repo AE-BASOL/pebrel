@@ -972,6 +972,13 @@
   "files.search_narrow": "Choose a smaller directory or use a more specific query.",
   "files.search_empty": "No matching files",
   "files.search_empty_reason": "No files or folders match this query in the current directory.",
+  "terminal_startup.failed": "Could not start this terminal",
+  "terminal_startup.retry": "Retry this launch",
+  "terminal_startup.choose": "Open another Shell…",
+  "session.restore_launch_failed": "Reopened {tabs} tabs; {failed} terminal launches failed. Retry them or open another Shell.",
+  "session.restore_crashed_launch_failed": "The previous run did not exit normally. Reopened {tabs} tabs; {failed} terminal launches failed. Retry them or open another Shell.",
+  "session.reopened": "Reopened {tabs} tabs",
+  "session.reopened_after_crash": "The previous run did not exit normally. Reopened {tabs} tabs",
   "session": {
     "choose_conversation": "Choose a conversation…",
     "exit_incomplete_title": "Close without identifying every AI session?",

@@ -43,6 +43,8 @@ pub(crate) mod process_snapshot;
 pub(crate) mod quick_window;
 pub mod shell;
 pub mod shell_integration;
+#[cfg(all(test, feature = "gpui-test-support"))]
+pub(crate) mod shell_startup_fixture;
 #[cfg(unix)]
 mod sound;
 pub(crate) mod ssh_agent;
