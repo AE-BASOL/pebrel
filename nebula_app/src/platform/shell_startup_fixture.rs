@@ -85,7 +85,7 @@ pub(crate) fn queued_args(_directory: &Path, marker: &str) -> Vec<String> {
         // relative command needs no absolute-path quoting at the CMD /c boundary.
         let script = _directory.join("retry-queued.cmd");
         let batch = format!(
-            r#"@echo off
+            r#"@echo on
 echo {marker}:%PEBREL_512_FROZEN%:%CD%
 echo 512-PANE:%PEBREL_PANE_ID%:%NEBULA_PANE_ID%:%PEBREL_PROCESS_ID%
 set "line="
