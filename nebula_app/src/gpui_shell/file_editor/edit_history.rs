@@ -10,6 +10,7 @@ use std::{
 
 const MAX_HISTORY_BYTES: usize = 8 * 1024 * 1024;
 
+#[derive(Clone)]
 struct Change {
     start: usize,
     before: String,
@@ -52,7 +53,7 @@ fn changed_rope_span(before: &str, after: &Rope) -> (Range<usize>, Range<usize>)
     (prefix..before.len() - suffix, prefix..after.len() - suffix)
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct EditHistory {
     current: String,
     undo: Vec<Vec<Change>>,

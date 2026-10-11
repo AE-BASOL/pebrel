@@ -4,6 +4,7 @@ mod activity;
 mod block_inline;
 mod block_structure;
 mod chrome;
+mod cloning;
 mod code_actions;
 #[cfg(all(test, feature = "gpui-test-support"))]
 mod code_actions_tests;
@@ -61,6 +62,7 @@ use gpui_component::text::TextViewState;
 use super::prelude::*;
 use crate::i18n::Message;
 use crate::ssh_sftp::document::{DocumentOperation, RemoteLocation};
+pub(super) use cloning::DraftSnapshot;
 pub(super) use details::{DocumentDetails, DocumentSection};
 use document::SaveError;
 use outline::Outline;
@@ -196,6 +198,16 @@ impl TextFileView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let mut this = Self::new_empty_with_source(source, window, cx);
+        this.reload(window, cx);
+        this
+    }
+
+    fn new_empty_with_source(
+        source: DocumentSource,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let path = source.path().to_owned();
         let language = super::code_tab::language_for_path(&path.to_string_lossy());
         // Remote Markdown is edited as source. It must not resolve remote image
@@ -232,7 +244,7 @@ impl TextFileView {
             DocumentSource::Remote(location) => format!("{name} · {}", location.destination),
         };
         let preview_extensions = preview::extensions(path.parent().map(PathBuf::from));
-        let mut this = Self {
+        Self {
             preview_images: image_cache::DocumentImageCache::new(cx.entity_id(), cx),
             preview_extensions,
             preview_code_languages: Default::default(),
@@ -281,9 +293,7 @@ impl TextFileView {
             content_revision: 0,
             preview_task: None,
             _input_subscription: subscription,
-        };
-        this.reload(window, cx);
-        this
+        }
     }
 
     pub(super) fn draft(&self, cx: &App) -> SharedString {

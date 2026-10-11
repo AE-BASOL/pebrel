@@ -21,7 +21,7 @@ mod transport;
 use transport::*;
 pub mod shortcuts;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 pub(crate) use cli::request_once_bounded;
 pub use cli::run_cli;

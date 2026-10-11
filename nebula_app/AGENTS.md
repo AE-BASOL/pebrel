@@ -6,6 +6,7 @@
 - 独立本地草稿写入的 canonical target 并发合同见 [`file_editor writers`](../architecture/notes/nebula_app/gpui_shell/file_editor/2026-10-11-canonical-target-writers.md)。
 - GPUI 图片解码帧与 zoom/pan 几何一致性见 [`doc_tabs`](../architecture/notes/nebula_app/gpui_shell/doc_tabs/)。
 - 文件异步结果的当前窗口归属与 retirement 合同见 [`file_editor host`](../architecture/notes/nebula_app/gpui_shell/file_editor/2026-10-11-transferable-document-operations.md)。
+- live draft 独立复制与 Undo 合同见 [`draft snapshot`](../architecture/notes/nebula_app/gpui_shell/file_editor/2026-10-11-independent-draft-snapshots.md)。
 - 操作形成“触发 → 执行 → 可感知结果”的闭环。成功只能在操作真实完成或底层接口明确接受后显示，不能把回调触发当成平台级成功。
 - 异步工作必须有所有者、取消/过期策略和视图销毁清理；旧结果不得覆盖新状态。渲染回调不得同步等待磁盘、网络、子进程或长锁。
 - 新 UI 文案使用现有 typed message ID、命名占位符和回退合同，遵循 [`../docs/internationalization.md`](../docs/internationalization.md)。

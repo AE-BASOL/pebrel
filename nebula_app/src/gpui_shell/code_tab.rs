@@ -17,6 +17,8 @@ use gpui::{
 use crate::display::side_panel::GitLocation;
 use crate::gpui_shell::prelude::*;
 
+mod ordinary;
+
 /// 一次性读入的上限。行级虚拟化解决的是渲染成本，解析/塑形仍随内容量
 /// 增长；8MB 已覆盖常见源码文件，超限的普通文件截断，冲突文件则拒绝写回。
 const MAX_CODE_BYTES: usize = 8 * 1024 * 1024;
@@ -146,30 +148,6 @@ pub struct CodeTabView {
 }
 
 impl CodeTabView {
-    pub fn new(path: PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let title = path
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| path.display().to_string());
-        let language = language_for_path(&path.to_string_lossy());
-        let input = code_input(language, window, cx);
-        let file = cx.new(|cx| super::file_editor::TextFileView::new(path.clone(), window, cx));
-        let subscription = cx.subscribe(&file, |_, _, _, cx| {
-            cx.emit(CodeTabViewEvent::Changed);
-            cx.notify();
-        });
-        Self {
-            path,
-            title,
-            input,
-            notice: None,
-            lines: 0,
-            merge: None,
-            file: Some(file),
-            _file_subscription: Some(subscription),
-        }
-    }
-
     pub(super) fn file_editor(&self) -> Option<Entity<super::file_editor::TextFileView>> {
         self.file.clone()
     }
