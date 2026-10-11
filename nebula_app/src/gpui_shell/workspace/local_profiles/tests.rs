@@ -172,7 +172,7 @@ fn detected_preset_editor_real_controls_prefill_save_and_keep_presets_immutable(
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("profiles.json");
     let program = directory.path().join("wsl.exe");
-    std::fs::hard_link(std::env::current_exe().unwrap(), &program).unwrap();
+    std::fs::copy(std::env::current_exe().unwrap(), &program).unwrap();
     let presets = vec![crate::shell_detect::DetectedShell {
         name: "Synthetic WSL".into(),
         id: "wsl:Team Linux".into(),

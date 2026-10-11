@@ -35,10 +35,10 @@ fn detected_presets_copy_raw_windows_arguments_into_distinct_saved_profile_model
 fn detected_preset_custom_arguments_roundtrip_with_existing_cas_and_default_selection() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("profiles.json");
-    // A real executable hard link satisfies the native store's executable check.
+    // An executable copy also works when the test binary and temp directory use different volumes.
     // This fixture never launches it or discovers a user's Windows installation.
     let program = directory.path().join("wsl.exe");
-    std::fs::hard_link(std::env::current_exe().unwrap(), &program).unwrap();
+    std::fs::copy(std::env::current_exe().unwrap(), &program).unwrap();
     let detected = DetectedShell {
         name: "Synthetic WSL".into(),
         id: "wsl:Synthetic Linux".into(),
