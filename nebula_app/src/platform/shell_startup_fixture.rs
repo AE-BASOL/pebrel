@@ -92,10 +92,13 @@ echo 512-PANE:%PEBREL_PANE_ID%:%NEBULA_PANE_ID%:%PEBREL_PROCESS_ID%
 set "line="
 set /p "line=%CD%>"
 echo 512-INPUT:!line!
+>"%PEBREL_LOCAL_STARTUP_QA_DIR%\retry-queued.trace" echo input:[!line!]
 if "!line!"=="echo synthetic-queued-request" (
+  >>"%PEBREL_LOCAL_STARTUP_QA_DIR%\retry-queued.trace" echo matched
   echo synthetic-queued-request
   echo 512-QUEUED-EXECUTED
 )
+>>"%PEBREL_LOCAL_STARTUP_QA_DIR%\retry-queued.trace" echo after
 echo 512-BATCH-WAIT-STOP
 set /p stop=
 "#

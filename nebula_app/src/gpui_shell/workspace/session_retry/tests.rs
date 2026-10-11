@@ -172,7 +172,8 @@ fn wait(
                 let output = text(view, cx).chars().take(1200).collect::<String>();
                 format!("{state} output={output:?}")
             });
-            panic!("synthetic PTY phase={phase} timed out: {diagnostic:?}");
+            let trace = std::fs::read_to_string(owned().join("retry-queued.trace"));
+            panic!("synthetic PTY phase={phase} timed out: {diagnostic:?}, trace={trace:?}");
         }
         std::thread::sleep(Duration::from_millis(10));
     }
