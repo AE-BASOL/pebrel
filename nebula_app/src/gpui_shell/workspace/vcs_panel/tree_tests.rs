@@ -406,11 +406,20 @@ impl GitFixture {
     }
 }
 
+#[track_caller]
 fn settle_panel(owner: &Entity<NebulaWorkspace>, root: &Path, cx: &mut VisualTestContext) {
+    let mut observed = None;
     for _ in 0..1000 {
         let ready = cx.update(|_, cx| {
             owner.update(cx, |workspace, _| {
                 workspace.side_panel.sync_at(Some(root.to_path_buf()), None);
+                observed = Some((
+                    workspace.side_panel.op_running(),
+                    workspace.side_panel.snapshot_pending(),
+                    workspace.side_panel.git().is_some(),
+                    workspace.side_panel.root().map(Path::to_path_buf),
+                    workspace.side_panel.op_error(),
+                ));
                 !workspace.side_panel.op_running()
                     && !workspace.side_panel.snapshot_pending()
                     && workspace.side_panel.git().is_some()
@@ -421,7 +430,11 @@ fn settle_panel(owner: &Entity<NebulaWorkspace>, root: &Path, cx: &mut VisualTes
         }
         std::thread::sleep(Duration::from_millis(2));
     }
-    panic!("synthetic Git panel operation did not settle");
+    panic!(
+        "synthetic Git panel operation did not settle: op/snapshot/git/root/error={observed:?}, owned_root={:?}, git_metadata={:?}",
+        root.canonicalize(),
+        root.join(".git").metadata()
+    );
 }
 
 #[gpui::test]

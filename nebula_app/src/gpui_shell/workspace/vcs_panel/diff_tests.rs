@@ -101,33 +101,40 @@ impl Render for DiffProbe {
     }
 }
 
+fn initialize(cx: &mut TestAppContext, configure: impl FnOnce(&mut gpui::App)) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::gpui_shell::math_view::register(cx);
+        crate::gpui_shell::file_editor::init(cx);
+        crate::gpui_shell::init(cx, None);
+        configure(cx);
+        windowing::initialize(cx, crate::runtime_api::RuntimeHub::new());
+    });
+}
+
+fn new_workspace(window: &mut Window, cx: &mut Context<NebulaWorkspace>) -> NebulaWorkspace {
+    NebulaWorkspace::new(
+        window,
+        None,
+        None,
+        1,
+        crate::runtime_api::RuntimeHub::new(),
+        windowing::WorkspaceStartup::Empty,
+        windowing::WindowRole::Regular,
+        cx,
+    )
+}
+
 fn window<'a>(
     cx: &'a mut TestAppContext,
     root: &Path,
     data: GitInfo,
 ) -> (Entity<NebulaWorkspace>, &'a mut VisualTestContext) {
     assert_isolation();
-    cx.update(|cx| {
-        gpui_component::init(cx);
-        crate::gpui_shell::math_view::register(cx);
-        crate::gpui_shell::file_editor::init(cx);
-        crate::gpui_shell::init(cx, None);
-        windowing::initialize(cx, crate::runtime_api::RuntimeHub::new());
-    });
+    initialize(cx, |_| {});
     let mut owner = None;
     let (_, cx) = cx.add_window_view(|window, cx| {
-        let workspace = cx.new(|cx| {
-            NebulaWorkspace::new(
-                window,
-                None,
-                None,
-                1,
-                crate::runtime_api::RuntimeHub::new(),
-                windowing::WorkspaceStartup::Empty,
-                windowing::WindowRole::Regular,
-                cx,
-            )
-        });
+        let workspace = cx.new(|cx| new_workspace(window, cx));
         workspace.update(cx, |workspace, _| {
             workspace.side_panel.toggle(PanelView::Git);
             workspace.vcs_list.sync(Some(Arc::new(data)), GitPanelView::Changes, Some(root.into()));
@@ -426,28 +433,10 @@ fn git_patch_full_workspace_save_route_preserves_the_neighbor_draft_and_releases
     let path = root.join("safe.rs");
     std::fs::write(&path, "base\n").unwrap();
     commit(root);
-    cx.update(|cx| {
-        gpui_component::init(cx);
-        crate::gpui_shell::math_view::register(cx);
-        crate::gpui_shell::file_editor::init(cx);
-        crate::gpui_shell::init(cx, None);
-        cx.set_reduce_motion(true);
-        windowing::initialize(cx, crate::runtime_api::RuntimeHub::new());
-    });
+    initialize(cx, |cx| cx.set_reduce_motion(true));
     let mut owner = None;
     let (_, cx) = cx.add_window_view(|window, cx| {
-        let workspace = cx.new(|cx| {
-            NebulaWorkspace::new(
-                window,
-                None,
-                None,
-                1,
-                crate::runtime_api::RuntimeHub::new(),
-                windowing::WorkspaceStartup::Empty,
-                windowing::WindowRole::Regular,
-                cx,
-            )
-        });
+        let workspace = cx.new(|cx| new_workspace(window, cx));
         workspace.update(cx, |workspace, cx| {
             workspace.open_document_path(path.clone(), window, cx);
         });
