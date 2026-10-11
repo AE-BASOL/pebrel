@@ -215,6 +215,21 @@ fn press(key: &str, cx: &mut VisualTestContext) {
     cx.run_until_parked();
 }
 
+fn double_click(position: gpui::Point<gpui::Pixels>, cx: &mut VisualTestContext) {
+    cx.simulate_event(gpui::MouseDownEvent {
+        position,
+        button: gpui::MouseButton::Left,
+        click_count: 2,
+        ..Default::default()
+    });
+    cx.simulate_event(gpui::MouseUpEvent {
+        position,
+        button: gpui::MouseButton::Left,
+        click_count: 2,
+        ..Default::default()
+    });
+}
+
 fn click(selector: &'static str, cx: &mut VisualTestContext) {
     let point = cx.debug_bounds(selector).unwrap().center();
     cx.simulate_click(point, Modifiers::default());
@@ -228,18 +243,7 @@ fn tree_controls_keyboard_and_scrolled_click_keep_the_file_identity(cx: &mut Tes
     std::fs::write(root.join("aa/deep/同名.rs"), "// synthetic file\n").unwrap();
     git(root, &["init", "-q"]);
     git(root, &["add", "--", "aa/deep/同名.rs"]);
-    git(
-        root,
-        &[
-            "-c",
-            "user.name=Synthetic test",
-            "-c",
-            "user.email=fixture@example.invalid",
-            "commit",
-            "-qm",
-            "fixture",
-        ],
-    );
+    git(root, &["commit", "-qm", "fixture"]);
     std::fs::write(root.join("aa/deep/同名.rs"), "// changed file\n").unwrap();
     let data = Arc::new(GitInfo {
         unstaged: [('M', "aa/deep/同名.rs".to_owned()), ('M', "bb/同名.rs".to_owned())]
@@ -579,18 +583,7 @@ fn tree_conflict_enter_opens_readonly_patch_and_double_click_opens_matching_merg
         matches!(&workspace.tabs[workspace.active], WorkspaceTab::Code { view, .. }
             if view.read(cx).matches_git_merge(&location, relative))
     }));
-    cx.simulate_event(gpui::MouseDownEvent {
-        position: row.center(),
-        button: gpui::MouseButton::Left,
-        click_count: 2,
-        ..Default::default()
-    });
-    cx.simulate_event(gpui::MouseUpEvent {
-        position: row.center(),
-        button: gpui::MouseButton::Left,
-        click_count: 2,
-        ..Default::default()
-    });
+    double_click(row.center(), cx);
     assert!(owner.read_with(cx, |workspace, cx| workspace.tabs.iter().any(|tab| {
         matches!(tab, WorkspaceTab::Code { view, .. } if view.read(cx).matches_git_merge(&location, relative))
     })));

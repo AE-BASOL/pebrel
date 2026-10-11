@@ -33,6 +33,7 @@ fn isolated_git_diff_controls() {
         std::fs::write(directory.path().join("pebrel_settings.txt"), settings).unwrap();
         let git_configuration =
             crate::display::side_panel::diff::test_fixture::GitTestConfig::new();
+        let trace = directory.path().join("git-trace2.jsonl");
         let mut child = std::process::Command::new(std::env::current_exe().unwrap());
         git_configuration.configure(&mut child);
         let output = child
@@ -47,6 +48,13 @@ fn isolated_git_diff_controls() {
             .env("PEBREL_TEST_SSH_HOME", directory.path())
             .env("PEBREL_CONFIG_DIR", directory.path())
             .env("PEBREL_GIT_DIFF_QA_DIR", directory.path())
+            .env("GIT_TRACE2_EVENT", &trace)
+            .env("GIT_TRACE2", "0")
+            .env("GIT_TRACE2_PERF", "0")
+            .env("GIT_TRACE2_CONFIG_PARAMS", "")
+            .env("GIT_TRACE2_ENV_VARS", "")
+            .env("GIT_TRACE2_PARENT_SID", "")
+            .env("GIT_TRACE2_EVENT_BRIEF", "0")
             .output()
             .unwrap();
         let evidence = format!(
@@ -54,7 +62,9 @@ fn isolated_git_diff_controls() {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
-        writeln!(std::io::stdout(), "{test}: {evidence}").unwrap();
+        let trace = std::fs::read_to_string(trace)
+            .unwrap_or_else(|error| format!("Trace2 unavailable: {error}"));
+        writeln!(std::io::stdout(), "{test}: {evidence}\nGit Trace2: {trace}").unwrap();
         assert!(
             output.status.success()
                 && evidence.contains("running 1 test")
@@ -271,18 +281,7 @@ fn git_patch_click_enter_copy_refresh_and_double_click_keep_real_file_identity(
     let row = cx.debug_bounds("git-tree-row-changes-0-module/文件.rs").unwrap();
     cx.simulate_click(row.center(), Modifiers::default());
     // Native double-click is the first normal click followed by click_count=2.
-    cx.simulate_event(gpui::MouseDownEvent {
-        position: row.center(),
-        button: gpui::MouseButton::Left,
-        click_count: 2,
-        ..Default::default()
-    });
-    cx.simulate_event(gpui::MouseUpEvent {
-        position: row.center(),
-        button: gpui::MouseButton::Left,
-        click_count: 2,
-        ..Default::default()
-    });
+    double_click(row.center(), cx);
     assert!(owner.read_with(cx, |workspace, cx| {
         let key = DiffKey {
             location: GitLocation::Local { root: root.into() },
