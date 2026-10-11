@@ -81,8 +81,8 @@ pub(crate) fn queued_args(_directory: &Path, marker: &str) -> Vec<String> {
     ];
     #[cfg(windows)]
     {
-        // Keep each input-dependent command on its own batch line. The explicit
-        // /s wrapper leaves the inner quoted owned path intact for cmd.exe.
+        // The script lives in the owned parent of repairable-cwd, so this fixed
+        // relative command needs no absolute-path quoting at the CMD /c boundary.
         let script = _directory.join("retry-queued.cmd");
         let batch = format!(
             r#"@echo off
@@ -100,14 +100,7 @@ set /p stop=
 "#
         );
         std::fs::write(&script, batch.replace('\n', "\r\n")).unwrap();
-        vec![
-            "/d".into(),
-            "/q".into(),
-            "/v:on".into(),
-            "/s".into(),
-            "/c".into(),
-            format!("\"\"{}\"\"", script.display()),
-        ]
+        vec!["/d".into(), "/q".into(), "/v:on".into(), "/c".into(), r"..\retry-queued.cmd".into()]
     }
 }
 
