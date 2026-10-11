@@ -24,6 +24,9 @@ impl GitTestConfig {
             ("commit.gpgSign", "false".into()),
             ("tag.gpgSign", "false".into()),
             ("core.fsmonitor", "false".into()),
+            ("user.useConfigOnly", "true".into()),
+            ("user.name", "Synthetic Git test".into()),
+            ("user.email", "fixture@example.invalid".into()),
         ];
         let mut env = HashMap::from([
             ("GIT_CONFIG_NOSYSTEM".into(), "1".into()),
@@ -43,6 +46,10 @@ impl GitTestConfig {
 
     pub(crate) fn configure(&self, command: &mut Command) {
         for name in [
+            "GIT_AUTHOR_NAME",
+            "GIT_AUTHOR_EMAIL",
+            "GIT_COMMITTER_NAME",
+            "GIT_COMMITTER_EMAIL",
             "GIT_DIR",
             "GIT_COMMON_DIR",
             "GIT_WORK_TREE",

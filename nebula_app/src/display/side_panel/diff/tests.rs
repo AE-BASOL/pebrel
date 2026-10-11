@@ -18,18 +18,7 @@ pub(crate) fn repository() -> tempfile::TempDir {
 
 pub(crate) fn commit(root: &Path) {
     git(root, &["add", "--all"]);
-    git(
-        root,
-        &[
-            "-c",
-            "user.name=Synthetic Git test",
-            "-c",
-            "user.email=fixture@example.invalid",
-            "commit",
-            "-qm",
-            "fixture",
-        ],
-    );
+    git(root, &["commit", "-qm", "fixture"]);
 }
 
 fn key(root: &Path, path: &str, staged: bool) -> DiffKey {
@@ -55,7 +44,7 @@ fn git_diff_keeps_index_worktree_unicode_dash_paths_and_nested_cwd_separate() {
     std::fs::write(root.join("nested/文件.rs"), "unicode change\n").unwrap();
     let nested = load(&key(&root.join("nested"), "nested/文件.rs", false)).unwrap();
     assert!(nested.text.contains("+unicode change"));
-    assert_eq!(Path::new(&nested.root), root.canonicalize().unwrap());
+    assert_eq!(Path::new(&nested.root).canonicalize().unwrap(), root.canonicalize().unwrap());
     assert!(load(&key(root, "-name.rs", true)).unwrap().text == staged.text);
 }
 
@@ -123,9 +112,11 @@ fn git_diff_conflict_is_a_read_only_combined_patch() {
     commit(root);
     let configuration = test_fixture::GitTestConfig::new();
     let mut command = Command::new("git");
+    command.env("GIT_AUTHOR_NAME", "").env("GIT_AUTHOR_EMAIL", "");
+    command.env("GIT_COMMITTER_NAME", "").env("GIT_COMMITTER_EMAIL", "");
     configuration.configure(&mut command);
     let status = command.arg("-C").arg(root).args(["merge", "incoming"]).output().unwrap();
-    assert!(!status.status.success());
+    assert_eq!(status.status.code(), Some(1), "{status:?}");
     let before = std::fs::read(root.join("conflict.rs")).unwrap();
     let patch = load(&key(root, "conflict.rs", false)).unwrap();
     assert!(patch.text.contains("diff --cc conflict.rs"));
