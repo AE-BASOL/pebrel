@@ -22,7 +22,12 @@ fn isolated_git_diff_controls() {
         "git_patch_empty_binary_and_failure_have_visible_readonly_controls",
         "git_patch_large_content_virtualizes_and_bounds_single_line_shaping",
         "git_patch_full_workspace_save_route_preserves_the_neighbor_draft_and_releases_feedback",
+        "tree_stage_button_and_keyboard_unstage_target_the_same_named_file",
     ] {
+        let module = match test {
+            "tree_stage_button_and_keyboard_unstage_target_the_same_named_file" => "",
+            _ => "diff_tests::",
+        };
         let directory = tempfile::tempdir().unwrap();
         std::fs::create_dir(directory.path().join(".ssh")).unwrap();
         std::fs::write(directory.path().join(".ssh/config"), "Host git-diff-fixture\n").unwrap();
@@ -38,7 +43,7 @@ fn isolated_git_diff_controls() {
         git_configuration.configure(&mut child);
         let output = child
             .arg("--exact")
-            .arg(format!("gpui_shell::workspace::vcs_panel::tree_tests::diff_tests::{test}"))
+            .arg(format!("gpui_shell::workspace::vcs_panel::tree_tests::{module}{test}"))
             .args(["--ignored", "--nocapture"])
             .env_remove("PEBREL_CONFIG_FILE")
             .env_remove("NEBULA_CONFIG_FILE")
@@ -74,7 +79,7 @@ fn isolated_git_diff_controls() {
     }
 }
 
-fn assert_isolation() {
+pub(super) fn assert_isolation() {
     let directory = PathBuf::from(std::env::var_os("PEBREL_GIT_DIFF_QA_DIR").unwrap());
     assert_eq!(Some(directory.as_os_str()), std::env::var_os("PEBREL_CONFIG_DIR").as_deref());
     assert_eq!(crate::ssh::ssh_config_path(), Some(directory.join(".ssh/config")));

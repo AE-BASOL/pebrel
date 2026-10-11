@@ -442,7 +442,9 @@ fn settle_panel(owner: &Entity<NebulaWorkspace>, root: &Path, cx: &mut VisualTes
 }
 
 #[gpui::test]
+#[ignore = "launched by isolated_git_diff_controls with owned configuration and SSH home"]
 fn tree_stage_button_and_keyboard_unstage_target_the_same_named_file(cx: &mut TestAppContext) {
+    diff_tests::assert_isolation();
     let fixture = GitFixture::new();
     let root = fixture.root.as_path();
     fixture.git(&["init", "-q"]);
