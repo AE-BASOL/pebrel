@@ -1,6 +1,32 @@
 //! Synthetic, noninteractive launchers installed in an owned test directory.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+#[cfg(windows)]
+fn native_cmd() -> PathBuf {
+    PathBuf::from(std::env::var_os("SystemRoot").expect("system directory"))
+        .join("System32/cmd.exe")
+}
+
+pub(crate) fn retry_paths(directory: &Path) -> (PathBuf, PathBuf) {
+    #[cfg(windows)]
+    return (native_cmd(), directory.join("repairable-cwd"));
+    #[cfg(unix)]
+    return (directory.join("repairable-shell"), directory.to_path_buf());
+}
+
+pub(crate) fn repair_retry(program: &Path, cwd: &Path) {
+    #[cfg(windows)]
+    {
+        assert!(program.is_file());
+        std::fs::create_dir(cwd).unwrap();
+    }
+    #[cfg(unix)]
+    {
+        assert!(cwd.is_dir());
+        install(program);
+    }
+}
 
 pub(crate) fn install(program: &Path) {
     #[cfg(unix)]
@@ -13,10 +39,7 @@ pub(crate) fn install(program: &Path) {
     }
     #[cfg(windows)]
     {
-        let source =
-            std::path::PathBuf::from(std::env::var_os("SystemRoot").expect("system directory"))
-                .join("System32/cmd.exe");
-        std::fs::copy(source, program).expect("copy synthetic fixture executable");
+        std::fs::copy(native_cmd(), program).expect("copy synthetic fixture executable");
     }
 }
 

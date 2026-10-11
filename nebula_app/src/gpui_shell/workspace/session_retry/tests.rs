@@ -190,7 +190,7 @@ fn text(view: &Entity<TerminalView>, cx: &VisualTestContext) -> String {
 #[ignore = "launched by isolated_local_startup_controls with owned settings and SSH home"]
 fn local_startup_retry_keeps_snapshot_metadata_and_rejects_stale_events(cx: &mut TestAppContext) {
     let directory = tempfile::tempdir_in(owned()).unwrap();
-    let program = directory.path().join("repairable-shell");
+    let (program, cwd) = fixture::retry_paths(directory.path());
     let mut saved = launch(&program, "512-READY");
     let LaunchSession::Shell { args, .. } = &mut saved else { unreachable!() };
     *args = fixture::queued_args("512-READY");
@@ -204,7 +204,7 @@ fn local_startup_retry_keeps_snapshot_metadata_and_rejects_stale_events(cx: &mut
                     program.to_string_lossy().into_owned(),
                     fixture::queued_args("512-READY"),
                 )),
-                working_directory: Some(directory.path().to_path_buf()),
+                working_directory: Some(cwd.clone()),
                 env: [("PEBREL_512_FROZEN".into(), "original-value".into())].into_iter().collect(),
                 ..Default::default()
             };
@@ -281,7 +281,7 @@ fn local_startup_retry_keeps_snapshot_metadata_and_rejects_stale_events(cx: &mut
             .filter(|key| before.env.get(*key) != after.env.get(*key))
             .collect::<std::collections::BTreeSet<_>>()
     );
-    fixture::install(&program);
+    fixture::repair_retry(&program, &cwd);
     cx.update(|_, cx| {
         // Current defaults must not replace the failed pane's frozen command.
         cx.global_mut::<Settings>().shell_id = Some("synthetic-other-default".into());
@@ -309,7 +309,7 @@ fn local_startup_retry_keeps_snapshot_metadata_and_rejects_stale_events(cx: &mut
     repaired.read_with(&cx, |view, _| {
         assert!(!view.local_startup_failed());
         assert_eq!(view.session_launch, saved);
-        assert_eq!(view.cwd, directory.path().to_string_lossy());
+        assert_eq!(view.cwd, cwd.to_string_lossy());
     });
     assert!(cx.debug_bounds("local-startup-error").is_none());
     cx.update(|window, cx| {
