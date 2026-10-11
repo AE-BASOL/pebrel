@@ -354,8 +354,9 @@ fn encode_ssh_uri_username(username: &str) -> String {
 }
 
 /// Some system OpenSSH versions reject bracketed IPv6 URIs and non-ASCII
-/// command-line users. A literal User option supports the latter without
-/// changing Match user or %r; expansion-bearing users keep their existing args.
+/// command-line users. A literal User option preserves Match user and %r on
+/// clients accepting those bytes; newer native validation may still reject
+/// them. Expansion-bearing users keep their existing args.
 pub(crate) fn ssh_config_probe_args(value: &str) -> Vec<String> {
     let address = value.strip_prefix("ssh://").unwrap_or(value);
     let (username, host_port) = address
