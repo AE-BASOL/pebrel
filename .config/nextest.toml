@@ -25,3 +25,9 @@ threads-required = 'num-test-threads'
 [[profile.default.overrides]]
 filter = 'test(=completion::tests::completion_requests_work_without_a_view_and_keep_repository_invalidation) or test(=completion::tests::editor_cursor_requests_replace_only_the_active_token_and_keep_following_options) or test(=completion::tests::checkout_completion_combines_branches_and_paths_and_scopes_remote_demand) or test(=completion::tests::explicit_tracking_requests_keep_edits_scoped_and_do_not_execute) or test(=completion::tests::network_completion_reads_configured_remotes_and_refspecs_without_network_access)'
 threads-required = 'num-test-threads'
+
+# 为这些真实 Git/窗口夹具预留 runner 资源；原等待、产品期限和断言保持不变。
+# Foundation 的 stage/旧 conflict 独立运行；后继 ignored stage 仍由外层覆盖。
+[[profile.default.overrides]]
+filter = 'test(=gpui_shell::workspace::vcs_panel::tree_tests::diff_tests::isolated_git_diff_controls) or test(=gpui_shell::workspace::vcs_panel::tree_tests::tree_conflict_enter_opens_readonly_patch_and_double_click_opens_matching_merge_editor) or test(=gpui_shell::workspace::vcs_panel::tree_tests::tree_controls_keyboard_and_scrolled_click_keep_the_file_identity) or test(=gpui_shell::workspace::vcs_panel::tree_tests::tree_stage_button_and_keyboard_unstage_target_the_same_named_file) or test(=gpui_shell::workspace::vcs_panel::tree_tests::tree_conflict_keyboard_opens_the_matching_merge_editor)'
+threads-required = 'num-test-threads'

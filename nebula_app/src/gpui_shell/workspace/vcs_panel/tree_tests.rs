@@ -376,22 +376,33 @@ impl GitFixture {
     }
 }
 
-fn settle_panel(owner: &Entity<NebulaWorkspace>, root: &Path, cx: &mut VisualTestContext) {
+fn settle_panel(
+    owner: &Entity<NebulaWorkspace>,
+    root: &Path,
+    phase: &str,
+    cx: &mut VisualTestContext,
+) {
+    let mut last = (false, false, false);
     for _ in 0..1000 {
-        let ready = cx.update(|_, cx| {
+        last = cx.update(|_, cx| {
             owner.update(cx, |workspace, _| {
                 workspace.side_panel.sync_at(Some(root.to_path_buf()), None);
-                !workspace.side_panel.op_running()
-                    && !workspace.side_panel.snapshot_pending()
-                    && workspace.side_panel.git().is_some()
+                (
+                    workspace.side_panel.op_running(),
+                    workspace.side_panel.snapshot_pending(),
+                    workspace.side_panel.git().is_some(),
+                )
             })
         });
-        if ready {
+        if !last.0 && !last.1 && last.2 {
             return;
         }
         std::thread::sleep(Duration::from_millis(2));
     }
-    panic!("synthetic Git panel operation did not settle");
+    panic!(
+        "synthetic Git panel operation did not settle during {phase}: \
+         (op_running, snapshot_pending, has_git)={last:?}"
+    );
 }
 
 #[gpui::test]
@@ -426,14 +437,14 @@ fn tree_stage_button_and_keyboard_unstage_target_the_same_named_file(cx: &mut Te
             workspace.vcs_list.set_layout(ChangeLayout::Tree);
         })
     });
-    settle_panel(&owner, root, cx);
+    settle_panel(&owner, root, "initial snapshot", cx);
     draw(&owner, &probe, cx);
     let row = cx.debug_bounds("git-tree-row-changes-1-bb/same.rs").unwrap();
     cx.simulate_mouse_move(row.center(), None, Modifiers::default());
     draw(&owner, &probe, cx);
     let stage = cx.debug_bounds("vcs-stage-changes-1").unwrap();
     cx.simulate_click(stage.center(), Modifiers::default());
-    settle_panel(&owner, root, cx);
+    settle_panel(&owner, root, "stage click", cx);
     assert_eq!(fixture.git(&["diff", "--cached", "--name-only"]), "bb/same.rs\n");
     cx.update(|_, cx| {
         owner.update(cx, |workspace, _| {
@@ -450,7 +461,7 @@ fn tree_stage_button_and_keyboard_unstage_target_the_same_named_file(cx: &mut Te
     // The focused file row's next tab stop is its real Unstage button.
     press("tab", cx);
     press("enter", cx);
-    settle_panel(&owner, root, cx);
+    settle_panel(&owner, root, "keyboard unstage", cx);
     assert!(fixture.git(&["diff", "--cached", "--name-only"]).is_empty());
     assert_eq!(
         owner.read_with(cx, |workspace, _| workspace.tabs.len()),
@@ -513,7 +524,7 @@ fn tree_conflict_keyboard_opens_the_matching_merge_editor(cx: &mut TestAppContex
             workspace.vcs_list.set_layout(ChangeLayout::Tree);
         })
     });
-    settle_panel(&owner, root, cx);
+    settle_panel(&owner, root, "conflict initial snapshot", cx);
     draw(&owner, &probe, cx);
     let row = cx.debug_bounds("git-tree-row-conflicts-0-module/deep/文件.rs").unwrap();
     cx.simulate_click(row.center(), Modifiers::default());

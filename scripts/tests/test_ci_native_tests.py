@@ -210,6 +210,13 @@ class NativeSuiteTests(unittest.TestCase):
                           " or test(=completion::tests::explicit_tracking_requests_keep_edits_scoped_and_do_not_execute)"
                           " or test(=completion::tests::network_completion_reads_configured_remotes_and_refspecs_without_network_access)",
                 "threads-required": "num-test-threads",
+            }, {
+                "filter": "test(=gpui_shell::workspace::vcs_panel::tree_tests::diff_tests::isolated_git_diff_controls)"
+                          " or test(=gpui_shell::workspace::vcs_panel::tree_tests::tree_conflict_enter_opens_readonly_patch_and_double_click_opens_matching_merge_editor)"
+                          " or test(=gpui_shell::workspace::vcs_panel::tree_tests::tree_controls_keyboard_and_scrolled_click_keep_the_file_identity)"
+                          " or test(=gpui_shell::workspace::vcs_panel::tree_tests::tree_stage_button_and_keyboard_unstage_target_the_same_named_file)"
+                          " or test(=gpui_shell::workspace::vcs_panel::tree_tests::tree_conflict_keyboard_opens_the_matching_merge_editor)",
+                "threads-required": "num-test-threads",
             }],
         })
 
@@ -220,6 +227,58 @@ class NativeSuiteTests(unittest.TestCase):
             "completion_capsules_keep_all_chinese_choices_at_large_font_size",
         ):
             self.assertIn(f"fn {name}(", segmented)
+
+        # Foundation checkouts lack the later diff module; when it is present,
+        # validate the real outer/standalone names and its ignored stage child.
+        tree_path = root / "nebula_app/src/gpui_shell/workspace/vcs_panel/tree_tests.rs"
+        diff_path = tree_path.with_name("diff_tests.rs")
+        tree = tree_path.read_text(encoding="utf-8")
+        self.assertIn("#[gpui::test]\nfn tree_controls_keyboard_and_scrolled_click_keep_the_file_identity(", tree)
+        if "mod diff_tests;" in tree or diff_path.is_file():
+            self.assertIn("mod diff_tests;", tree)
+            diff = diff_path.read_text(encoding="utf-8")
+            self.assertIn("#[test]\nfn isolated_git_diff_controls(", diff)
+            for name in (
+                "tree_conflict_enter_opens_readonly_patch_and_double_click_opens_matching_merge_editor",
+                "tree_controls_keyboard_and_scrolled_click_keep_the_file_identity",
+            ):
+                self.assertIn(f"#[gpui::test]\nfn {name}(", tree)
+            stage = "tree_stage_button_and_keyboard_unstage_target_the_same_named_file"
+            self.assertIn(f'"{stage}"', diff)
+            self.assertIn(f'#[gpui::test]\n#[ignore = "launched by isolated_git_diff_controls with owned configuration and SSH home"]\nfn {stage}(', tree)
+        else:
+            for name in (
+                "tree_stage_button_and_keyboard_unstage_target_the_same_named_file",
+                "tree_conflict_keyboard_opens_the_matching_merge_editor",
+            ):
+                self.assertIn(f"#[gpui::test]\nfn {name}(", tree)
+
+    def test_nextest_git_panel_reservation_rejects_inexact_or_partial_scope(self):
+        root = Path(__file__).resolve().parents[2]
+        path = root / ".config/nextest.toml"
+        original_reader = Path.read_text
+        raw = path.read_text(encoding="utf-8")
+        entry = tomllib.loads(raw)["profile"]["default"]["overrides"][-1]
+        scoped = entry["filter"]
+        selectors = scoped.split(" or ")
+        self.assertEqual(len(selectors), 5)
+        variants = [(f"missing selector {index}", " or ".join(selectors[:index] + selectors[index + 1:]))
+                    for index in range(5)]
+        variants += [
+            ("inexact wrapper", scoped.replace("test(=", "test(", 1)),
+            ("stage selector duplicated instead of outer", scoped.replace(selectors[0], "test(=gpui_shell::workspace::vcs_panel::tree_tests::tree_stage_button_and_keyboard_unstage_target_the_same_named_file)")),
+            ("extra unrelated scope", scoped + " or test(=unrelated_rule_test)"),
+        ]
+        bad_configs = [(label, raw.replace(scoped, bad, 1)) for label, bad in variants]
+        exact_block = f"filter = '{scoped}'\nthreads-required = 'num-test-threads'"
+        self.assertIn(exact_block, raw)
+        bad_configs.append(("partial resource reservation", raw.replace(exact_block, exact_block.replace("'num-test-threads'", "1"), 1)))
+        for label, bad in bad_configs:
+            def read_text(current, *args, **kwargs):
+                return bad if current == path else original_reader(current, *args, **kwargs)
+            with self.subTest(case=label), patch.object(Path, "read_text", read_text):
+                with self.assertRaises(AssertionError):
+                    self.test_nextest_reserves_only_shared_settings_and_exact_bounded_git_fixtures()
 
     def test_native_caches_are_default_branch_snapshots_not_per_pr_uploads(self):
         root = Path(__file__).resolve().parents[2]
