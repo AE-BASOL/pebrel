@@ -65,7 +65,7 @@ pub(crate) fn exit_args(status: u32) -> Vec<String> {
     return vec!["/d".into(), "/q".into(), "/c".into(), format!("exit {status}")];
 }
 
-pub(crate) fn queued_args(marker: &str) -> Vec<String> {
+pub(crate) fn queued_args(_directory: &Path, marker: &str) -> Vec<String> {
     #[cfg(unix)]
     return vec![
         "-c".into(),
@@ -80,17 +80,34 @@ pub(crate) fn queued_args(marker: &str) -> Vec<String> {
         ),
     ];
     #[cfg(windows)]
-    return vec![
-        "/d".into(),
-        "/q".into(),
-        "/v:on".into(),
-        "/c".into(),
-        format!(
-            "echo {marker}:%PEBREL_512_FROZEN%:%CD%&echo 512-PANE:%PEBREL_PANE_ID%:%NEBULA_PANE_ID%:%PEBREL_PROCESS_ID%&\
-         set /p \"line=%CD%>\"&echo 512-INPUT:!line!&\
-         if \"!line!\"==\"echo synthetic-queued-request\" (echo synthetic-queued-request&echo 512-QUEUED-EXECUTED)&set /p stop="
-        ),
-    ];
+    {
+        // Keep each input-dependent command on its own batch line. The explicit
+        // /s wrapper leaves the inner quoted owned path intact for cmd.exe.
+        let script = _directory.join("retry-queued.cmd");
+        let batch = format!(
+            r#"@echo off
+echo {marker}:%PEBREL_512_FROZEN%:%CD%
+echo 512-PANE:%PEBREL_PANE_ID%:%NEBULA_PANE_ID%:%PEBREL_PROCESS_ID%
+set "line="
+set /p "line=%CD%>"
+echo 512-INPUT:!line!
+if "!line!"=="echo synthetic-queued-request" (
+  echo synthetic-queued-request
+  echo 512-QUEUED-EXECUTED
+)
+set /p stop=
+"#
+        );
+        std::fs::write(&script, batch.replace('\n', "\r\n")).unwrap();
+        vec![
+            "/d".into(),
+            "/q".into(),
+            "/v:on".into(),
+            "/s".into(),
+            "/c".into(),
+            format!("\"\"{}\"\"", script.display()),
+        ]
+    }
 }
 
 pub(crate) fn queued_command() -> &'static str {

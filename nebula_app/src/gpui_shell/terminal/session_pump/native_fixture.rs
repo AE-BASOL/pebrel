@@ -35,6 +35,15 @@ impl LocalPtyPump {
             let result = owner.update(cx, |view, cx| {
                 for _ in 0..128 {
                     let Ok(event) = rx.try_recv() else { break };
+                    if matches!(
+                        event,
+                        TermEvent::ChildExit(_) | TermEvent::PtyFailure(_) | TermEvent::Exit
+                    ) {
+                        crate::gpui_shell::try_write_stderr(format_args!(
+                            "512-native-event pane={} {event:?}\n",
+                            view.pane_id
+                        ));
+                    }
                     exited |= matches!(event, TermEvent::Exit);
                     view.process_event(event, cx);
                 }

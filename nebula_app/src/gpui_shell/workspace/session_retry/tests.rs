@@ -156,6 +156,9 @@ fn wait(
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         draw(cx);
+        if workspace.read_with(cx, |workspace, _| workspace.tabs.is_empty()) {
+            panic!("synthetic PTY phase={phase} lost all tabs; see 512-native-event");
+        }
         if ready(cx) {
             crate::gpui_shell::try_write_stderr(format_args!("512-phase {phase}=ready\n"));
             return;
@@ -191,9 +194,10 @@ fn text(view: &Entity<TerminalView>, cx: &VisualTestContext) -> String {
 fn local_startup_retry_keeps_snapshot_metadata_and_rejects_stale_events(cx: &mut TestAppContext) {
     let directory = tempfile::tempdir_in(owned()).unwrap();
     let (program, cwd) = fixture::retry_paths(directory.path());
+    let queued_args = fixture::queued_args(directory.path(), "512-READY");
     let mut saved = launch(&program, "512-READY");
     let LaunchSession::Shell { args, .. } = &mut saved else { unreachable!() };
-    *args = fixture::queued_args("512-READY");
+    *args = queued_args.clone();
     let (workspace, mut cx) = open(cx);
     cx.update(|window, cx| {
         workspace.update(cx, |workspace, cx| {
@@ -202,7 +206,7 @@ fn local_startup_retry_keeps_snapshot_metadata_and_rejects_stale_events(cx: &mut
             let options = nebula_terminal::tty::Options {
                 shell: Some(nebula_terminal::tty::Shell::new(
                     program.to_string_lossy().into_owned(),
-                    fixture::queued_args("512-READY"),
+                    queued_args,
                 )),
                 working_directory: Some(cwd.clone()),
                 env: [("PEBREL_512_FROZEN".into(), "original-value".into())].into_iter().collect(),
