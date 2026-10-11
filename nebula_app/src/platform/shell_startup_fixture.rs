@@ -95,6 +95,7 @@ if "!line!"=="echo synthetic-queued-request" (
   echo synthetic-queued-request
   echo 512-QUEUED-EXECUTED
 )
+echo 512-BATCH-WAIT-STOP
 set /p stop=
 "#
         );

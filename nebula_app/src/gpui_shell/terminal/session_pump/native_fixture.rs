@@ -40,8 +40,9 @@ impl LocalPtyPump {
                         TermEvent::ChildExit(_) | TermEvent::PtyFailure(_) | TermEvent::Exit
                     ) {
                         crate::gpui_shell::try_write_stderr(format_args!(
-                            "512-native-event pane={} {event:?}\n",
-                            view.pane_id
+                            "512-native-event pane={} {event:?} tail={:?}\n",
+                            view.pane_id,
+                            view.runtime_read(0, 80, None).map(|read| read.text)
                         ));
                     }
                     exited |= matches!(event, TermEvent::Exit);
