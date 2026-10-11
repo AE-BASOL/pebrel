@@ -8,23 +8,6 @@ impl TerminalView {
     pub(super) fn handle_completion_key(&mut self, key: &str, cx: &mut Context<Self>) -> bool {
         use crate::display::CompletionStyle;
         let hybrid = self.completion_style == CompletionStyle::Hybrid;
-        if key == "tab" && hybrid && self.ghost_enabled && self.suggest.screen_line.is_empty() {
-            let snapshot = self.session.as_ref().and_then(|session| {
-                let term = session.term.lock();
-                let cursor = term.grid().cursor.point;
-                let line = self.suggest.completion_prefix_from_raw_grid(&term, cursor)?;
-                let point = nebula_terminal::term::point_to_viewport_from(
-                    term.viewport_origin_for(self.rows),
-                    cursor,
-                )?;
-                Some((line.input, (point.line, point.column.0)))
-            });
-            if let Some((line, anchor)) = snapshot {
-                self.suggest.request_completion_popup();
-                self.refresh_suggestion_from_snapshot(Some(line), Some(anchor), cx);
-                return true;
-            }
-        }
         if key == "escape"
             && (hybrid && self.suggest.completion_popup_requested
                 || self.completion_editor.is_querying())
@@ -66,6 +49,29 @@ impl TerminalView {
                 },
                 "enter" | "right" => return self.accept_completion_popup(cx),
                 _ => {},
+            }
+        }
+        // 原生编辑器未就绪时才由键击镜像兜底；就绪后一律走其权威查询。
+        if key == "tab"
+            && hybrid
+            && self.ghost_enabled
+            && self.suggest.screen_line.is_empty()
+            && !self.completion_editor.ready()
+        {
+            let snapshot = self.session.as_ref().and_then(|session| {
+                let term = session.term.lock();
+                let cursor = term.grid().cursor.point;
+                let line = self.suggest.completion_prefix_from_raw_grid(&term, cursor)?;
+                let point = nebula_terminal::term::point_to_viewport_from(
+                    term.viewport_origin_for(self.rows),
+                    cursor,
+                )?;
+                Some((line.input, (point.line, point.column.0)))
+            });
+            if let Some((line, anchor)) = snapshot {
+                self.suggest.request_completion_popup();
+                self.refresh_suggestion_from_snapshot(Some(line), Some(anchor), cx);
+                return true;
             }
         }
         if key == "tab"

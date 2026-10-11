@@ -587,6 +587,45 @@ fn hybrid_tab_opens_history_behind_native_prediction_without_writing(cx: &mut Te
 }
 
 #[gpui::test]
+fn hybrid_tab_with_a_native_editor_queries_it_instead_of_the_mirror(cx: &mut TestAppContext) {
+    let (view, window, receiver) = open(cx);
+    view.update(window, |view, cx| {
+        view.ghost_enabled = true;
+        view.completion_style = crate::display::CompletionStyle::Hybrid;
+        view.completion_editor.advertise("fixture");
+        feed(view, "\x1b]133;A\x07❯ ".as_bytes());
+        refresh_completion_from_grid(view, cx);
+        crate::display::nebula_input_text(&mut view.suggest, "cls");
+        feed(view, b"cls\x1b[90m;notepad\x1b[0m\x1b[8D");
+        refresh_completion_from_grid(view, cx);
+        {
+            let term = view.session.as_ref().unwrap().term.lock();
+            let cursor = term.grid().cursor.point;
+            assert!(view.suggest.completion_prefix_from_raw_grid(&term, cursor).is_some());
+        }
+    });
+    window.update(|window, cx| {
+        view.update(cx, |view, cx| view.on_terminal_tab(&TerminalTab, window, cx));
+    });
+    view.update(window, |view, _| {
+        assert!(view.completion_editor.is_querying());
+        assert!(view.suggest.screen_line.is_empty(), "the mirror does not answer first");
+        assert_eq!(
+            receiver.try_iter().filter(|message| matches!(message, Msg::Input(_))).count(),
+            1,
+            "only the native editor query reaches the PTY"
+        );
+    });
+    window.update(|window, cx| {
+        view.update(cx, |view, cx| view.on_terminal_tab(&TerminalTab, window, cx));
+    });
+    view.update(window, |view, _| {
+        assert!(view.completion_editor.is_querying());
+        assert!(receiver.try_iter().all(|message| !matches!(message, Msg::Input(_))));
+    });
+}
+
+#[gpui::test]
 fn hybrid_tab_yields_after_cursor_edit_or_history_even_when_typed_prefix_matches(
     cx: &mut TestAppContext,
 ) {
