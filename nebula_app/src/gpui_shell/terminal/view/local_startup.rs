@@ -13,6 +13,27 @@ impl TerminalView {
         self.local_startup_failed().then_some(self.failed_local_options.as_ref()).flatten()
     }
 
+    #[cfg(all(test, feature = "gpui-test-support"))]
+    pub(crate) fn local_startup_phase_for_test(&self) -> String {
+        let ready = self.session.as_ref().is_some_and(|session| {
+            crate::display::nebula_shell_ready_from_raw_grid(
+                &session.term.lock(),
+                &self.suggest.suggest_env,
+            )
+        });
+        format!(
+            "pane={} session={} failed={} queued={} submitting={} ready={} error={:?} exited={:?}",
+            self.pane_id,
+            self.session.is_some(),
+            self.local_startup_failed(),
+            self.pending_shell_command.is_some(),
+            self.pending_runtime_submit.is_some(),
+            ready,
+            self.error,
+            self.exited,
+        )
+    }
+
     pub(crate) fn new_local_retry(
         pane_id: u64,
         grid: (u16, u16),

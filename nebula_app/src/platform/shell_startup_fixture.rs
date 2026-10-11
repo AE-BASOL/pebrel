@@ -64,7 +64,7 @@ pub(crate) fn queued_args(marker: &str) -> Vec<String> {
         "/c".into(),
         format!(
             "echo {marker}:%PEBREL_512_FROZEN%:%CD%&echo 512-PANE:%PEBREL_PANE_ID%:%NEBULA_PANE_ID%:%PEBREL_PROCESS_ID%&\
-         <nul set /p prompt=\"\x1b]133;A\x07$ \x1b]133;B\x07\"&set /p line=&\
+         set /p \"line=%CD%>\"&echo 512-INPUT:!line!&\
          if \"!line!\"==\"echo synthetic-queued-request\" (echo synthetic-queued-request&echo 512-QUEUED-EXECUTED)&set /p stop="
         ),
     ];

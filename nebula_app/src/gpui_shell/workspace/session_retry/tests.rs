@@ -146,14 +146,31 @@ fn active(workspace: &Entity<NebulaWorkspace>, cx: &VisualTestContext) -> Entity
     })
 }
 
-fn wait(cx: &mut VisualTestContext, mut ready: impl FnMut(&mut VisualTestContext) -> bool) {
+fn wait(
+    workspace: &Entity<NebulaWorkspace>,
+    cx: &mut VisualTestContext,
+    phase: &str,
+    mut ready: impl FnMut(&mut VisualTestContext) -> bool,
+) {
+    crate::gpui_shell::try_write_stderr(format_args!("512-phase {phase}=begin\n"));
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         draw(cx);
         if ready(cx) {
+            crate::gpui_shell::try_write_stderr(format_args!("512-phase {phase}=ready\n"));
             return;
         }
-        assert!(Instant::now() < deadline, "synthetic PTY did not produce the expected outcome");
+        if Instant::now() >= deadline {
+            let view = workspace.read_with(cx, |workspace, _| {
+                workspace.tabs.get(workspace.active).and_then(WorkspaceTab::focused_view).cloned()
+            });
+            let diagnostic = view.as_ref().map(|view| {
+                let state = view.read_with(cx, |view, _| view.local_startup_phase_for_test());
+                let output = text(view, cx).chars().take(1200).collect::<String>();
+                format!("{state} output={output:?}")
+            });
+            panic!("synthetic PTY phase={phase} timed out: {diagnostic:?}");
+        }
         std::thread::sleep(Duration::from_millis(10));
     }
 }
@@ -274,8 +291,12 @@ fn local_startup_retry_keeps_snapshot_metadata_and_rejects_stale_events(cx: &mut
         point(button.origin.x + px(2.0), button.bottom() - px(2.0)),
         Modifiers::default(),
     );
-    wait(&mut cx, |cx| text(&active(&workspace, cx), cx).contains("512-READY:original-value:"));
-    wait(&mut cx, |cx| text(&active(&workspace, cx), cx).contains("512-QUEUED-EXECUTED"));
+    wait(&workspace, &mut cx, "retry-ready", |cx| {
+        text(&active(&workspace, cx), cx).contains("512-READY:original-value:")
+    });
+    wait(&workspace, &mut cx, "queued-executed", |cx| {
+        text(&active(&workspace, cx), cx).contains("512-QUEUED-EXECUTED")
+    });
     let repaired = active(&workspace, &cx);
     let repaired_id = repaired.read_with(&cx, |view, _| view.pane_id);
     let actual = text(&repaired, &cx);
@@ -370,7 +391,9 @@ fn local_startup_picker_opens_another_shell_and_preserves_failed_diagnostics(
     draw(&mut cx);
     assert!(cx.debug_bounds("command-palette-row-0").is_some());
     cx.simulate_keystrokes("enter");
-    wait(&mut cx, |cx| text(&active(&workspace, cx), cx).contains("512-ALTERNATE:"));
+    wait(&workspace, &mut cx, "alternate-ready", |cx| {
+        text(&active(&workspace, cx), cx).contains("512-ALTERNATE:")
+    });
     workspace.read_with(&cx, |workspace, cx| {
         assert_eq!(workspace.tabs.len(), 2);
         assert!(!workspace.command_palette_open);
@@ -550,7 +573,9 @@ fn local_startup_short_commands_keep_existing_exit_behavior(cx: &mut TestAppCont
                 );
             })
         });
-        wait(&mut cx, |cx| workspace.read_with(cx, |workspace, _| workspace.tabs.len() == 1));
+        wait(&workspace, &mut cx, &format!("short-exit-{status}"), |cx| {
+            workspace.read_with(cx, |workspace, _| workspace.tabs.len() == 1)
+        });
         assert_eq!(active(&workspace, &cx).entity_id(), anchor.entity_id());
     }
 }
