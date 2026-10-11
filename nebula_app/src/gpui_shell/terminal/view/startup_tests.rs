@@ -593,7 +593,8 @@ fn hybrid_tab_with_a_native_editor_queries_it_instead_of_the_mirror(cx: &mut Tes
         view.ghost_enabled = true;
         view.completion_style = crate::display::CompletionStyle::Hybrid;
         view.completion_editor.advertise("fixture");
-        feed(view, "\x1b]133;A\x07❯ ".as_bytes());
+        feed(view, "❯ ".as_bytes());
+        view.session.as_ref().unwrap().term.lock().nebula_add_prompt_mark();
         refresh_completion_from_grid(view, cx);
         crate::display::nebula_input_text(&mut view.suggest, "cls");
         feed(view, b"cls\x1b[90m;notepad\x1b[0m\x1b[8D");
