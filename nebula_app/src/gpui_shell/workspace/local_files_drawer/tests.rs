@@ -138,7 +138,7 @@ fn owners_keep_independent_controls_and_cancel_stale_work(cx: &mut TestAppContex
         }
     }
     let roots = roots.map(|root| root.canonicalize().unwrap());
-    let browsed = browsed.map(|root| root.canonicalize().unwrap());
+    let browsed = browsed.map(|root| PathBuf::from(display_path(&root.canonicalize().unwrap())));
     cx.update(|cx| {
         gpui_component::init(cx);
         cx.set_global(crate::gpui_shell::config::Settings::load(nebula_settings::ThemeName::Nord));
