@@ -31,14 +31,18 @@ fn isolated_ended_ssh_workspace_lifecycle() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+    crate::gpui_shell::try_write_stderr(format_args!("{evidence}"));
     assert!(output.status.success() && evidence.contains("1 passed;"), "{evidence}");
 }
 
-fn draw(window: &mut VisualTestContext) {
-    window.update(|window, cx| {
-        let _ = window.draw(cx);
-    });
+fn draw(window: &mut VisualTestContext) -> (usize, usize) {
     window.run_until_parked();
+    window.update(|window, cx| {
+        let delivered = crate::gpui_shell::terminal::SshSessionPump::drain(cx);
+        window.refresh();
+        window.draw(cx).clear(cx);
+        delivered
+    })
 }
 
 #[gpui::test]
@@ -54,7 +58,11 @@ fn ended_ssh_keeps_last_tab_and_reconnect_replaces_only_its_pane(cx: &mut TestAp
     assert!(!path.exists());
     std::fs::write(&path, "language=en-US\nai_hooks=0\nauto_check_updates=0\nkeep_ssh_session=1\n")
         .unwrap();
+    let settings = nebula_settings::RawSettings::load();
+    assert_eq!(settings.bool_on("ai_hooks"), Some(false));
+    assert_eq!(settings.bool_on("auto_check_updates"), Some(false));
     cx.update(|cx| {
+        cx.set_global(crate::gpui_shell::terminal::SshSessionPump::default());
         gpui_component::init(cx);
         crate::gpui_shell::init(cx, None);
         windowing::initialize(cx, crate::runtime_api::RuntimeHub::new());
@@ -217,6 +225,28 @@ fn ended_ssh_keeps_last_tab_and_reconnect_replaces_only_its_pane(cx: &mut TestAp
         assert_eq!(panes[0].name_history, vec![Some("old-name".into())]);
         assert_eq!(panes[0].view.read(cx).ssh_destination.as_deref(), Some(destination));
     });
+    let replacement = workspace
+        .read_with(window, |workspace, _| workspace.tabs[0].focused_view().unwrap().clone());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let (mut delivered_events, mut delivered_stages) = (0, 0);
+    loop {
+        let (events, stages) = draw(window);
+        delivered_events += events;
+        delivered_stages += stages;
+        let failed = replacement.read_with(window, |view, _| {
+            view.lifecycle_test_ssh_failed()
+                && view.lifecycle_test_grid_contains("SSH connection stopped:")
+        });
+        if failed && delivered_events > 0 && delivered_stages > 0 {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "real reconnect failure was not delivered");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(
+        replacement.read_with(window, |view, _| view.runtime_read(1, 24, None).unwrap_err().code),
+        "ssh_not_ready"
+    );
     // The replaced entity has no live subscription/leaf and cannot close its successor.
     old_view.update(window, |view, cx| view.lifecycle_test_event(TermEvent::Exit, cx));
     assert_eq!(workspace.read_with(window, |workspace, _| workspace.tabs.len()), 1);

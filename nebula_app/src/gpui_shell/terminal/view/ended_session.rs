@@ -68,6 +68,23 @@ impl TerminalView {
 
 #[cfg(all(test, feature = "gpui-test-support"))]
 impl TerminalView {
+    pub(crate) fn lifecycle_test_ssh_failed(&self) -> bool {
+        matches!(self.ssh_stage, Some(crate::ssh_session::SshStage::Failed(_)))
+    }
+
+    pub(crate) fn lifecycle_test_grid_contains(&self, text: &str) -> bool {
+        self.session.as_ref().is_some_and(|session| {
+            session
+                .term
+                .lock()
+                .grid()
+                .display_iter()
+                .map(|cell| cell.cell.c)
+                .collect::<String>()
+                .contains(text)
+        })
+    }
+
     pub(crate) fn lifecycle_test_ssh_ready(&mut self, cx: &mut Context<Self>) {
         self.apply_ssh_stage(crate::ssh_session::SshStage::Ready, cx);
         super::startup_tests::feed(self, b"retained remote output\r\n");
