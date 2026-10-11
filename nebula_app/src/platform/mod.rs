@@ -145,3 +145,6 @@ impl Platform {
         }
     }
 }
+
+#[cfg(test)]
+pub(crate) mod profile_test_isolation;
