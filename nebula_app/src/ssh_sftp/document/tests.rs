@@ -21,6 +21,11 @@ async fn open(session: Arc<SftpSession>) -> RemoteDocument {
     .unwrap()
 }
 
+pub(super) async fn fixture_snapshot(data: &[u8]) -> RemoteDocument {
+    let (_, session) = peer::connect(data).await;
+    open(session).await
+}
+
 #[test]
 fn remote_save_preserves_bom_crlf_permissions_and_ownership() {
     run(async {

@@ -220,7 +220,11 @@ fn block_frame(index: usize, heading: Option<u8>) -> gpui::Stateful<gpui::Div> {
 }
 
 impl TextFileView {
-    fn start_preview_selection_scroll(&mut self, window: &Window, cx: &mut Context<Self>) {
+    pub(super) fn start_preview_selection_scroll(
+        &mut self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.preview_selection_scroll_active {
             return;
         }
@@ -228,7 +232,7 @@ impl TextFileView {
         self.preview_selection_scroll_epoch = self.preview_selection_scroll_epoch.wrapping_add(1);
         let epoch = self.preview_selection_scroll_epoch;
         let executor = cx.background_executor().clone();
-        cx.spawn_in(window, async move |this, cx| {
+        self.host.selection_scroll = Some(cx.spawn_in(window, async move |this, cx| {
             let mut refresh_selection = false;
             loop {
                 executor.timer(SELECTION_SCROLL_INTERVAL).await;
@@ -254,11 +258,11 @@ impl TextFileView {
                 }
                 refresh_selection = scrolled;
             }
-        })
-        .detach();
+        }));
     }
 
     pub(super) fn stop_preview_selection_scroll(&mut self) {
+        self.host.selection_scroll = None;
         if !self.preview_selection_scroll_active {
             return;
         }

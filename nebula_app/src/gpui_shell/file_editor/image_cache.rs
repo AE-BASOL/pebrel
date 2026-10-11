@@ -86,6 +86,11 @@ impl DocumentImageCache {
         }
     }
 
+    pub(super) fn retire(&mut self, cx: &mut App) {
+        self.active = false;
+        self.clear(None, cx);
+    }
+
     pub(super) fn finish_frame(&mut self, window: &mut Window, cx: &mut App) {
         self.ready.trim_with_eviction(
             WORKING_BYTES,

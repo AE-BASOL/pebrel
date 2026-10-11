@@ -12,6 +12,7 @@ mod document;
 mod edit_history;
 #[cfg(all(test, feature = "gpui-test-support"))]
 mod focus_tests;
+mod host;
 mod image_cache;
 mod images;
 mod info;
@@ -108,6 +109,7 @@ pub struct TextFileView {
     source: DocumentSource,
     document: Option<LoadedDocument>,
     operation: Option<DocumentOperation>,
+    host: host::Host,
     dirty: bool,
     loading: bool,
     saving: bool,
@@ -242,6 +244,7 @@ impl TextFileView {
             source,
             document: None,
             operation: None,
+            host: host::Host::new(window),
             dirty: false,
             loading: false,
             saving: false,
@@ -391,97 +394,6 @@ impl TextFileView {
         self.load(window, cx);
     }
 
-    fn load(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.loading = true;
-        self.content_revision = self.content_revision.wrapping_add(1);
-        self.revision += 1;
-        self.preview_task = None;
-        let path = self.path.clone();
-        let source = self.source.clone();
-        let operation = DocumentOperation::default();
-        if let Some(previous) = self.operation.replace(operation.clone()) {
-            previous.cancel();
-        }
-        let markdown = self.markdown;
-        let resources = super::scientific_render::assets(cx);
-        let task = cx.background_executor().spawn(async move {
-            let _permit = resources.document_permit().await;
-            source.load(operation).await.map(|doc| {
-                let outline = markdown.then(|| Outline::prepare(&doc.text, path.parent()));
-                (doc, outline)
-            })
-        });
-        let handle = window.window_handle();
-        cx.spawn(async move |this, cx| {
-            let loaded = task.await;
-            let _ = handle.update(cx, |_, window, cx| {
-                let _ = this.update(cx, |view, cx| {
-                    view.loading = false;
-                    view.operation = None;
-                    match loaded {
-                        Ok((document, outline)) => {
-                            view.live_edit = None;
-                            view.last_edit_cursor = None;
-                            view.resume_edit = false;
-                            view.history.reset(&document.text);
-                            view.input.update(cx, |input, cx| {
-                                input.set_value(document.text.clone(), window, cx)
-                            });
-                            view.document = Some(document);
-                            view.dirty = false;
-                            view.notice = None;
-                            if let Some(outline) = outline {
-                                view.apply_outline(outline, cx);
-                            }
-                            if view.preview && view.focus.is_focused(window) {
-                                view.begin_live_edit(0, window, cx);
-                            }
-                        },
-                        Err(error) => {
-                            view.notice = Some(if error.kind() == std::io::ErrorKind::Interrupted {
-                                (Message::TransferCancelled, None)
-                            } else {
-                                (Message::EditorReadFailed, Some(error.to_string()))
-                            })
-                        },
-                    }
-                    cx.emit(TextFileEvent::Changed);
-                    cx.notify();
-                });
-            });
-        })
-        .detach();
-        cx.notify();
-    }
-
-    fn request_reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.saving || self.loading {
-            return;
-        }
-        if !self.dirty {
-            self.load(window, cx);
-            return;
-        }
-        let language = super::config::ui_language(cx);
-        let answer = window.prompt(
-            PromptLevel::Warning,
-            language.text(Message::EditorDiscardTitle),
-            Some(&self.source.display()),
-            &[language.text(Message::EditorCancel), language.text(Message::EditorDiscard)],
-            cx,
-        );
-        let handle = window.window_handle();
-        cx.spawn(async move |this, cx| {
-            if answer.await != Ok(1) {
-                return;
-            }
-            let _ = handle.update(cx, |_, window, cx| {
-                let _ = this.update(cx, |view, cx| view.load(window, cx));
-            });
-        })
-        .detach();
-    }
-
     /// A successful save only cleans the exact snapshot written. Edits made while
     /// I/O is running remain dirty; a second write cannot race the first one.
     pub fn save(&mut self, cx: &mut Context<Self>) -> Task<bool> {
@@ -501,10 +413,14 @@ impl TextFileView {
         let task = cx
             .background_executor()
             .spawn(async move { document.save(source, text, operation).await });
+        let generation = self.host.generation;
         cx.notify();
         cx.spawn(async move |this, cx| {
             let result = task.await;
             this.update(cx, |view, cx| {
+                if view.host.generation != generation || !view.host.is_attached() {
+                    return false;
+                }
                 view.saving = false;
                 view.operation = None;
                 let success = match result {

@@ -220,3 +220,8 @@ pub(super) async fn read_bounded(
 #[cfg(test)]
 #[path = "document/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+pub(crate) async fn fixture_snapshot(data: &[u8]) -> RemoteDocument {
+    tests::fixture_snapshot(data).await
+}
