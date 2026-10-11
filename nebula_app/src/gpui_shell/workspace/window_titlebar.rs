@@ -96,11 +96,11 @@ fn title_bar_frame() -> gpui::Div {
     })
 }
 
-/// 标题栏右侧工具组。macOS 的窗口右缘没有系统控件占位，按钮会贴边，需要留出间距。
+/// 标题栏右侧工具组；右缘留白由平台层决定（见 `RIGHT_CONTROLS_INSET`）。
 pub(super) fn title_bar_right_controls() -> gpui::Div {
     title_bar_panel_controls()
         .gap(px(8.0))
-        .when(cfg!(target_os = "macos"), |controls| controls.pr(px(12.0)))
+        .pr(px(crate::platform::window_chrome::RIGHT_CONTROLS_INSET))
 }
 
 impl NebulaWorkspace {
