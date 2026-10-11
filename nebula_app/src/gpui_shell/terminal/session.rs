@@ -110,6 +110,40 @@ pub(super) fn test_session_with_events() -> (
     )
 }
 
+#[cfg(all(test, feature = "gpui-test-support"))]
+thread_local! {
+    static SYNTHETIC_SSH: std::cell::RefCell<Option<Vec<std::sync::mpsc::Receiver<nebula_terminal::event_loop::Msg>>>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(all(test, feature = "gpui-test-support"))]
+pub(crate) struct SyntheticSshSessions;
+
+#[cfg(all(test, feature = "gpui-test-support"))]
+impl SyntheticSshSessions {
+    pub(crate) fn new() -> Self {
+        SYNTHETIC_SSH.with(|sessions| {
+            assert!(sessions.borrow().is_none(), "synthetic SSH fixture cannot nest");
+            *sessions.borrow_mut() = Some(Vec::new());
+        });
+        Self
+    }
+
+    pub(crate) fn assert_spawned(&self, expected: usize) {
+        SYNTHETIC_SSH.with(|sessions| {
+            assert_eq!(sessions.borrow().as_ref().unwrap().len(), expected);
+        });
+    }
+}
+
+#[cfg(all(test, feature = "gpui-test-support"))]
+impl Drop for SyntheticSshSessions {
+    fn drop(&mut self) {
+        SYNTHETIC_SSH.with(|sessions| {
+            sessions.borrow_mut().take();
+        });
+    }
+}
+
 /// 一次会话 spawn 的完整出口：会话句柄 + 终端事件流 + SSH 阶段流
 /// （本地会话的阶段流永远安静，接收端可以直接丢弃）。
 pub type SpawnedSession = (
@@ -204,6 +238,17 @@ pub fn spawn_ssh(
     window_size: WindowSize,
     term_config: Config,
 ) -> std::io::Result<SpawnedSession> {
+    #[cfg(all(test, feature = "gpui-test-support"))]
+    if let Some(session) = SYNTHETIC_SSH.with(|sessions| {
+        let mut sessions = sessions.borrow_mut();
+        let sessions = sessions.as_mut()?;
+        let (session, writes, events, _) = test_session_with_events();
+        sessions.push(writes);
+        let (_, stages) = unbounded();
+        Some((session, events, stages))
+    }) {
+        return Ok(session);
+    }
     let term_config = crate::ssh_session::terminal_config(term_config);
     let (tx, rx) = super::event_mailbox::channel();
     let (stage_tx, stage_rx) = unbounded();

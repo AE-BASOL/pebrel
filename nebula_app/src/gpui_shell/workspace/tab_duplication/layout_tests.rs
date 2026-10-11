@@ -7,6 +7,10 @@ use std::sync::Arc;
 
 #[gpui::test]
 fn duplicate_bare_wsl_keeps_the_panes_frozen_distribution(cx: &mut TestAppContext) {
+    let name = "duplicate_bare_wsl_keeps_the_panes_frozen_distribution";
+    if crate::runtime_api::tests::file_pane_fixture::isolated_child(module_path!(), name) {
+        return;
+    }
     cx.update(|cx| {
         gpui_component::init(cx);
         crate::gpui_shell::math_view::register(cx);
@@ -67,10 +71,16 @@ fn duplicate_bare_wsl_keeps_the_panes_frozen_distribution(cx: &mut TestAppContex
         Root::new(workspace, window, cx)
     });
     window.update(|window, cx| window.draw(cx).clear(cx));
+    crate::runtime_api::tests::file_pane_fixture::completed(name);
 }
 
 #[gpui::test]
 fn duplicate_rebuilds_nested_mixed_layout_with_fresh_sessions(cx: &mut TestAppContext) {
+    let name = "duplicate_rebuilds_nested_mixed_layout_with_fresh_sessions";
+    if crate::runtime_api::tests::file_pane_fixture::isolated_child(module_path!(), name) {
+        return;
+    }
+    let _ssh = crate::gpui_shell::terminal::session::SyntheticSshSessions::new();
     cx.update(|cx| {
         gpui_component::init(cx);
         crate::gpui_shell::math_view::register(cx);
@@ -217,4 +227,6 @@ fn duplicate_rebuilds_nested_mixed_layout_with_fresh_sessions(cx: &mut TestAppCo
         Root::new(workspace, window, cx)
     });
     window.update(|window, cx| window.draw(cx).clear(cx));
+    _ssh.assert_spawned(2);
+    crate::runtime_api::tests::file_pane_fixture::completed(name);
 }
