@@ -204,14 +204,18 @@ impl StreamProcessor {
         }
     }
 
+    /// Returns the input byte count passed to VTE, including ordered image
+    /// markers. Synchronization-buffer accounting uses this count; transport
+    /// byte counts remain unchanged.
     pub fn feed<U: EventListener>(
         &mut self,
         terminal: &mut Term<U>,
         event_proxy: &U,
         bytes: &[u8],
-    ) {
+    ) -> usize {
         let osc_events = self.cwd_sniffer.feed(bytes);
         let mut advanced = 0;
+        let mut parser_input_bytes = bytes.len();
         for (offset, event) in osc_events {
             // Titles and shell identity/cwd reports must retain wire order:
             // coalescing a remote cwd past a parent prompt would attribute that
@@ -256,6 +260,7 @@ impl StreamProcessor {
                     {
                         self.pending_images.push(image);
                         self.advance(terminal, marker.as_bytes());
+                        parser_input_bytes += marker.len();
                         self.pending_images.retain(|image| Arc::weak_count(image) != 0);
                     }
                 },
@@ -263,6 +268,7 @@ impl StreamProcessor {
         }
         self.advance(terminal, &bytes[advanced..]);
         self.pending_images.retain(|image| Arc::weak_count(image) != 0);
+        parser_input_bytes
     }
 }
 
@@ -425,6 +431,7 @@ where
     {
         let mut unprocessed = 0;
         let mut processed = 0;
+        let mut parser_input_bytes = 0;
 
         // Reserve the next terminal lock for PTY reading.
         let _terminal_lease = Some(self.terminal.lease());
@@ -485,7 +492,8 @@ where
                 writer.write_all(&buf[..unprocessed]).unwrap();
             }
 
-            state.stream.feed(&mut **terminal, &self.event_proxy, &buf[..unprocessed]);
+            parser_input_bytes +=
+                state.stream.feed(&mut **terminal, &self.event_proxy, &buf[..unprocessed]);
             trace_terminal_state("after-pty-read", &terminal);
 
             processed += unprocessed;
@@ -497,8 +505,9 @@ where
             }
         }
 
-        // Queue terminal redraw unless all processed bytes were synchronized.
-        if state.stream.sync_bytes_count() < processed && processed > 0 {
+        // Compare parser input with its buffered tail, including injected
+        // markers on both sides. Wire bytes alone can hide a committed prefix.
+        if state.stream.sync_bytes_count() < parser_input_bytes && processed > 0 {
             self.event_proxy.send_event(Event::Wakeup);
         }
 
@@ -1120,3 +1129,7 @@ mod tests {
         assert!(!terminal.nebula_prompt_active());
     }
 }
+
+#[cfg(all(test, unix))]
+#[path = "event_loop/sync_tests.rs"]
+mod sync_tests;
