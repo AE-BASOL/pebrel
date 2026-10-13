@@ -7794,7 +7794,6 @@ impl Display {
         let cursor = content.cursor();
 
         let cursor_point = terminal.grid().cursor.point;
-        let frame_images = inline_image::capture(&terminal, &mut pane_state.inline_images, &view);
         // Ghost text is suppressed on the alt screen (vim/less/etc.).
         let alt_screen = terminal.mode().contains(TermMode::ALT_SCREEN);
         let total_lines = terminal.grid().total_lines();
@@ -7867,6 +7866,12 @@ impl Display {
             &terminal_math_overlays,
             &prepared_math,
             !alt_screen,
+        );
+        let frame_images = inline_image::capture(
+            &terminal,
+            &mut pane_state.inline_images,
+            &view,
+            &pane_state.terminal_math,
         );
 
         // Add damage from the terminal, keeping a pane-local copy: the shared

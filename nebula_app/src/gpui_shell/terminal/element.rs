@@ -802,9 +802,10 @@ impl Element for TerminalElement {
         );
 
         let inline_images = self.view.update(cx, |view, _| view.inline_images.frame_images());
+        let image_runs = math_frame.project_image_runs(&snap.image_runs, layout.cols);
         super::inline_image::paint(
             &inline_images,
-            &snap.image_runs,
+            &image_runs,
             bounds,
             layout.cell_width,
             layout.line_height,
