@@ -15,8 +15,6 @@ use nebula_terminal::event_loop::{EventLoopSender, Msg, StreamProcessor};
 use nebula_terminal::sync::FairMutex;
 use nebula_terminal::term::Term;
 
-mod port;
-
 pub(crate) const SCHEME: &str = "serial:";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -104,7 +102,7 @@ where
     H: EventListener + Clone + Send + Sync + 'static,
 {
     let config: SerialConfig = destination.parse()?;
-    let mut writer = port::open(&config)?;
+    let mut writer = crate::platform::serial_port::open(&config)?;
     let mut reader = writer.try_clone()?;
     let (sender, receiver) = EventLoopSender::standalone()?;
     let stream = Arc::new(Mutex::new(StreamProcessor::default()));

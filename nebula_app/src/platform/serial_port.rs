@@ -3,10 +3,10 @@
 use std::fs::{File, OpenOptions};
 use std::io;
 
-use super::{Parity, SerialConfig};
+use crate::serial_session::{Parity, SerialConfig};
 
 #[cfg(unix)]
-pub(super) fn open(config: &SerialConfig) -> io::Result<File> {
+pub(crate) fn open(config: &SerialConfig) -> io::Result<File> {
     use std::os::fd::AsRawFd;
     use std::os::unix::fs::OpenOptionsExt;
 
@@ -75,7 +75,7 @@ fn baud_constant(baud: u32) -> io::Result<libc::speed_t> {
 }
 
 #[cfg(windows)]
-pub(super) fn open(config: &SerialConfig) -> io::Result<File> {
+pub(crate) fn open(config: &SerialConfig) -> io::Result<File> {
     use std::os::windows::fs::OpenOptionsExt;
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Devices::Communication::{
