@@ -120,6 +120,10 @@ impl russh_sftp::server::Handler for Peer {
 
 fn browser_session(destination: &str) -> (SftpBrowseSession, Arc<Mutex<Store>>) {
     let store = Arc::new(Mutex::new(Store::default()));
+    (browser_session_with_store(destination, store.clone()), store)
+}
+
+fn browser_session_with_store(destination: &str, store: Arc<Mutex<Store>>) -> SftpBrowseSession {
     let state = store.clone();
     let session = crate::ssh_session::runtime().unwrap().block_on(async move {
         let (client, server) = tokio::io::duplex(16 * 1024);
@@ -134,7 +138,7 @@ fn browser_session(destination: &str) -> (SftpBrowseSession, Arc<Mutex<Store>>) 
         .await
         .unwrap()
     });
-    (SftpBrowseSession::from_test_session(destination.into(), session), store)
+    SftpBrowseSession::from_test_session(destination.into(), session)
 }
 
 struct Fixture {
@@ -154,6 +158,16 @@ impl Drop for Fixture {
             }
         }
     }
+}
+
+fn reconnect(fixture: &mut Fixture, index: usize) {
+    // 取消会回收真实子通道；重连也必须使用隔离协议端点，不触及用户 SSH 凭据。
+    let session =
+        browser_session_with_store("fixture@same-host.invalid", fixture.stores[index].clone());
+    let pane = fixture.terminals[index].read_with(&fixture.window, |view, _| view.pane_id);
+    fixture.workspace.update(&mut fixture.window, |workspace, _| {
+        workspace.remote_browser.browse_sessions.insert(pane, session);
+    });
 }
 
 fn open(cx: &mut TestAppContext) -> Fixture {
@@ -343,6 +357,7 @@ fn manual_browsing_survives_same_cwd_polls_but_follows_a_real_shell_change(
     focus(&mut fixture, 0);
     listed(&mut fixture, "/manual");
     assert_eq!(fixture.stores[0].lock().unwrap().requested.len(), 3);
+    reconnect(&mut fixture, 0);
     report(&mut fixture, 0, Event::CwdReport("/srv/moved".into()));
     listed(&mut fixture, "/srv/moved");
 }
@@ -357,6 +372,7 @@ fn pending_listings_cannot_overwrite_newer_cwd_or_another_pane(cx: &mut TestAppC
     wait(&mut fixture, |fixture| {
         fixture.stores[0].lock().unwrap().requested.contains(&"/slow".into())
     });
+    reconnect(&mut fixture, 0);
     report(&mut fixture, 0, Event::CwdReport("/newest".into()));
     fixture.workspace.update(&mut fixture.window, |workspace, cx| {
         let generation = workspace.remote_browser.generation;
@@ -383,6 +399,7 @@ fn pending_listings_cannot_overwrite_newer_cwd_or_another_pane(cx: &mut TestAppC
     fixture.window.run_until_parked();
     listed(&mut fixture, "/srv/Beta");
     fixture.stores[0].lock().unwrap().gates.remove("/old-pane");
+    reconnect(&mut fixture, 0);
     focus(&mut fixture, 0);
     listed(&mut fixture, "/old-pane");
 }
