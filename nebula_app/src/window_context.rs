@@ -1540,6 +1540,8 @@ impl WindowContext {
             session::LaunchSession::Ssh { host } => {
                 self.spawn_tab_ssh(host.clone(), TabPlacement::AfterActive)
             },
+            // The legacy shell has no serial transport; the tab is skipped.
+            session::LaunchSession::Serial { .. } => {},
         }
         if self.tabs.len() == before {
             // Cross-platform degradation: a workspace made on another OS may

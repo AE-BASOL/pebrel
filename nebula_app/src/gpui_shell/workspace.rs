@@ -1094,6 +1094,9 @@ impl NebulaWorkspace {
             LaunchSession::Ssh { host } => {
                 TerminalLaunch::Ssh { destination: host.clone(), cwd: None }
             },
+            LaunchSession::Serial { destination } => {
+                TerminalLaunch::Serial { destination: destination.clone() }
+            },
         }
     }
 
@@ -1104,6 +1107,7 @@ impl NebulaWorkspace {
                 Some(crate::shell_detect::shell_short_tag(name).into())
             },
             crate::session::LaunchSession::Ssh { .. } => Some("ssh".into()),
+            crate::session::LaunchSession::Serial { .. } => Some("serial".into()),
             crate::session::LaunchSession::Profile { name, shell_id, .. } => Some(
                 crate::shell_detect::shell_short_tag(shell_id.as_deref().unwrap_or(name)).into(),
             ),
@@ -1277,9 +1281,16 @@ impl NebulaWorkspace {
             }
         }
         let grid = self.inherited_grid(cx);
-        let launch = crate::gpui_shell::terminal::view::TerminalLaunch::Ssh {
-            destination: destination.clone(),
-            cwd: remote_cwd,
+        let serial = destination.starts_with(crate::serial_session::SCHEME);
+        let launch = if serial {
+            crate::gpui_shell::terminal::view::TerminalLaunch::Serial {
+                destination: destination.clone(),
+            }
+        } else {
+            crate::gpui_shell::terminal::view::TerminalLaunch::Ssh {
+                destination: destination.clone(),
+                cwd: remote_cwd,
+            }
         };
         let pane = self.new_pane(grid, launch, None, window, cx);
         let focused = pane.id;
@@ -1292,12 +1303,17 @@ impl NebulaWorkspace {
         };
         let position = nebula_settings::RuntimeSettings::load().new_tab_position;
         let at = new_tab_insert_index(position, self.active, self.tabs.len());
+        let (shell_tag, launch) = if serial {
+            ("serial", crate::session::LaunchSession::Serial { destination })
+        } else {
+            ("ssh", crate::session::LaunchSession::Ssh { host: destination })
+        };
         self.insert_tab_at(
             at,
             tab,
             TabMeta {
-                shell_tag: Some("ssh".into()),
-                launch: Some(crate::session::LaunchSession::Ssh { host: destination }),
+                shell_tag: Some(shell_tag.into()),
+                launch: Some(launch),
                 ..TabMeta::default()
             },
         );
