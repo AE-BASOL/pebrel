@@ -37,6 +37,12 @@ initial configure handshake while hidden but submits no window buffer until show
 the first visible frame consumes a queued token once. A forced frame restores a
 scene whose earlier hidden presentation was intentionally skipped.
 
+The component fork at `5ae661caa9ffb3b19729fa797ad3aa3a6d722f26` changes only its
+five framework pins to the same revision. Updating only the application's pins
+leaves two framework sources and fails locked resolution. Cargo regenerates the
+lockfile; locked metadata contains one GPUI identity, with no unrelated package
+version changes.
+
 The app adapter uses this interface instead of manipulating the framework's XCB
 connection directly. An already mapped Wayland window retains the previously
 documented compositor-minimization behavior. No surface is unmapped behind WGPU.
