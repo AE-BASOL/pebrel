@@ -67,6 +67,8 @@ def run_backend(backend: str, output: Path) -> None:
                 raise RuntimeError('Wayland buffer trace does not prove hidden startup then presentation')
             if 'pebrel-qa-cancelled-activation' in trace:
                 raise RuntimeError('Wayland consumed an activation token after a later hide request')
+            if 'set_app_id("io.github.kuddev.pebrel")' not in trace:
+                raise RuntimeError('Wayland did not publish the matching desktop app_id')
             report['initial_surface_unmapped_then_presented'] = True
             report['cancelled_activation_not_sent'] = True
         (output / 'result.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')

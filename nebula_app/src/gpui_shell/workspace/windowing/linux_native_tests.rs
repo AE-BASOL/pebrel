@@ -89,6 +89,18 @@ fn native_linux_silent_start_close_and_restore_keep_the_same_session() {
                     panes
                 });
                 check_x11_mapping(backend, id, false);
+                if backend == "x11" {
+                    let property = std::process::Command::new("xprop")
+                        .args(["-id", &id.to_string(), "WM_CLASS"])
+                        .output()
+                        .unwrap();
+                    assert!(property.status.success());
+                    assert!(
+                        String::from_utf8(property.stdout)
+                            .unwrap()
+                            .contains(crate::brand::LINUX_APP_ID)
+                    );
+                }
                 eprintln!("PEBREL_DESKTOP_QA_SHOW");
                 cx.update(|cx| focus_notification(None, cx));
                 cx.background_executor().timer(Duration::from_millis(400)).await;
