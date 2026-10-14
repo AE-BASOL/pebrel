@@ -84,6 +84,29 @@ fn ligature_components_move_together_and_the_next_cell_keeps_its_column() {
 }
 
 #[test]
+fn monaco_fi_ligature_collapses_to_one_cell_and_must_be_expanded() {
+    // "file": the fi glyph sits on byte 0 and only advances one cell, while
+    // "l" is already indexed at byte 2. Snapping that index leaves byte 1 empty.
+    let natural = layout(&[(0, 0.0), (2, 10.0), (3, 20.0)], 4);
+    assert_eq!(super::collapsed_cluster_ranges(&natural, px(10.0)), vec![(0, 2)]);
+    assert!(super::cluster_collapses(2, 10.0, 10.0));
+}
+
+#[test]
+fn a_programming_ligature_that_covers_both_columns_stays_joined() {
+    let natural = layout(&[(0, 0.0), (1, 9.6), (1, 13.6), (3, 28.8)], 4);
+    assert!(super::collapsed_cluster_ranges(&natural, px(9.0)).is_empty());
+    assert!(!super::cluster_collapses(2, 19.2, 9.6));
+}
+
+#[test]
+fn a_trailing_one_cell_ligature_is_collapsed_against_the_shaped_width() {
+    let mut natural = layout(&[(0, 0.0)], 2);
+    natural.width = px(10.0);
+    assert_eq!(super::collapsed_cluster_ranges(&natural, px(10.0)), vec![(0, 2)]);
+}
+
+#[test]
 fn deleting_text_or_splitting_a_run_cannot_change_other_grid_origins() {
     let before = layout(&[(0, 0.0), (1, 9.6), (2, 19.2), (3, 28.8)], 4);
     let after = layout(&[(0, 0.0), (1, 9.6), (2, 19.2)], 3);
