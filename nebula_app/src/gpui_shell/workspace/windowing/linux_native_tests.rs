@@ -101,7 +101,7 @@ fn native_linux_silent_start_close_and_restore_keep_the_same_session() {
                             .contains(crate::brand::LINUX_APP_ID)
                     );
                 }
-                eprintln!("PEBREL_DESKTOP_QA_SHOW");
+                crate::gpui_shell::try_write_stderr(format_args!("PEBREL_DESKTOP_QA_SHOW"));
                 cx.update(|cx| focus_notification(None, cx));
                 cx.background_executor().timer(Duration::from_millis(400)).await;
                 check_x11_mapping(backend, id, true);
@@ -141,7 +141,7 @@ fn native_linux_silent_start_close_and_restore_keep_the_same_session() {
                     assert_eq!(pane_entities(workspace.read(cx)), panes);
                 });
                 check_x11_mapping(backend, id, false);
-                eprintln!("PEBREL_DESKTOP_QA_RESTORE");
+                crate::gpui_shell::try_write_stderr(format_args!("PEBREL_DESKTOP_QA_RESTORE"));
                 cx.update(|cx| focus_notification(None, cx));
                 cx.background_executor().timer(Duration::from_millis(400)).await;
                 check_x11_mapping(backend, id, true);
