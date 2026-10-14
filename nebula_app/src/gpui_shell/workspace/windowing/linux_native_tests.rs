@@ -50,7 +50,8 @@ fn native_linux_silent_start_close_and_restore_keep_the_same_session() {
         Some(output.join("config"))
     );
     std::fs::create_dir_all(output.join("config")).unwrap();
-    assert!(!output.join("result.json").exists());
+    let result_path = output.join("result.json");
+    assert!(!result_path.exists());
     std::fs::write(output.join("config/pebrel_settings.txt"),
         "silent_start=1\ntray=1\nkeep_session=1\nrestore_session=0\nresume_ai=0\nbackground_image=\nlanguage=en-US\n").unwrap();
     gpui_platform::application()
@@ -182,5 +183,5 @@ fn native_linux_silent_start_close_and_restore_keep_the_same_session() {
             })
             .detach();
         });
-    assert!(output.join("result.json").is_file());
+    assert!(result_path.is_file());
 }
