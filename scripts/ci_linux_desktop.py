@@ -65,7 +65,10 @@ def run_backend(backend: str, output: Path) -> None:
             attach = rf'wl_surface[@#]{report["id"]}\.attach\(wl_buffer[@#]\d+'
             if re.search(attach, before) or not re.search(attach, after):
                 raise RuntimeError('Wayland buffer trace does not prove hidden startup then presentation')
+            if 'pebrel-qa-cancelled-activation' in trace:
+                raise RuntimeError('Wayland consumed an activation token after a later hide request')
             report['initial_surface_unmapped_then_presented'] = True
+            report['cancelled_activation_not_sent'] = True
         (output / 'result.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
         print(json.dumps(report))
     finally:

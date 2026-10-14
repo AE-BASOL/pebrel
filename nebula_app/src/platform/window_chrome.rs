@@ -37,7 +37,7 @@ pub(crate) fn native_test_window_id(_window: &Window) -> Option<(&'static str, u
     #[cfg(target_os = "linux")]
     {
         use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
-        match _window.window_handle().ok()?.as_raw() {
+        match HasWindowHandle::window_handle(_window).ok()?.as_raw() {
             RawWindowHandle::Xcb(handle) => return Some(("x11", handle.window.get())),
             RawWindowHandle::Wayland(handle) => {
                 #[link(name = "wayland-client")]

@@ -46,6 +46,31 @@ pub(crate) fn toggle_quick_terminal_window(cx: &mut App) {
     toggle_quick_terminal_window_with_token(cx, None);
 }
 
+pub(super) fn report_quick_terminal_failure(error: &str, cx: &mut App) -> bool {
+    let handle = entries_by_mru(cx).into_iter().find_map(|entry| {
+        entry
+            .workspace
+            .upgrade()
+            .filter(|workspace| !workspace.read(cx).window_hidden)
+            .map(|_| entry.handle)
+    });
+    let Some(handle) = handle else { return false };
+    handle
+        .update(cx, |_, window, cx| {
+            let language = crate::gpui_shell::config::ui_language(cx);
+            crate::gpui_shell::toast::banner(
+                window,
+                cx,
+                crate::display::ToastKind::Warning,
+                language.format(
+                    crate::i18n::Message::SettingsQuickTerminalUnavailable,
+                    &[("error", error)],
+                ),
+            );
+        })
+        .is_ok()
+}
+
 pub(crate) fn toggle_quick_terminal_window_with_token(cx: &mut App, token: Option<&str>) {
     quick_window::toggle_quick_terminal_window(cx);
     let Some(token) = token else { return };

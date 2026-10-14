@@ -42,7 +42,7 @@ struct QuickTerminalHotkey {
 impl Global for QuickTerminalHotkey {}
 
 #[cfg(target_os = "linux")]
-struct PortalHotkey(crate::platform::global_shortcut::Portal);
+struct PortalHotkey(crate::platform::global_shortcut::Portal, Option<String>);
 #[cfg(target_os = "linux")]
 impl Global for PortalHotkey {}
 
@@ -106,7 +106,7 @@ impl NebulaWorkspace {
                 return;
             },
         };
-        cx.set_global(PortalHotkey(portal));
+        cx.set_global(PortalHotkey(portal, None));
         cx.spawn(async move |_, cx| {
             let mut ticks = 0u32;
             loop {
@@ -119,21 +119,12 @@ impl NebulaWorkspace {
                     }
                     let failure = portal.take_failure();
                     let pressed = portal.take_pressed();
-                    if let Some(error) = failure {
-                        if let Some(handle) = cx.windows().first().copied() {
-                            let _ = handle.update(cx, |_, window, cx| {
-                                let language = crate::gpui_shell::config::ui_language(cx);
-                                crate::gpui_shell::toast::banner(
-                                    window,
-                                    cx,
-                                    crate::display::ToastKind::Warning,
-                                    language.format(
-                                        crate::i18n::Message::SettingsQuickTerminalUnavailable,
-                                        &[("error", &error)],
-                                    ),
-                                );
-                            });
-                        }
+                    let failure = failure.or(cx.global_mut::<PortalHotkey>().1.take());
+                    if let Some(error) = failure
+                        && !super::windowing::report_quick_terminal_failure(&error, cx)
+                    {
+                        // 静默启动时保留错误，直到可见窗口接收，避免提示在后台过期。
+                        cx.global_mut::<PortalHotkey>().1 = Some(error);
                     }
                     if let Some(token) = pressed {
                         super::windowing::toggle_quick_terminal_window_with_token(

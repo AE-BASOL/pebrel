@@ -2,6 +2,13 @@
 use super::*;
 use gpui::{MouseButton, MouseDownEvent, MouseUpEvent, PlatformInput};
 
+struct ActivationFixture;
+impl Render for ActivationFixture {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().size_full().bg(gpui::black())
+    }
+}
+
 fn pane_entities(workspace: &NebulaWorkspace) -> Vec<gpui::EntityId> {
     workspace
         .tabs
@@ -130,6 +137,25 @@ fn native_linux_silent_start_close_and_restore_keep_the_same_session() {
                     assert!(!workspace.read(cx).window_hidden);
                     assert_eq!(pane_entities(workspace.read(cx)), panes);
                 });
+                if backend == "wayland" {
+                    let cancelled = cx.update(|cx| {
+                        let handle = cx
+                            .open_window(
+                                WindowOptions { show: false, focus: false, ..Default::default() },
+                                |_, cx| cx.new(|_| ActivationFixture),
+                            )
+                            .unwrap();
+                        handle
+                            .update(cx, |_, window, _| {
+                                window.activate_window_with_token("pebrel-qa-cancelled-activation");
+                                assert!(window.set_window_visible(false));
+                            })
+                            .unwrap();
+                        handle
+                    });
+                    cx.background_executor().timer(Duration::from_millis(400)).await;
+                    cancelled.update(cx, |_, window, _| window.remove_window()).unwrap();
+                }
                 std::fs::write(
                     output.join("result.json"),
                     serde_json::to_vec(&json!({

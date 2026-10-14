@@ -31,7 +31,7 @@ Route the client titlebar through the same workspace close operation as native
 close requests. Keep the window, terminal views, PTYs and persistence ownership.
 
 Keep native presentation in the existing fixed GPUI fork. The patch at
-`4994e5d97e21adab50e9d5097a8385d9e24e7d24` honors initial visibility, reuses the
+`f9215143d15809a427a7889d511d1355d9933592` honors initial visibility, reuses the
 X11 map/drain path, and accepts a portal activation token. Wayland performs its
 initial configure handshake while hidden but submits no window buffer until shown;
 the first visible frame consumes a queued token once. A forced frame restores a
