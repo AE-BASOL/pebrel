@@ -117,8 +117,29 @@ impl NebulaWorkspace {
                     if ticks % RESYNC_EVERY == 0 {
                         portal.set_combo(current_combo());
                     }
-                    if portal.take_pressed() {
-                        super::windowing::toggle_quick_terminal_window(cx);
+                    let failure = portal.take_failure();
+                    let pressed = portal.take_pressed();
+                    if let Some(error) = failure {
+                        if let Some(handle) = cx.windows().first().copied() {
+                            let _ = handle.update(cx, |_, window, cx| {
+                                let language = crate::gpui_shell::config::ui_language(cx);
+                                crate::gpui_shell::toast::banner(
+                                    window,
+                                    cx,
+                                    crate::display::ToastKind::Warning,
+                                    language.format(
+                                        crate::i18n::Message::SettingsQuickTerminalUnavailable,
+                                        &[("error", &error)],
+                                    ),
+                                );
+                            });
+                        }
+                    }
+                    if let Some(token) = pressed {
+                        super::windowing::toggle_quick_terminal_window_with_token(
+                            cx,
+                            token.as_deref(),
+                        );
                     }
                 });
             }
