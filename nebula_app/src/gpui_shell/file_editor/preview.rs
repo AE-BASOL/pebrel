@@ -317,11 +317,13 @@ impl TextFileView {
                 style
             },
             inline_code: gpui::HighlightStyle {
-                background_color: Some(super::super::theme::code_block_background(cx)),
+                background_color: Some(super::super::theme::inline_code_background(cx)),
                 ..Default::default()
             },
+            inline_code_radius: px(reader_presentation::INLINE_CODE_RADIUS),
             code_block: {
-                let mut style = gpui::StyleRefinement::default();
+                let mut surface = div().rounded(px(reader_presentation::CODE_RADIUS));
+                let mut style = surface.style().clone();
                 style.padding.top = Some(px(16.0).into());
                 style.background = Some(super::super::theme::code_block_background(cx).into());
                 style

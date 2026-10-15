@@ -64,7 +64,6 @@ impl TextFileView {
                         )
                     }),
             )
-            .when(self.markdown, |bar| bar.child(self.render_document_menu(cx)))
             .child(div().w(px(1.0)).h(px(18.0)).mx_1().bg(cx.theme().border))
             .when(!self.details_hosted, |bar| {
                 bar.child(
@@ -138,25 +137,105 @@ impl TextFileView {
                         }
                     })),
             )
-            .child(
-                Button::new("file-save")
+            .when(!self.markdown, |bar| {
+                bar.child(
+                    Button::new("file-save")
+                        .ghost()
+                        .xsmall()
+                        .h(px(design::CONTROL_HEIGHT))
+                        .px(px(12.0))
+                        .flex_shrink_0()
+                        .text_size(px(design::CHROME_SIZE))
+                        .label(language.text(if self.saving {
+                            Message::EditorSaving
+                        } else {
+                            Message::EditorSave
+                        }))
+                        .tooltip(language.text(Message::EditorSaveShortcut))
+                        .disabled(!editable || !self.dirty || self.saving)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.save(cx).detach();
+                        })),
+                )
+            })
+            .into_any_element()
+    }
+
+    pub(super) fn render_status_bar(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let language = super::super::config::ui_language(cx);
+        let theme = cx.theme();
+        let position = self.input.read(cx).cursor_position();
+        let mode = language.text(if self.preview {
+            Message::EditorReading
+        } else {
+            Message::EditorSource
+        });
+        let location = language.format(
+            Message::EditorCursorPosition,
+            &[
+                ("line", &(position.line + 1).to_string()),
+                ("column", &(position.character + 1).to_string()),
+            ],
+        );
+        let mut modes = h_flex()
+            .id("file-view-modes")
+            .gap(px(2.0))
+            .p(px(2.0))
+            .rounded(px(9.0))
+            .bg(theme.muted.opacity(0.6));
+        for (preview, id, icon, label) in [
+            (true, "file-mode-reading", IconName::Eye, Message::EditorReading),
+            (false, "file-mode-source", IconName::Code, Message::EditorSource),
+        ] {
+            let selected = self.preview == preview;
+            modes = modes.child(
+                Button::new(id)
+                    .debug_selector(move || id.to_owned())
                     .ghost()
-                    .xsmall()
-                    .h(px(design::CONTROL_HEIGHT))
-                    .px(px(12.0))
-                    .flex_shrink_0()
-                    .text_size(px(design::CHROME_SIZE))
-                    .label(language.text(if self.saving {
-                        Message::EditorSaving
-                    } else {
-                        Message::EditorSave
-                    }))
-                    .tooltip(language.text(Message::EditorSaveShortcut))
-                    .disabled(!editable || !self.dirty || self.saving)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.save(cx).detach();
+                    .size(px(design::CONTROL_HEIGHT))
+                    .rounded(px(7.0))
+                    .icon(Icon::new(icon).size(px(design::ICON_SIZE)))
+                    .selected(selected)
+                    .aria_label(language.text(label))
+                    .tooltip(
+                        language
+                            .format(Message::EditorModeShortcut, &[("mode", language.text(label))]),
+                    )
+                    .when(selected, |button| {
+                        button.bg(theme.background).text_color(theme.foreground)
+                    })
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        // 同一模式重复点击不切换，避免丢掉当前输入焦点与选择。
+                        if this.preview != preview {
+                            this.toggle_preview(window, cx);
+                        }
                     })),
-            )
+            );
+        }
+        h_flex()
+            .debug_selector(|| "file-status-bar".to_owned())
+            .h(px(design::STATUS_HEIGHT))
+            .flex_shrink_0()
+            .px(px(design::PANEL_PADDING))
+            .gap_2()
+            .border_t_1()
+            .border_color(theme.border.opacity(0.5))
+            .text_size(px(design::SECONDARY_SIZE))
+            .text_color(theme.muted_foreground)
+            .child(div().flex_1().min_w_0().truncate().child(if self.preview {
+                format!("Markdown · {mode}")
+            } else {
+                format!("Markdown · {location}")
+            }))
+            .when(self.dirty || self.saving, |bar| {
+                bar.child(language.text(if self.saving {
+                    Message::EditorSaving
+                } else {
+                    Message::EditorUnsaved
+                }))
+            })
+            .child(modes)
+            .child(self.render_document_menu(cx))
             .into_any_element()
     }
 
