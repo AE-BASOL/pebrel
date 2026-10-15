@@ -15,6 +15,76 @@ fn shell_glyph_size() -> f32 {
 }
 
 impl NebulaWorkspace {
+    pub(super) fn run_selected_palette_action(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let action = self
+            .filtered_palette_rows(cx)
+            .get(self.command_palette_selected)
+            .map(|row| row.action.clone());
+        if let Some(action) = action {
+            self.run_workspace_palette_action(action, window, cx);
+        }
+    }
+    fn run_workspace_palette_action(
+        &mut self,
+        action: WorkspacePaletteAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match action {
+            WorkspacePaletteAction::TerminalReading { commands } => {
+                self.dismiss_palette_state();
+                if let Some(view) =
+                    self.tabs.get(self.active).and_then(WorkspaceTab::focused_view).cloned()
+                {
+                    view.update(cx, |view, cx| {
+                        view.open_reading(commands, window, cx);
+                    });
+                }
+                cx.notify();
+            },
+            WorkspacePaletteAction::Shared(action) => self.run_palette_action(action, window, cx),
+            WorkspacePaletteAction::LayoutRecipes => {
+                self.dismiss_palette_state();
+                self.open_layout_recipes(window, cx);
+            },
+            WorkspacePaletteAction::FocusTab(tab) => {
+                self.dismiss_palette_state();
+                self.activate_tab(tab, window, cx);
+                self.focus_active(window, cx);
+                cx.notify();
+            },
+            WorkspacePaletteAction::FocusPane { tab, pane } => {
+                self.dismiss_palette_state();
+                self.activate_tab(tab, window, cx);
+                self.focus_pane(tab, pane, window, cx);
+                self.focus_active(window, cx);
+                cx.notify();
+            },
+            WorkspacePaletteAction::OpenDirectory(path) => {
+                self.dismiss_palette_state();
+                self.add_terminal_at(Some(path), None, window, cx);
+            },
+            WorkspacePaletteAction::RunAiSession { command, cwd } => {
+                self.dismiss_palette_state();
+                self.add_terminal_at(cwd, Some(command), window, cx);
+            },
+            WorkspacePaletteAction::LaunchSshHost(host) => {
+                self.dismiss_palette_state();
+                self.add_ssh_terminal(host, window, cx);
+            },
+            WorkspacePaletteAction::LaunchShell(detected) => {
+                self.launch_palette_shell(detected, window, cx);
+            },
+            WorkspacePaletteAction::LaunchProfile(profile) => {
+                self.launch_palette_profile(profile, window, cx);
+            },
+        }
+    }
+
     /// The catalog itself is owned by the old/shared command model. This
     /// presentation advertises only actions whose execution path is already
     /// wired in GPUI; unsupported rows remain in the shared catalog and appear
@@ -98,6 +168,26 @@ impl NebulaWorkspace {
                 })
                 .collect();
             rows.push(recipes::palette_row(language));
+            if self.tabs.get(self.active).and_then(WorkspaceTab::focused_view).is_some() {
+                for (commands, message) in [
+                    (false, crate::i18n::Message::TerminalReadingOpen),
+                    (true, crate::i18n::Message::TerminalReadingChoose),
+                ] {
+                    let label = language.text(message).to_owned();
+                    rows.push(WorkspacePaletteRow {
+                        group_order: 0,
+                        group: language.text(crate::i18n::Message::TerminalReadingOpen).to_owned(),
+                        search: format!("{label} terminal search find copy output shell"),
+                        label,
+                        hint: String::new(),
+                        hint_style: WorkspacePaletteHintStyle::Metadata,
+                        action: WorkspacePaletteAction::TerminalReading { commands },
+                        icon: None,
+                        icon_glyph: None,
+                        icon_path: None,
+                    });
+                }
+            }
             // 启动器混排（旧壳 ⌘K 裁定）：SSH 主机与命令同列，置顶/隐藏
             // 次序由共享 merge 权威裁定。
             rows.extend(shell_picker::ssh_palette_rows(
@@ -396,46 +486,7 @@ impl NebulaWorkspace {
                 })
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.command_palette_selected = ix;
-                    match action.clone() {
-                        WorkspacePaletteAction::Shared(action) => {
-                            this.run_palette_action(action, window, cx);
-                        },
-                        WorkspacePaletteAction::LayoutRecipes => {
-                            this.dismiss_palette_state();
-                            this.open_layout_recipes(window, cx);
-                        },
-                        WorkspacePaletteAction::FocusTab(tab) => {
-                            this.dismiss_palette_state();
-                            this.activate_tab(tab, window, cx);
-                            this.focus_active(window, cx);
-                            cx.notify();
-                        },
-                        WorkspacePaletteAction::FocusPane { tab, pane } => {
-                            this.dismiss_palette_state();
-                            this.activate_tab(tab, window, cx);
-                            this.focus_pane(tab, pane, window, cx);
-                            this.focus_active(window, cx);
-                            cx.notify();
-                        },
-                        WorkspacePaletteAction::OpenDirectory(path) => {
-                            this.dismiss_palette_state();
-                            this.add_terminal_at(Some(path), None, window, cx);
-                        },
-                        WorkspacePaletteAction::RunAiSession { command, cwd } => {
-                            this.dismiss_palette_state();
-                            this.add_terminal_at(cwd, Some(command), window, cx);
-                        },
-                        WorkspacePaletteAction::LaunchSshHost(host) => {
-                            this.dismiss_palette_state();
-                            this.add_ssh_terminal(host, window, cx);
-                        },
-                        WorkspacePaletteAction::LaunchShell(detected) => {
-                            this.launch_palette_shell(detected, window, cx);
-                        },
-                        WorkspacePaletteAction::LaunchProfile(profile) => {
-                            this.launch_palette_profile(profile, window, cx);
-                        },
-                    }
+                    this.run_workspace_palette_action(action.clone(), window, cx);
                 }));
 
             rows.push(row_content.into_any_element());
