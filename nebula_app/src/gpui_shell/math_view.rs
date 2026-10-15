@@ -378,6 +378,8 @@ struct MathFormulaView {
     latex_feedback: Entity<CopyFeedback>,
     image_feedback: Entity<CopyFeedback>,
     image_copy_task: Option<Task<()>>,
+    toolbar_hovered: bool,
+    formula_hovered: bool,
     _latex_feedback_subscription: Subscription,
     _image_feedback_subscription: Subscription,
 }
@@ -395,6 +397,8 @@ impl MathFormulaView {
             latex_feedback,
             image_feedback,
             image_copy_task: None,
+            toolbar_hovered: false,
+            formula_hovered: false,
             _latex_feedback_subscription: latex_feedback_subscription,
             _image_feedback_subscription: image_feedback_subscription,
         }
@@ -467,7 +471,6 @@ impl Render for MathFormulaView {
         let source_for_latex = source.clone();
         let display = self.display;
         let key = math_element_key(&source, display);
-        let group = format!("markdown-math-actions-{key:x}");
         let language = super::config::ui_language(cx);
         let latex_feedback = self.latex_feedback.clone();
         let image_feedback = self.image_feedback.clone();
@@ -482,6 +485,7 @@ impl Render for MathFormulaView {
         let owner = cx.weak_entity();
 
         let latex_button = Button::new(("markdown-copy-math-latex", key))
+            .debug_selector(|| "markdown-copy-math-latex".to_owned())
             .custom(
                 gpui_component::button::ButtonCustomVariant::new(cx)
                     .hover(cx.theme().list_hover)
@@ -492,6 +496,7 @@ impl Render for MathFormulaView {
             .icon(if latex_copied { IconName::Check } else { IconName::Copy })
             .tooltip(language.text(Message::EditorCopyMathLatex))
             .on_click(move |_, window, cx| {
+                cx.stop_propagation();
                 // The GPUI clipboard API is best-effort and returns `()`. The
                 // payload is always valid here, so mark the visual action
                 // complete immediately after submitting it.
@@ -509,6 +514,7 @@ impl Render for MathFormulaView {
 
         let owner_for_image = owner.clone();
         let image_button = Button::new(("markdown-copy-math-image", key))
+            .debug_selector(|| "markdown-copy-math-image".to_owned())
             .custom(
                 gpui_component::button::ButtonCustomVariant::new(cx)
                     .hover(cx.theme().list_hover)
@@ -531,38 +537,66 @@ impl Render for MathFormulaView {
                 language.text(Message::EditorMathImageUnavailable)
             })
             .on_click(move |_, window, cx| {
+                cx.stop_propagation();
                 let _ = owner_for_image.update(cx, |view, cx| view.copy_formula_image(window, cx));
             });
 
+        let toolbar = h_flex()
+            .id(("markdown-math-toolbar", key))
+            .on_hover(cx.listener(|view, hovered, _, cx| {
+                if view.toolbar_hovered != *hovered {
+                    view.toolbar_hovered = *hovered;
+                    cx.notify();
+                }
+            }))
+            .on_click(|_, _, cx| cx.stop_propagation())
+            .gap(px(2.0))
+            .p(px(2.0))
+            .rounded(cx.theme().radius)
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().popover)
+            .shadow_sm()
+            .child(latex_button)
+            .child(image_button);
+
         div()
+            .id(("markdown-formula-actions", key))
             .relative()
             .flex_shrink_0()
             .debug_selector(|| "markdown-math-formula".to_owned())
-            .group(group.clone())
+            .on_hover(cx.listener(|view, hovered, _, cx| {
+                if view.formula_hovered != *hovered {
+                    view.formula_hovered = *hovered;
+                    cx.notify();
+                }
+            }))
             .child(MathView {
                 source,
                 display,
                 visible_pixel_size: self.visible_pixel_size.clone(),
             })
-            .child(
-                h_flex()
-                    .absolute()
-                    .top(px(-4.0))
-                    .right(px(0.0))
-                    .invisible()
-                    .when(latex_copied || image_copied || image_pending, |actions| {
-                        actions.visible()
-                    })
-                    .group_hover(group, |actions| actions.visible())
-                    .gap(px(2.0))
-                    .p(px(2.0))
-                    .rounded(cx.theme().radius)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .bg(cx.theme().popover)
-                    .shadow_sm()
-                    .child(latex_button)
-                    .child(image_button),
+            .when(
+                self.formula_hovered
+                    || self.toolbar_hovered
+                    || latex_copied
+                    || image_copied
+                    || image_pending,
+                |view| {
+                    view.child(
+                        gpui::deferred(
+                            // 显式零尺寸锚点避免绝对定位的静态位置落到公式底部。
+                            div().absolute().top_0().left_0().size(px(0.0)).child(
+                                gpui::anchored()
+                                    .anchor(gpui::Anchor::BottomLeft)
+                                    .position_mode(gpui::AnchoredPositionMode::Local)
+                                    .snap_to_window_with_margin(px(4.0))
+                                    .child(toolbar),
+                            ),
+                        )
+                        .with_priority(1),
+                    )
+                },
             )
     }
 }

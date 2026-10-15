@@ -25,6 +25,9 @@ pub(super) const PANEL_HEADER_HEIGHT: f32 = 44.0;
 pub(super) const CONTROL_HEIGHT: f32 = 32.0;
 pub(super) const ACTION_HEIGHT: f32 = 36.0;
 pub(super) const PANEL_PADDING: f32 = 20.0;
+pub(super) const STATUS_HEIGHT: f32 = 40.0;
+pub(super) const CODE_RADIUS: f32 = 10.0;
+pub(super) const INLINE_CODE_RADIUS: f32 = 5.0;
 
 pub(super) fn clamp_details_width(width: f32) -> f32 {
     width.clamp(DETAILS_MIN_WIDTH, DETAILS_MAX_WIDTH)
