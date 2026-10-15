@@ -31,13 +31,13 @@ Route the client titlebar through the same workspace close operation as native
 close requests. Keep the window, terminal views, PTYs and persistence ownership.
 
 Keep native presentation in the existing fixed GPUI fork. The patch at
-`f9215143d15809a427a7889d511d1355d9933592` honors initial visibility, reuses the
+`1e716d16ec54b361499931b4278903cdcaae8949` honors initial visibility, reuses the
 X11 map/drain path, and accepts a portal activation token. Wayland performs its
 initial configure handshake while hidden but submits no window buffer until shown;
 the first visible frame consumes a queued token once. A forced frame restores a
 scene whose earlier hidden presentation was intentionally skipped.
 
-The component fork at `ce8ef64313b4e4145cd4f9eedf2dd9612d4b842a` retains the
+The component fork at `78e1d0c48867f69fec297d9016f48b0ce1b8c146` retains the
 current reader component APIs and aligns its five framework pins with that revision.
 Updating only the application's pins
 leaves two framework sources and fails locked resolution. Cargo regenerates the
@@ -82,6 +82,10 @@ job runs it with Xvfb and Weston, keeping the existing native matrix and compila
 cache. It clicks the actual titlebar, checks terminal-view identity across closing
 and restoration, and checks X11 map state. Wayland protocol evidence checks that
 the actual surface has no buffer before the first show and does present afterward.
+
+Native window destruction releases its input handler synchronously before queuing
+platform close callbacks. Otherwise a final-window quit can retain the handler's
+strong terminal-view entity while the native event loop has already stopped.
 
 ## Validation
 
