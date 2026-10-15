@@ -9,7 +9,10 @@
 //! ligature is one glyph with a one-cell advance, while the next cluster index
 //! skips a column. Snapping that index onto the grid leaves the second letter's
 //! cell empty. Those clusters are shaped one character at a time instead.
-//! Programming ligatures still advance every column they cover, so they stay.
+//! Collapse is decided from the shaped column advance, not from the configured
+//! grid width: `font.offset` and device-pixel rounding change the grid without
+//! changing the font. Programming ligatures still advance every column they
+//! cover, so they stay.
 
 use std::sync::Arc;
 
@@ -57,67 +60,94 @@ pub(super) fn shape_ascii_span(
 ) -> ShapedLine {
     debug_assert!(text.bytes().all(|byte| byte.is_ascii_graphic()));
     run.len = text.len();
-    let mut shaped = text_system.shape_line(text.clone(), font_size, &[run.clone()], None);
-    let natural =
-        expand_collapsed_ligatures(&shaped, &text, text_system, font_size, &run, cell_width);
+    let runs = [run];
+    let mut shaped = text_system.shape_line(text, font_size, &runs, None);
+    // No collapsed cluster: grid_layout makes the only glyph-run copy. The
+    // TextRun stays in `runs` and is not cloned on this path.
+    let layout = if let Some(expanded) =
+        expand_collapsed_ligatures(&shaped, text_system, font_size, &runs[0])
+    {
+        grid_layout(&expanded, cell_width)
+    } else {
+        grid_layout(&shaped, cell_width)
+    };
     // The cached natural layout is shared with other views. Replace only this
     // ShapedLine's Arc, preserving its text and decoration runs.
-    *shaped = Arc::new(grid_layout(&natural, cell_width));
+    *shaped = Arc::new(layout);
     shaped
 }
 
-/// Columns a cluster claims minus the cells its glyphs actually advance.
+/// A cluster collapsed when its advance is shorter than the columns it claims,
+/// measured against the font's own column advance.
 ///
-/// `0.45` leaves room for hinting and the compact cell-width rounding without
-/// treating a real two-cell ligature (advance ≈ 2 cells) as collapsed.
-fn cluster_collapses(columns: usize, advance: f32, cell_width: f32) -> bool {
-    columns > 1 && cell_width > 0.0 && advance < cell_width * (columns as f32 - 0.45)
+/// `0.45` leaves room for hinting. A programming ligature whose advance is about
+/// `columns` natural columns stays joined. The configured grid width is not an
+/// input: positive `font.offset.x` widens the grid and must not split `->`.
+fn cluster_collapses(columns: usize, advance: f32, natural_advance: f32) -> bool {
+    columns > 1 && natural_advance > 0.0 && advance < natural_advance * (columns as f32 - 0.45)
 }
 
-fn collapsed_cluster_ranges(natural: &LineLayout, cell_width: Pixels) -> Vec<(usize, usize)> {
-    let glyphs: Vec<&ShapedGlyph> = natural.runs.iter().flat_map(|run| &run.glyphs).collect();
-    let cell = cell_width.as_f32();
-    let mut ranges = Vec::new();
-    let mut index = 0;
-    while index < glyphs.len() {
-        let start = glyphs[index].index;
-        let origin = glyphs[index].position.x.as_f32();
-        let mut next = index + 1;
-        while next < glyphs.len() && glyphs[next].index == start {
-            next += 1;
+fn visit_clusters(natural: &LineLayout, mut visit: impl FnMut(usize, usize, f32)) {
+    let mut glyphs = natural.runs.iter().flat_map(|run| &run.glyphs);
+    let Some(first) = glyphs.next() else { return };
+    let mut start = first.index;
+    let mut origin = first.position.x.as_f32();
+    for glyph in glyphs {
+        if glyph.index == start {
+            continue;
         }
-        let end = glyphs.get(next).map(|glyph| glyph.index).unwrap_or(natural.len);
-        let next_x = glyphs
-            .get(next)
-            .map(|glyph| glyph.position.x.as_f32())
-            .unwrap_or(natural.width.as_f32());
-        if cluster_collapses(end.saturating_sub(start), next_x - origin, cell) {
+        visit(start, glyph.index, glyph.position.x.as_f32() - origin);
+        start = glyph.index;
+        origin = glyph.position.x.as_f32();
+    }
+    visit(start, natural.len, natural.width.as_f32() - origin);
+}
+
+/// `(any multi-column cluster, advance of the first single-column cluster)`.
+fn cluster_summary(natural: &LineLayout) -> (bool, Option<f32>) {
+    let mut wide = false;
+    let mut unit = None;
+    visit_clusters(natural, |start, end, advance| {
+        let columns = end.saturating_sub(start);
+        if columns == 1 {
+            if unit.is_none() && advance > 0.0 {
+                unit = Some(advance);
+            }
+        } else if columns > 1 {
+            wide = true;
+        }
+    });
+    (wide, unit)
+}
+
+fn collapsed_cluster_ranges(natural: &LineLayout, natural_advance: f32) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
+    visit_clusters(natural, |start, end, advance| {
+        if cluster_collapses(end.saturating_sub(start), advance, natural_advance) {
             ranges.push((start, end));
         }
-        index = next;
-    }
+    });
     ranges
 }
 
 fn expand_collapsed_ligatures(
-    natural: &LineLayout,
-    text: &str,
+    natural: &ShapedLine,
     text_system: &WindowTextSystem,
     font_size: Pixels,
     template: &TextRun,
-    cell_width: Pixels,
-) -> LineLayout {
-    let ranges = collapsed_cluster_ranges(natural, cell_width);
-    if ranges.is_empty() {
-        return LineLayout {
-            font_size: natural.font_size,
-            width: natural.width,
-            ascent: natural.ascent,
-            descent: natural.descent,
-            runs: natural.runs.clone(),
-            len: natural.len,
-        };
+) -> Option<LineLayout> {
+    let (wide, mut unit) = cluster_summary(natural);
+    if !wide {
+        return None;
     }
+    if unit.is_none() {
+        unit = shaped_column_advance(text_system, font_size, template, &natural.text);
+    }
+    let ranges = collapsed_cluster_ranges(natural, unit?);
+    if ranges.is_empty() {
+        return None;
+    }
+    let text = natural.text.as_ref();
 
     let flat: Vec<(FontId, ShapedGlyph)> = natural
         .runs
@@ -151,14 +181,29 @@ fn expand_collapsed_ligatures(
         }
     }
 
-    LineLayout {
+    Some(LineLayout {
         font_size: natural.font_size,
         width: natural.width,
         ascent: natural.ascent,
         descent: natural.descent,
         runs: coalesce_runs(placed),
         len: natural.len,
-    }
+    })
+}
+
+fn shaped_column_advance(
+    text_system: &WindowTextSystem,
+    font_size: Pixels,
+    template: &TextRun,
+    text: &str,
+) -> Option<f32> {
+    let end = text.chars().next()?.len_utf8();
+    let sample = &text[..end];
+    let mut run = template.clone();
+    run.len = sample.len();
+    let shaped = text_system.shape_line(sample.into(), font_size, &[run], None);
+    let advance = shaped.width.as_f32();
+    (advance > 0.0).then_some(advance)
 }
 
 fn shape_one_column(
