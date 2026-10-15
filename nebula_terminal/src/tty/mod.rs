@@ -21,12 +21,18 @@ pub use self::windows::*;
 
 /// Shared SSH/WSL execution reports for local and bootstrapped bash/zsh shells.
 pub fn connection_shell() -> &'static str {
-    static SCRIPT: LazyLock<Cow<'static, str>> =
-        LazyLock::new(|| shell_line_endings(include_str!("connection.sh")));
+    static SCRIPT: LazyLock<Cow<'static, str>> = LazyLock::new(|| {
+        Cow::Owned(format!(
+            "{}\n{}",
+            shell_line_endings(include_str!("connection.sh")),
+            shell_line_endings(include_str!("completion.sh"))
+        ))
+    });
     &SCRIPT
 }
 
-fn shell_line_endings(script: &str) -> Cow<'_, str> {
+/// Script text as a POSIX shell must see it: CRLF checkout line endings become LF.
+pub fn shell_line_endings(script: &str) -> Cow<'_, str> {
     // include_str! preserves checkout bytes. POSIX shells treat CR in a CRLF
     // checkout as syntax, including when this script travels via PROMPT_COMMAND.
     if script.contains("\r\n") {

@@ -54,11 +54,13 @@
 <table>
   <tr>
     <td align="center" width="240">
-      <a href="https://fluxionai.space/register?source=github&campaign=pebrel&promo=pebrel"><img src="extra/logo/sponsor_fluxionai.png" alt="Fluxion AI" width="200" /></a><br />
-      <a href="https://fluxionai.space/register?source=github&campaign=pebrel&promo=pebrel"><strong>Fluxion AI</strong></a>
+      <a href="https://sidrune.ai/register?source=github&campaign=pebrel&promo=pebrel"><img src="extra/logo/sponsor_sidrune.png" alt="Sidrune AI" width="200" /></a><br />
+      <a href="https://sidrune.ai/register?source=github&campaign=pebrel&promo=pebrel"><strong>Sidrune AI</strong></a>
     </td>
     <td>
-      Thanks to Fluxion AI for sponsoring this project! Fluxion AI is one entry point for accessing and managing the world's leading AI models. It serves individual developers, technical teams and enterprises with a unified API; dynamic multi-route scheduling improves availability, and model performance, response time and cost stay transparent. Depending on the model and route, API calls can cost 40%–98% less than official or benchmark prices. <a href="https://fluxionai.space/register?source=github&campaign=pebrel&promo=pebrel">Sign up via this link</a> to receive $3 in API credit.
+      <p><strong>One entry point for accessing and managing the world's leading AI models</strong></p>
+      <p>Thanks to Sidrune AI for sponsoring this project! Sidrune AI serves individual developers, technical teams and enterprises with a unified API for accessing and managing the world's leading AI models. Dynamic multi-route scheduling improves availability, and model performance, response time and cost stay transparent. Depending on the model and route, API calls can cost 40%–98% less than official or benchmark prices.</p>
+      <p><a href="https://sidrune.ai/register?source=github&campaign=pebrel&promo=pebrel">Visit and sign up now</a> to receive $3 in API credit.</p>
     </td>
   </tr>
 </table>
@@ -80,6 +82,23 @@ each agent's activity, and read its output without leaving the application.
   close the window. Restoring a conversation after the process exits is a separate
   feature and requires a supported CLI and a usable session identity.
 - Context-aware and history completions, configurable keybindings, and integrated shell prompts.
+- Saved-command management supports checkbox selection and one confirmation for a
+  batch, replacing repeated single-command deletion. Selection mode never runs a
+  command; changing the search or folder clears the selection. **Select results**
+  selects commands in the current filtered list, including rows below the viewport.
+  **Manage → Delete all commands** clears custom commands and all current built-in
+  recipes across platforms, regardless of the current search or folder; folders stay.
+  Clearing built-ins also includes recipes moved to other folders. Empty built-in
+  folders disappear, and **Manage → Restore built-in commands** restores deleted
+  recipes to their default folder. Custom deletions are not undoable here. Deleting
+  a custom folder requires confirmation and keeps its commands in Ungrouped.
+  Batch changes reuse the existing locked, refreshed, atomic store transaction;
+  the saved file format is unchanged and stale selections preserve unrelated edits.
+- Remapping or disabling terminal shortcuts preserves text fields' native paste keys.
+  Restoring defaults updates existing windows without restarting. Runtime overrides
+  replace their previous rules, avoiding the stale disabled bindings from the append-only
+  path; the saved configuration format is unchanged. See the
+  [shortcut ownership decision](architecture/notes/nebula_app/gpui_shell/workspace/2026-10-07-keyboard-override-sources.md).
 
 ### Intelligent Completion
 
@@ -115,6 +134,9 @@ discover candidates from the current environment without matching prior commands
 
 ### SSH and Files
 
+- Search SSH hosts by name, address, group, tags or notes in the host library,
+  launcher, command palette and Quick Jump. Space-separated keywords must all match;
+  searches are case-insensitive. The launchers now use the same metadata as the host library.
 - Saved hosts, SSH config aliases, proxy and jump-host options, private-key and
   keyboard-interactive authentication, and host-key verification.
 - SFTP browsing, uploads and downloads, folder transfers, progress, and cancellation.
@@ -186,6 +208,23 @@ a status notifier, and Wayland shortcuts use the desktop portal. Windows and
 macOS provide native update installation; Linux upgrades use its package manager
 or a new package. See [installation details](INSTALL.md) for platform requirements
 and upgrading an existing Nebula installation.
+
+## Self-hosted relay
+
+On your phone, save an SSH host with password or private-key authentication, then
+select that host in relay setup. For key authentication, the credential field is
+the private-key passphrase; leave it empty for an unencrypted key. It is not a
+relay password. After installation, select the SSH host under desktop
+**Settings → Phone connection → Relay**, then generate the phone pairing QR code.
+
+See [offline relay installation](mobile/relay-native/INSTALL.md) for server
+requirements, verification and management. The original v2.1.1 Release assets
+did not include an offline relay kit. A source checkout containing that installer
+can use `mobile/tools/package_manual_relay.py` to generate a two-architecture Linux
+kit and SHA256 sidecar from a verified APK. The tool does not download executables
+or publish or replace Release assets.
+Older APKs also need Cargo dependency notices collected from their matching source;
+the installation guide includes those commands.
 
 ## Configure
 

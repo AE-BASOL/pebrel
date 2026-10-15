@@ -32,6 +32,14 @@ impl SettingsPane {
                     if let SelectEvent::Confirm(Some(_)) = event {
                         let row = entity.read(cx).selected_index(cx).map(|path| path.row);
                         if let Some(value) = row.and_then(|row| values.get(row)) {
+                            if key == "background_media_kind" {
+                                this.set_background_kind(value, window, cx);
+                                return;
+                            }
+                            if key == "background_shader_preset" {
+                                this.set_shader_preset(value, window, cx);
+                                return;
+                            }
                             if key == "cursor_motion" {
                                 this.set_cursor_motion(value, window, cx);
                                 return;
@@ -56,6 +64,13 @@ impl SettingsPane {
             selects.push((key, select, values));
         };
 
+        add_select(
+            "terminal_effect_animation",
+            nebula_settings::EffectAnimation::VALUES,
+            runtime.terminal_effects.animation.settings_value(),
+            window,
+            cx,
+        );
         let cursor_current =
             runtime.cursor_shape.map(|shape| shape.settings_value()).unwrap_or("beam");
         add_select(
@@ -160,6 +175,13 @@ impl SettingsPane {
             window,
             cx,
         );
+        add_select(
+            "scrollbar_visibility",
+            nebula_settings::ScrollbarVisibility::VALUES,
+            runtime.scrollbar_visibility.settings_value(),
+            window,
+            cx,
+        );
         // 文案照抄旧壳 `accept_label` / `completion_style_label`。
         add_select(
             "bell",
@@ -185,7 +207,21 @@ impl SettingsPane {
             window,
             cx,
         );
+        add_select(
+            "background_media_kind",
+            nebula_settings::BackgroundMediaKind::VALUES,
+            runtime.background_media_kind.settings_value(),
+            window,
+            cx,
+        );
         // 壁纸 fit/对齐：存原文，经旧壳 renderer::image 的 parse 归一化
+        add_select(
+            "background_shader_preset",
+            nebula_settings::BackgroundEffects::PRESETS,
+            runtime.background_effects.preset(),
+            window,
+            cx,
+        );
         // （兼容 cover/contain 等别名），展示用规范记号。
         let bgimg_fit = crate::renderer::image::BackgroundImageFit::parse(
             runtime.background_image_fit.as_deref().unwrap_or(""),
@@ -523,7 +559,7 @@ impl SettingsPane {
         let keymap_interceptor = cx.listener(|this, event: &gpui::KeystrokeEvent, window, cx| {
             if this.keymap_capture.is_some() && this.focus_handle.contains_focused(window, cx) {
                 cx.stop_propagation();
-                this.handle_keymap_capture(&event.keystroke, cx);
+                this.handle_keymap_capture(&event.keystroke, window, cx);
             }
         });
         subscriptions.push(cx.intercept_keystrokes(keymap_interceptor));
@@ -542,6 +578,11 @@ impl SettingsPane {
              event: &InputEvent,
              _: &mut Window,
              cx: &mut Context<Self>| {
+                match event {
+                    InputEvent::Focus => this.settings_search_focus.set_focused(true),
+                    InputEvent::Blur => this.settings_search_focus.set_focused(false),
+                    _ => {},
+                }
                 if matches!(event, InputEvent::Change | InputEvent::Focus | InputEvent::Blur) {
                     if matches!(event, InputEvent::Change) {
                         this.update_settings_search(cx);
@@ -550,6 +591,41 @@ impl SettingsPane {
                 }
             },
         ));
+
+        let font_size_input = cx.new(|cx| InputState::new(window, cx));
+        subscriptions.push(cx.subscribe_in(
+            &font_size_input,
+            window,
+            |this: &mut Self, _, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::Blur | InputEvent::PressEnter { .. }) {
+                    this.finish_font_size_edit(true, window, cx);
+                }
+            },
+        ));
+        let font_size_interceptor =
+            cx.listener(|this, event: &gpui::KeystrokeEvent, window, cx| {
+                if this.font_size_editing.is_some()
+                    && this.font_size_input.read(cx).focus_handle(cx).is_focused(window)
+                {
+                    match event.keystroke.key.as_str() {
+                        "escape" => {
+                            cx.stop_propagation();
+                            this.finish_font_size_edit(false, window, cx);
+                        },
+                        "tab" => {
+                            cx.stop_propagation();
+                            if event.keystroke.modifiers.shift {
+                                window.focus_prev(cx);
+                            } else {
+                                window.focus_next(cx);
+                            }
+                            this.finish_font_size_edit(true, window, cx);
+                        },
+                        _ => {},
+                    }
+                }
+            });
+        subscriptions.push(cx.intercept_keystrokes(font_size_interceptor));
 
         Self {
             focus_handle: cx.focus_handle(),
@@ -560,9 +636,17 @@ impl SettingsPane {
             mobile: mobile::MobileState::new(window, cx),
             appearance_picker: None,
             appearance_picker_seq: 0,
+            shader_picker: None,
+            terminal_effect_picker: None,
+            shader_custom_open: false,
+            effect_settings_open: false,
+            media_picker: None,
+            media_picker_generation: 0,
             theme_editor: None,
             theme_editor_seq: 0,
             theme_transfer: theme_transfer::ThemeTransferState::default(),
+            theme_package: None,
+            theme_package_seq: 0,
             theme_picker_trigger: cx.focus_handle(),
             icon_picker_trigger: cx.focus_handle(),
             expanded_setting_help: std::collections::HashSet::new(),
@@ -571,6 +655,7 @@ impl SettingsPane {
             about_last_checked: None,
             about_sponsor_open: false,
             settings_search_input,
+            settings_search_focus: search_header::SearchFocus::default(),
             search_origin_section: None,
             selects,
             shell_select,
@@ -635,6 +720,8 @@ impl SettingsPane {
             font_imported: Vec::new(),
             font_family_input,
             font_family_cjk_input,
+            font_size_input,
+            font_size_editing: None,
             font_picker_trigger_bounds: None,
             font_picker_cjk_bounds: None,
             backup_selection: backup_remote.selection,

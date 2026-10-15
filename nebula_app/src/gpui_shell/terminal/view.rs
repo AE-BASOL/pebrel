@@ -11,6 +11,7 @@ mod confirmation;
 mod conversation;
 pub(super) mod cursor;
 mod cwd_report;
+mod editor;
 mod image_paste;
 mod layout;
 #[cfg(all(test, windows, feature = "gpui-test-support"))]
@@ -20,11 +21,12 @@ mod notifications;
 mod output_tests;
 mod path_drop;
 mod pointer;
+mod reading;
 mod runtime;
 mod startup;
 mod startup_command;
 #[cfg(all(test, feature = "gpui-test-support"))]
-mod startup_tests;
+pub(super) mod startup_tests;
 mod tab_identity;
 mod typography;
 
@@ -268,11 +270,14 @@ pub struct TerminalView {
     pub(super) answers: crate::assistant_answer::AnswerInbox,
     confirmation: super::confirmation::ConfirmationState,
     pub(super) answer_reader: Option<gpui::Entity<super::answer_reader::AnswerReader>>,
+    pub(super) reading: super::reading::ReadingState,
     pub pane_id: u64,
     pub session: Option<TerminalSession>,
     pub focus_handle: FocusHandle,
     /// 公式覆盖层（探测/持久化状态复用旧壳 `terminal_math`，每 pane 一份）。
     pub math: super::math_overlay::MathOverlay,
+
+    pub(super) effect: Option<gpui::Entity<super::effects::TerminalEffect>>,
     pub font: Font,
     pub font_bold: Font,
     pub font_italic: Font,
@@ -340,6 +345,9 @@ pub struct TerminalView {
     path_drop: path_drop::PathDropState,
     /// SSH 直连目的地（`user@host[:port]`）；本地会话为 None。
     pub ssh_destination: Option<String>,
+    /// 本 pane 拥有的本地端口转发；pane 销毁即停止监听。
+    pub(crate) port_forwards: Vec<crate::ssh_session::LocalForward>,
+    pub(crate) port_forward_task: Option<gpui::Task<()>>,
     ssh_label: Option<String>,
     /// 创建本地 PTY 时冻结的受控环境，供独立 `pane.exec` child 复用。
     pub(crate) exec_context: Option<crate::runtime_exec::PaneExecContext>,
@@ -365,6 +373,8 @@ pub struct TerminalView {
     /// 滚动条拖拽中：按下时记下的「指针在拇指内的 y 偏移」，拖动全程据此
     /// 反算 `display_offset`，拇指不会在按下那一刻跳到指针中心。
     scrollbar_drag: Option<f32>,
+    scrollbar_hovered: bool,
+    scrollbar_visibility: nebula_settings::ScrollbarVisibility,
     origin: Point<Pixels>,
     cell_width: Pixels,
     line_height: Pixels,
@@ -440,6 +450,8 @@ pub struct TerminalView {
     pub(super) suggest_anchor: Option<(usize, usize)>,
     suggestion_task: Option<suggest::Pending>,
     completion_session: crate::completion::Session,
+    completion_editor: editor::Editor,
+    editor_query_task: Option<gpui::Task<()>>,
     ghost_enabled: bool,
     completion_style: crate::display::CompletionStyle,
     /// BEL 后暂停侧栏转圈，直到用户再往 PTY 打字（旧壳 `awaiting_input`）。
@@ -508,13 +520,26 @@ impl TerminalView {
         typography::startup_cell_metrics_at_scale(scale, cx)
     }
 
+    pub(super) fn effect_output_visible(&self) -> bool {
+        self.output_visible && self.answer_reader.is_none()
+    }
+
+    pub(super) fn effect_pane_focused(&self) -> bool {
+        self.cursor_pane_focused
+    }
+
     pub(in crate::gpui_shell) fn set_output_visible(
         &mut self,
         visible: bool,
         cx: &mut Context<Self>,
     ) {
+        if !visible {
+            self.clear_output_hover(cx);
+        }
         if self.output_visible != visible {
             self.cursor_animation.reset();
+
+            super::effects::visibility_changed(self, cx);
         }
         if std::mem::replace(&mut self.output_visible, visible) != visible && visible {
             // Hidden output deliberately did not invalidate the cached view.
@@ -547,6 +572,7 @@ impl TerminalView {
         }
         match event {
             TermEvent::Wakeup => {
+                self.observe_reading_output(cx);
                 self.flush_pending_runtime_submit(cx);
                 self.flush_pending_shell_command(cx);
                 if self.output_visible {
@@ -691,6 +717,7 @@ impl TerminalView {
                     self.on_native_cmd_prompt(cx);
                 }
                 self.suggest.completion_shell_report(&name, &value);
+                self.handle_completion_editor_report(&name, &value, cx);
                 cx.notify();
             },
         }
@@ -715,6 +742,15 @@ impl TerminalView {
 
     /// `Exited` 只对宿主发一次；重复的退出信号（ChildExit 之后必然跟 Exit）只更新文案。
     fn mark_exited(&mut self, message: String, cx: &mut Context<Self>) {
+        self.clear_output_hover(cx);
+        self.reading.cancel_query();
+        self.reading.cancel_copy();
+        if let Some(panel) = self.reading.panel.as_mut() {
+            panel.running = false;
+            panel.feedback.update(cx, |feedback, cx| feedback.clear(cx));
+        }
+        self.port_forward_task = None;
+        self.port_forwards.clear();
         self.confirmation.invalidate();
         self.pending_runtime_submit = None;
         self.pending_shell_command = None;
@@ -741,6 +777,8 @@ impl TerminalView {
 
     /// 输入后回到底部并请求重绘。
     fn write_input(&mut self, bytes: Vec<u8>, cx: &mut Context<Self>) {
+        self.completion_editor.invalidate();
+        self.editor_query_task = None;
         self.cursor_animation.note_input(&bytes);
         self.prompt_input_epoch = self.prompt_input_epoch.wrapping_add(1);
         self.path_drop.invalidate();
@@ -904,6 +942,8 @@ impl TerminalView {
         self.suggestion_task = None;
         self.suggest.clear_completion_hints();
         self.suggest.completion_popup_requested = false;
+        self.completion_editor.invalidate();
+        self.editor_query_task = None;
 
         self.font =
             mono_font(&families[0], FontWeight::NORMAL, FontStyle::Normal, settings.ligatures);
@@ -931,6 +971,7 @@ impl TerminalView {
         }
         self.palette = palette;
         self.copy_on_select = copy_on_select;
+        self.scrollbar_visibility = settings.scrollbar_visibility;
         self.default_cursor_style = default_cursor_style;
         if let Some(session) = &self.session {
             let mut term = session.term.lock();
@@ -966,6 +1007,12 @@ impl TerminalView {
         path.is_dir().then_some(path)
     }
 
+    /// WSL 发行版：spawn 时 pin 进启动参数的 [`crate::shell_detect::wsl_spawn_distro`]
+    /// 快照，裸 `wsl` / 默认 shell 也有确定的来宾身份，事后改默认发行版不会串台。
+    pub(crate) fn wsl_distro(&self) -> Option<&str> {
+        self.exec_context.as_ref()?.wsl_distribution().flatten()
+    }
+
     /// Absolute remote cwd reported by OSC 7/title integration. Unlike
     /// [`Self::local_cwd`], this deliberately does not consult the host
     /// filesystem; a POSIX path belongs to the SSH endpoint.
@@ -982,6 +1029,9 @@ impl TerminalView {
     /// 通道，撞上一个还没建立的传输——用户看到的是文件面板先报一个错，然后
     /// 终端才连上。
     pub fn ready_ssh_destination(&self) -> Option<&str> {
+        if self.exited.is_some() {
+            return None;
+        }
         let destination = self.ssh_destination.as_deref()?;
         matches!(self.ssh_stage, Some(crate::ssh_session::SshStage::Ready)).then_some(destination)
     }
@@ -1078,6 +1128,10 @@ impl TerminalView {
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        // 搜索输入具有独立焦点，祖先终端不得再次把同一按键写入 PTY。
+        if !self.focus_handle.is_focused(window) {
+            return;
+        }
         if self.exited.is_some() || self.answer_reader.is_some() {
             return;
         }
@@ -1089,6 +1143,24 @@ impl TerminalView {
         }
         let ks = &event.keystroke;
         let mods = &ks.modifiers;
+
+        if self.reading.panel.is_some() && ks.key.as_str() == "escape" {
+            self.close_reading(window, cx);
+            cx.stop_propagation();
+            return;
+        }
+        if !mods.alt
+            && !mods.function
+            && ((mods.control && mods.shift && ks.key.as_str() == "h")
+                || (crate::platform::Platform::current() == crate::platform::Platform::MacOS
+                    && mods.platform
+                    && !mods.shift
+                    && ks.key.as_str() == "f"))
+        {
+            self.open_reading(false, window, cx);
+            cx.stop_propagation();
+            return;
+        }
 
         // 终端惯例快捷键优先于编码器。
         if mods.control && mods.shift {
@@ -1193,6 +1265,10 @@ impl TerminalView {
     }
 
     fn on_terminal_tab(&mut self, _: &TerminalTab, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.focus_handle.is_focused(window) {
+            cx.propagate();
+            return;
+        }
         self.dispatch_terminal_tab(false, window, cx);
     }
 
@@ -1202,6 +1278,10 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.focus_handle.is_focused(window) {
+            cx.propagate();
+            return;
+        }
         self.dispatch_terminal_tab(true, window, cx);
     }
 
@@ -1226,7 +1306,13 @@ impl Drop for TerminalView {
 impl Focusable for TerminalView {
     fn focus_handle(&self, cx: &App) -> FocusHandle {
         self.answer_reader.as_ref().map_or_else(
-            || self.focus_handle.clone(),
+            || {
+                // 工作区会在分屏聚焦或标签恢复后延迟设置焦点，搜索输入仍须拥有它。
+                self.reading.panel.as_ref().map_or_else(
+                    || self.focus_handle.clone(),
+                    |panel| panel.input.read(cx).focus_handle(cx),
+                )
+            },
             |reader| reader.read(cx).focus_handle.clone(),
         )
     }
@@ -1274,10 +1360,10 @@ impl gpui::EntityInputHandler for TerminalView {
         &mut self,
         _range: Option<std::ops::Range<usize>>,
         text: &str,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.answer_reader.is_some() {
+        if self.answer_reader.is_some() || !self.focus_handle.is_focused(window) {
             return;
         }
         let had_marked_text = self.marked_text.take().is_some();
@@ -1298,10 +1384,10 @@ impl gpui::EntityInputHandler for TerminalView {
         _range: Option<std::ops::Range<usize>>,
         new_text: &str,
         _new_selected_range: Option<std::ops::Range<usize>>,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.answer_reader.is_some() {
+        if self.answer_reader.is_some() || !self.focus_handle.is_focused(window) {
             return;
         }
         let marked_text = if new_text.is_empty() { None } else { Some(new_text.to_string()) };
@@ -1343,7 +1429,11 @@ impl Render for TerminalView {
         let drop_highlight = cx.theme().accent.opacity(0.18);
         let mut root = div()
             .id("nebula-terminal")
-            .key_context(KEY_CONTEXT)
+            .key_context(if self.reading.panel.is_some() && !self.focus_handle.is_focused(window) {
+                "NebulaTerminalReading"
+            } else {
+                KEY_CONTEXT
+            })
             .size_full()
             // SSH 连接卡片使用 absolute + inset_0；本 pane 必须成为它的
             // containing block，否则坐标会逃到工作区/窗口根，轨道和粒子
@@ -1392,8 +1482,12 @@ impl Render for TerminalView {
                     this.paste_dropped_paths(&[drag.path_text.clone()], window, cx);
                 },
             ))
-            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+            .on_hover(cx.listener(|this, hovered: &bool, window, cx| {
                 if !*hovered {
+                    this.leave_output_hover(Some(window.mouse_position()), cx);
+                    if std::mem::take(&mut this.scrollbar_hovered) {
+                        cx.notify();
+                    }
                     this.clear_link_hover(cx);
                     if this.completion_viewport.hovered.take().is_some() {
                         cx.notify();
@@ -1442,12 +1536,19 @@ impl Render for TerminalView {
                 );
             }
         }
+        if self.session.is_some() {
+            root = root.child(self.reading_chrome(cx));
+        }
         root.into_any_element()
     }
 }
 
 impl TerminalView {
     fn open_answer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.clear_output_hover(cx);
+        self.reading.cancel_query();
+        self.reading.cancel_copy();
+        self.reading.panel = None;
         let Some(snapshot) = self.answers.latest.clone() else { return };
         let reader = cx.new(|cx| super::answer_reader::AnswerReader::new(snapshot, cx));
         if self.agent_activity.status() == crate::ai_agents::AgentStatus::Blocked {

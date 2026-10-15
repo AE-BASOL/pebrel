@@ -76,6 +76,37 @@ pub(crate) fn snapshot_shell(
     configured
 }
 
+#[cfg(windows)]
+pub(super) fn prepare_startup_directory(options: &mut nebula_terminal::tty::Options) {
+    use std::path::{Component, Prefix};
+
+    let Some(Component::Prefix(prefix)) =
+        options.working_directory.as_ref().and_then(|path| path.components().next())
+    else {
+        return;
+    };
+    let server = match prefix.kind() {
+        Prefix::UNC(server, _) | Prefix::VerbatimUNC(server, _) => server,
+        _ => return,
+    };
+    if !server.to_str().is_some_and(|server| {
+        server.eq_ignore_ascii_case("wsl.localhost") || server.eq_ignore_ascii_case("wsl$")
+    }) {
+        return;
+    }
+    let shell = options.shell.clone().unwrap_or_else(nebula_terminal::tty::resolved_default_shell);
+    let name = shell.program().rsplit(['/', '\\']).next().unwrap_or_default();
+    if matches!(
+        name.to_ascii_lowercase().as_str(),
+        "powershell" | "powershell.exe" | "pwsh" | "pwsh.exe"
+    ) {
+        // CMD launchers cannot inherit a WSL UNC cwd and otherwise fall back to Windows.
+        if let Some(home) = super::dirs::home_dir() {
+            options.working_directory = Some(home);
+        }
+    }
+}
+
 #[cfg(target_os = "macos")]
 const fn default_unix_shell_id() -> &'static str {
     "zsh"
@@ -180,7 +211,7 @@ pub(crate) fn completion_qa_ssh_config_permissions(path: &std::path::Path) {
     #[cfg(windows)]
     {
         // 临时目录可继承 OWNER RIGHTS；OpenSSH 拒绝它，夹具应只授权当前所有者。
-        let script = r#"$ErrorActionPreference='Stop'; $owner=[System.Security.Principal.WindowsIdentity]::GetCurrent().User; $acl=[System.Security.AccessControl.FileSecurity]::new(); $acl.SetOwner($owner); $acl.SetAccessRuleProtection($true,$false); $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($owner,[System.Security.AccessControl.FileSystemRights]::FullControl,[System.Security.AccessControl.AccessControlType]::Allow)); Set-Acl -LiteralPath $env:PEBREL_QA_SSH_CONFIG -AclObject $acl"#;
+        let script = r#"$ErrorActionPreference='Stop'; $owner=[System.Security.Principal.WindowsIdentity]::GetCurrent().User; $acl=[System.Security.AccessControl.FileSecurity]::new(); $acl.SetOwner($owner); $acl.SetAccessRuleProtection($true,$false); $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($owner,[System.Security.AccessControl.FileSystemRights]::FullControl,[System.Security.AccessControl.AccessControlType]::Allow)); $bytes=[System.IO.File]::ReadAllBytes($env:PEBREL_QA_SSH_CONFIG); [System.IO.File]::Delete($env:PEBREL_QA_SSH_CONFIG); $file=[System.IO.FileStream]::new($env:PEBREL_QA_SSH_CONFIG,[System.IO.FileMode]::CreateNew,[System.Security.AccessControl.FileSystemRights]::FullControl,[System.IO.FileShare]::Read,4096,[System.IO.FileOptions]::None,$acl); try { $file.Write($bytes,0,$bytes.Length) } finally { $file.Dispose() }"#;
         let mut command = std::process::Command::new("powershell.exe");
         command.args(["-NoProfile", "-Command", script]).env("PEBREL_QA_SSH_CONFIG", path);
         assert!(super::process::hidden_command(&mut command).status().unwrap().success());
@@ -204,11 +235,24 @@ pub(crate) fn completion_qa_shell(_output: &std::path::Path) -> nebula_terminal:
     #[cfg(windows)]
     {
         let integrated = nebula_terminal::tty::powershell_with_nebula_integration(
-            "powershell.exe".into(),
+            std::env::var("PEBREL_COMPLETION_QA_PWSH").unwrap_or_else(|_| "powershell.exe".into()),
             vec!["-NoLogo".into(), "-NoProfile".into()],
         );
         let mut args = integrated.args().to_vec();
         args.last_mut().unwrap().push_str("; Set-PSReadLineOption -HistorySaveStyle SaveNothing; if ((Get-Command Set-PSReadLineOption).Parameters.ContainsKey('PredictionSource')) { Set-PSReadLineOption -PredictionSource None }");
+        let diagnostic = _output.join("editor-shell.json").to_string_lossy().replace('\'', "''");
+        args.last_mut().unwrap().push_str(&format!("; @{{ready=$global:PebrelCompletionInputReady; version=(Get-Module PSReadLine).Version.ToString(); chordParameter=(Get-Command Get-PSReadLineKeyHandler).Parameters.ContainsKey('Chord'); binding=@(Get-PSReadLineKeyHandler | Where-Object {{ $_.Key -like '*F12*' }} | Select-Object Key,Function)}} | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath '{diagnostic}'"));
+        if std::env::var("PEBREL_COMPLETION_QA_PREDICTION").as_deref() == Ok("1") {
+            args.last_mut().unwrap().push_str("; Set-PSReadLineOption -PredictionSource History -PredictionViewStyle InlineView; (Get-PSReadLineOption).PredictionSource.ToString() | Set-Content -LiteralPath (Join-Path $env:PEBREL_COMPLETION_QA_DIR 'prediction-source.txt')");
+        }
+        // 原生验收中编码命令的启动曾静默停住；文件入口保留同一初始化内容，
+        // 避免把启动器故障误判为补全失败。BOM 让 PowerShell 5.1 也按 UTF-8 读取。
+        let startup = args.pop().unwrap();
+        let startup_path = _output.join("editor-startup.ps1");
+        std::fs::write(&startup_path, format!("\u{feff}{startup}\n")).unwrap();
+        *args.last_mut().unwrap() = "-File".into();
+        // PTY 接收的参数已经是 Windows 命令行文本，路径中的空格需要保留引号。
+        args.push(format!("\"{}\"", startup_path.display()));
         nebula_terminal::tty::Shell::new(integrated.program().to_owned(), args)
     }
     #[cfg(unix)]
@@ -234,6 +278,99 @@ pub(crate) fn completion_qa_shell(_output: &std::path::Path) -> nebula_terminal:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn powershell_wsl_unc_startup_uses_home_without_changing_the_launch() {
+        use nebula_terminal::tty::{Options, Shell};
+
+        let home = super::super::dirs::home_dir().unwrap();
+        for program in ["powershell.exe", "C:/Program Files/PowerShell/7/pwsh.exe"] {
+            for cwd in [
+                r"\\wsl.localhost\Ubuntu\home\user",
+                r"\\wsl$\Ubuntu\home\user",
+                r"\\?\UNC\WSL.LOCALHOST\Ubuntu\home\user",
+            ] {
+                let shell = Shell::new(program.into(), vec!["-NoLogo".into()]);
+                let mut options = Options {
+                    shell: Some(shell.clone()),
+                    working_directory: Some(cwd.into()),
+                    ..Default::default()
+                };
+                prepare_startup_directory(&mut options);
+                assert_eq!(options.working_directory, Some(home.clone()));
+                assert_eq!(options.shell, Some(shell));
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn ordinary_network_directories_and_wsl_launches_keep_their_startup_cwd() {
+        use nebula_terminal::tty::{Options, Shell};
+
+        for (program, cwd) in [
+            ("pwsh.exe", r"C:\work"),
+            ("powershell.exe", r"\\server\share\work"),
+            ("wsl.exe", r"\\wsl.localhost\Ubuntu\home\user"),
+            ("bash.exe", r"\\wsl$\Ubuntu\home\user"),
+        ] {
+            let mut options = Options {
+                shell: Some(Shell::new(program.into(), vec![])),
+                working_directory: Some(cwd.into()),
+                ..Default::default()
+            };
+            let original = options.clone();
+            prepare_startup_directory(&mut options);
+            assert_eq!(options, original);
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn powershell_cmd_launchers_inherit_the_prepared_windows_directory() {
+        use nebula_terminal::tty::{Options, Shell};
+
+        let root = tempfile::tempdir().unwrap();
+        let shim = root.path().join("cwd-probe.cmd");
+        let result = root.path().join("cwd-result.txt");
+        std::fs::write(&shim, b"@echo off\r\ncd\r\n").unwrap();
+        let home = super::super::dirs::home_dir().unwrap();
+        let system = std::env::var_os("SystemRoot").unwrap();
+        let powershell =
+            std::path::Path::new(&system).join("System32/WindowsPowerShell/v1.0/powershell.exe");
+        for program in [powershell.to_string_lossy().into_owned(), "pwsh.exe".into()] {
+            std::fs::write(&result, b"").unwrap();
+            let mut options = Options {
+                shell: Some(Shell::new(program.clone(), vec![])),
+                working_directory: Some(r"\\wsl.localhost\Ubuntu\home\user".into()),
+                ..Default::default()
+            };
+            super::super::environment::prepare_local_pty(&mut options);
+            assert_eq!(options.working_directory.as_ref(), Some(&home));
+            let output = std::process::Command::new(&program)
+                .args([
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "$paths = @($PWD.ProviderPath; & $env:ComSpec /d /c cd; & $env:PEBREL_CWD_SHIM); [IO.File]::WriteAllLines($env:PEBREL_CWD_RESULT, [string[]]$paths, [Text.Encoding]::UTF8)",
+                ])
+                .current_dir(options.working_directory.unwrap())
+                .env("PEBREL_CWD_SHIM", &shim)
+                .env("PEBREL_CWD_RESULT", &result)
+                .env_remove("PSModulePath")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{program}: {:?}", output);
+            assert!(output.stderr.is_empty(), "{program}: {:?}", output);
+            let paths = std::fs::read_to_string(&result).unwrap();
+            assert_eq!(
+                paths.trim_start_matches('\u{feff}').lines().collect::<Vec<_>>(),
+                vec![home.to_str().unwrap(); 3],
+                "{program}: {paths}"
+            );
+        }
+    }
 
     #[cfg(windows)]
     #[test]

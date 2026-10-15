@@ -26,12 +26,15 @@ use crate::event::EventProxy;
 use crate::proxy_test::{ProxyTestFailure, ProxyTestOutcome, ProxyTestResult, ProxyTestRoute};
 
 mod agent;
+pub(crate) mod completion;
 mod config;
 mod exec;
+mod forward;
 mod integration;
 mod lifecycle;
 mod route;
 mod transcript;
+pub(crate) use forward::{LocalForward, open_local_forward};
 pub(crate) use integration::setup_cli as setup_ai_cli;
 use route::{ResolvedRoute, RouteTransport};
 pub use transcript::TranscriptReader;
@@ -204,6 +207,11 @@ pub struct SshDestination {
 }
 
 impl SshDestination {
+    #[cfg(test)]
+    pub(crate) fn has_identity_files(&self) -> bool {
+        !self.identity_files.is_empty()
+    }
+
     pub fn parse(value: &str) -> io::Result<Self> {
         let original = value.trim().to_owned();
         let address = original.strip_prefix("ssh://").unwrap_or(&original).to_owned();
@@ -256,8 +264,7 @@ impl SshDestination {
         // `hostname host:port`。后续把它交给 socket 就会在 Windows 上得到
         // WSAHOST_NOT_FOUND。只规范化配置探测参数，保留 original 作为列表、
         // Profile 与凭据的稳定身份。
-        let config_target = ssh_config_probe_target(&original);
-        let output = ssh_config_output(config_target.as_ref());
+        let output = ssh_config_output(&original);
         if let Ok(output) = output {
             if output.status.success() {
                 let text = String::from_utf8_lossy(&output.stdout);
@@ -301,12 +308,14 @@ impl SshDestination {
 
 /// 给 `ssh -G` 的离线配置探测目标。Nebula 历史存盘格式允许
 /// `user@host:port`，而 OpenSSH 只会从 `ssh://user@host:port` URI 中拆出
-/// 端口；无显式端口、已有 URI 与裸 IPv6 都保持原样，避免改变 Host 匹配。
+/// 端口。URI 用户名需编码内部 @ 和字面 %；original 仍是未经编码的身份。
+/// 无显式端口的裸地址保持原样，避免改变 Host 匹配。
 pub(crate) fn ssh_config_probe_target(value: &str) -> Cow<'_, str> {
-    if value.starts_with("ssh://") {
-        return Cow::Borrowed(value);
-    }
-    let host_port = value.rsplit_once('@').map_or(value, |(_, host_port)| host_port);
+    let uri = value.starts_with("ssh://");
+    let address = value.strip_prefix("ssh://").unwrap_or(value);
+    let (username, host_port) = address
+        .rsplit_once('@')
+        .map_or((None, address), |(username, host_port)| (Some(username), host_port));
     let has_explicit_port = if let Some(rest) = host_port.strip_prefix('[') {
         rest.split_once(']')
             .and_then(|(_, suffix)| suffix.strip_prefix(':'))
@@ -317,7 +326,69 @@ pub(crate) fn ssh_config_probe_target(value: &str) -> Cow<'_, str> {
         false
     };
 
-    if has_explicit_port { Cow::Owned(format!("ssh://{value}")) } else { Cow::Borrowed(value) }
+    if !uri && !has_explicit_port {
+        return Cow::Borrowed(value);
+    }
+    if let Some(username) = username {
+        let encoded = encode_ssh_uri_username(username);
+        if !uri || encoded != username {
+            return Cow::Owned(format!("ssh://{encoded}@{host_port}"));
+        }
+    }
+    if uri { Cow::Borrowed(value) } else { Cow::Owned(format!("ssh://{value}")) }
+}
+
+fn encode_ssh_uri_username(username: &str) -> String {
+    use std::fmt::Write as _;
+    let mut encoded = String::with_capacity(username.len());
+    for byte in username.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            encoded.push(char::from(byte));
+        } else {
+            // Encode raw UTF-8 bytes once, including %, rather than decoding
+            // existing escapes: the application's username is literal text.
+            let _ = write!(encoded, "%{byte:02X}");
+        }
+    }
+    encoded
+}
+
+/// Some system OpenSSH versions reject bracketed IPv6 URIs and non-ASCII
+/// command-line users. A literal User option preserves Match user and %r on
+/// clients accepting those bytes; newer native validation may still reject
+/// them. Expansion-bearing users keep their existing args.
+pub(crate) fn ssh_config_probe_args(value: &str) -> Vec<String> {
+    let address = value.strip_prefix("ssh://").unwrap_or(value);
+    let (username, host_port) = address
+        .rsplit_once('@')
+        .map_or((None, address), |(username, host_port)| (Some(username), host_port));
+    let literal_user = username.is_some_and(|user| {
+        !user.is_ascii()
+            && !user.contains('%')
+            && !user.contains("${")
+            && !user.starts_with('-')
+            && !user.ends_with('\\')
+            && !user.contains(['(', ')', '{', '}'])
+            && crate::ssh_profiles::validate_ssh_destination(value).is_ok()
+    });
+    if let Ok((host, port)) = parse_host_port_optional(host_port)
+        && (host.parse::<std::net::Ipv6Addr>().is_ok() || literal_user)
+    {
+        let mut args = Vec::new();
+        if let Some(username) = username {
+            args.extend(if literal_user {
+                ["-o".to_owned(), format!("User={username}")]
+            } else {
+                ["-l".to_owned(), username.to_owned()]
+            });
+        }
+        if let Some(port) = port {
+            args.extend(["-p".to_owned(), port.to_string()]);
+        }
+        args.extend(["--".to_owned(), host]);
+        return args;
+    }
+    vec!["--".to_owned(), ssh_config_probe_target(value).into_owned()]
 }
 
 fn parse_host_port(host_port: &str) -> io::Result<(String, u16)> {
@@ -354,7 +425,7 @@ fn parse_host_port_optional(host_port: &str) -> io::Result<(String, Option<u16>)
     Ok((host, port))
 }
 
-fn parse_resolved_config(original: &str, text: &str) -> Option<SshDestination> {
+pub(crate) fn parse_resolved_config(original: &str, text: &str) -> Option<SshDestination> {
     let mut user = None;
     let mut host = None;
     let mut port = None;
@@ -419,7 +490,7 @@ fn ssh_config_command(target: &str, config: Option<&Path>) -> Command {
     if let Some(path) = config {
         command.arg("-F").arg(path);
     }
-    command.arg("-G").arg("--").arg(target);
+    command.arg("-G").args(ssh_config_probe_args(target));
     crate::platform::process::hidden_command(&mut command);
     command
 }
@@ -538,8 +609,21 @@ pub(crate) fn runtime() -> io::Result<&'static tokio::runtime::Runtime> {
     }
 }
 
-fn connection_pool() -> &'static tokio::sync::Mutex<HashMap<String, SharedSession>> {
-    static POOL: OnceLock<tokio::sync::Mutex<HashMap<String, SharedSession>>> = OnceLock::new();
+struct PooledSession {
+    session: SharedSession,
+    destination: String,
+    id: u64,
+}
+
+impl PooledSession {
+    fn new(session: SharedSession, destination: String) -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        Self { session, destination, id: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) }
+    }
+}
+
+fn connection_pool() -> &'static tokio::sync::Mutex<HashMap<String, PooledSession>> {
+    static POOL: OnceLock<tokio::sync::Mutex<HashMap<String, PooledSession>>> = OnceLock::new();
     POOL.get_or_init(|| tokio::sync::Mutex::new(HashMap::new()))
 }
 
@@ -589,7 +673,7 @@ fn initial_remote_cd_command(path: Option<&str>) -> Option<Vec<u8>> {
 
 async fn evict_pooled_session(key: &str, session: &SharedSession) -> bool {
     let mut pool = connection_pool().lock().await;
-    let matches = pool.get(key).is_some_and(|pooled| Arc::ptr_eq(pooled, session));
+    let matches = pool.get(key).is_some_and(|pooled| Arc::ptr_eq(&pooled.session, session));
     if matches {
         pool.remove(key);
     }
@@ -656,8 +740,11 @@ async fn authenticated_route<H: SshEventHost>(
     allow_host_key_prompt: bool,
 ) -> Result<AcquiredSession, SessionError> {
     let key = route.pool_key();
-    let existing =
-        if unattended { None } else { connection_pool().lock().await.get(&key).cloned() };
+    let existing = if unattended {
+        None
+    } else {
+        connection_pool().lock().await.get(&key).map(|entry| entry.session.clone())
+    };
     if let Some(existing) = existing {
         if !existing.is_closed() {
             info!("复用已认证 SSH 连接: {key}");
@@ -705,7 +792,7 @@ async fn authenticated_route<H: SshEventHost>(
         });
     }
     let mut pool = connection_pool().lock().await;
-    if let Some(existing) = pool.get(&key).cloned() {
+    if let Some(existing) = pool.get(&key).map(|entry| entry.session.clone()) {
         if !existing.is_closed() {
             return Ok(AcquiredSession {
                 key,
@@ -715,7 +802,10 @@ async fn authenticated_route<H: SshEventHost>(
             });
         }
     }
-    pool.insert(key.clone(), session.clone());
+    pool.insert(
+        key.clone(),
+        PooledSession::new(session.clone(), route.destination.original.clone()),
+    );
     Ok(AcquiredSession { key, session, reused: false, jump_sessions: transport.jump_sessions })
 }
 

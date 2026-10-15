@@ -5,11 +5,21 @@
 //! global palette so a test cannot pass by only exercising a state callback.
 
 use super::*;
-use crate::gpui_shell::settings_fixture::{SettingsBytesGuard, lock_theme_studio};
+use crate::gpui_shell::settings_fixture::{
+    SettingsBytesGuard, SettingsPaneHost, lock_theme_studio,
+};
 use crate::theme_library::{ThemeDocument, ThemeFormat, ThemeLibraryStore};
 use gpui::{Modifiers, TestAppContext, VisualTestContext, size};
 use gpui_component::Root;
 use nebula_settings::{RawSettings, RuntimeSettings, ThemeDefinition, ThemeName};
+
+#[path = "theme_background_tests.rs"]
+mod background_tests;
+#[path = "theme_package_tests.rs"]
+mod package_tests;
+#[cfg(feature = "shader-background")]
+#[path = "terminal_effect_tests.rs"]
+mod terminal_effect_tests;
 
 const TEST_SETTINGS: &str =
     "theme=Nord\nfollow_system_theme=0\napp_icon=graphite-violet\nfont_size=15\n";
@@ -150,6 +160,53 @@ fn scrolling_controls_persist_dropdown_and_slider_without_changing_existing_hist
     assert_eq!(existing.grid().history_size(), 10_000);
 }
 
+#[gpui::test]
+fn scrollbar_menu_persists_all_modes_and_reopens_with_the_selected_value(cx: &mut TestAppContext) {
+    use crate::gpui_shell::config::Settings;
+    use nebula_settings::ScrollbarVisibility;
+
+    let _fixture_guard = lock_theme_studio();
+    let _settings_guard = SettingsBytesGuard::capture();
+    std::fs::create_dir_all(nebula_settings::settings_dir()).unwrap();
+    std::fs::write(nebula_settings::settings_path(), TEST_SETTINGS).unwrap();
+    let (pane, mut window) = open_settings(cx);
+    pane.update(&mut window, |pane, cx| {
+        pane.active_section = 1;
+        cx.notify();
+    });
+    window.simulate_resize(size(px(1280.0), px(1800.0)));
+    draw(&mut window);
+    for mode in [ScrollbarVisibility::Hover, ScrollbarVisibility::Always, ScrollbarVisibility::Auto]
+    {
+        click("settings-select-scrollbar_visibility", &mut window);
+        if mode == ScrollbarVisibility::Auto {
+            press("up", &mut window);
+            press("up", &mut window);
+        } else {
+            press("down", &mut window);
+        }
+        press("enter", &mut window);
+        assert_eq!(RuntimeSettings::load().scrollbar_visibility, mode);
+        assert_eq!(window.read(|cx| cx.global::<Settings>().scrollbar_visibility), mode);
+        let reopened = window.update(|window, cx| cx.new(|cx| SettingsPane::new(window, cx)));
+        reopened.read_with(&mut window, |pane, cx| {
+            assert_eq!(pane.runtime.scrollbar_visibility, mode);
+            assert_eq!(
+                pane.select_of("scrollbar_visibility")
+                    .unwrap()
+                    .read(cx)
+                    .selected_index(cx)
+                    .unwrap()
+                    .row,
+                ScrollbarVisibility::VALUES
+                    .iter()
+                    .position(|value| *value == mode.settings_value())
+                    .unwrap(),
+            );
+        });
+    }
+}
+
 fn draw(cx: &mut VisualTestContext) {
     cx.run_until_parked();
     cx.update(|window, cx| {
@@ -203,27 +260,6 @@ fn edit_input(selector: &'static str, value: &str, cx: &mut VisualTestContext) {
     draw(cx);
 }
 
-struct ThemeStudioHost {
-    pane: Entity<SettingsPane>,
-}
-
-impl Render for ThemeStudioHost {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .size_full()
-            .child(self.pane.clone())
-            // `SettingsPane` owns the dialog requests, while the test host
-            // owns the component library's global modal layer just like the
-            // production workspace does. Keep it above the feature overlays
-            // (theme editor=0, component popovers=1, transfer=6) so real dialog buttons receive
-            // pointer events in the same order as the application shell.
-            .child(
-                deferred(div().size_full().children(Root::render_dialog_layer(window, cx)))
-                    .with_priority(10),
-            )
-    }
-}
-
 fn open_settings(cx: &mut TestAppContext) -> (Entity<SettingsPane>, VisualTestContext) {
     cx.update(|cx| {
         gpui_component::init(cx);
@@ -241,7 +277,7 @@ fn open_settings(cx: &mut TestAppContext) -> (Entity<SettingsPane>, VisualTestCo
             pane.runtime = test_runtime();
         });
         pane = Some(view.clone());
-        let host = cx.new(|_| ThemeStudioHost { pane: view });
+        let host = cx.new(|_| SettingsPaneHost { pane: view });
         Root::new(host, window, cx)
     });
     window.simulate_resize(size(px(1280.0), px(1000.0)));
@@ -805,6 +841,7 @@ fn advanced_selection_and_cursor_text_picker_colors_preview_persist_apply_and_re
 
     open_theme_editor(&mut window);
     edit_input("theme-editor-name", &saved_name, &mut window);
+    reveal_editor_control("theme-editor-advanced-toggle", &mut window);
     click("theme-editor-advanced-toggle", &mut window);
     assert!(window.debug_bounds("theme-editor-preview-cursor").is_some());
 
@@ -1181,7 +1218,7 @@ fn native_theme_picker_visual_review() {
                         }
                     });
                     pane = Some(settings.clone());
-                    let host = cx.new(|_| ThemeStudioHost { pane: settings });
+                    let host = cx.new(|_| SettingsPaneHost { pane: settings });
                     cx.new(|cx| Root::new(host, window, cx))
                 },
             )
@@ -1676,4 +1713,50 @@ fn theme_editor_save_only_forks_a_non_active_custom_template_without_publishing_
     );
     assert_eq!(settings_file_snapshot(), before_save_settings);
     assert_eq!(settings_file_snapshot(), before_settings_file);
+}
+
+#[gpui::test]
+fn theme_list_scroll_keeps_preview_visible_and_narrow_picker_accessible(cx: &mut TestAppContext) {
+    let _fixture_guard = lock_theme_studio();
+    let (pane, mut window) = open_settings(cx);
+    window.simulate_resize(size(px(900.0), px(590.0)));
+    draw(&mut window);
+    click("open-theme-picker", &mut window);
+    click_first_theme_option(&mut window);
+    let preview_before = window.debug_bounds("theme-picker-terminal-preview").unwrap();
+    let grid_before = window.debug_bounds("appearance-theme-grid").unwrap();
+    let list = window.debug_bounds("appearance-theme-list-scroll").unwrap();
+    let footer = window.debug_bounds("apply-appearance-picker").unwrap();
+    assert!(preview_before.bottom() < footer.top());
+    window.simulate_event(gpui::ScrollWheelEvent {
+        position: list.center(),
+        delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.0), px(-350.0))),
+        touch_phase: gpui::TouchPhase::Moved,
+        modifiers: Modifiers::default(),
+    });
+    draw(&mut window);
+    assert!(window.debug_bounds("appearance-theme-grid").unwrap().top() < grid_before.top());
+    assert_eq!(window.debug_bounds("theme-picker-terminal-preview").unwrap(), preview_before);
+    assert_eq!(window.debug_bounds("apply-appearance-picker").unwrap(), footer);
+
+    press("end", &mut window);
+    pane.read_with(&mut window, |pane, _| {
+        let picker = pane.appearance_picker.as_ref().unwrap();
+        assert_eq!(Some(&picker.draft), picker.choices().last());
+    });
+    assert_eq!(window.debug_bounds("theme-picker-terminal-preview").unwrap(), preview_before);
+    window.simulate_resize(size(px(620.0), px(590.0)));
+    draw(&mut window);
+    assert!(window.debug_bounds("appearance-theme-list-scroll").is_none());
+    let preview = window.debug_bounds("theme-picker-terminal-preview").unwrap();
+    let grid = window.debug_bounds("appearance-theme-grid").unwrap();
+    assert!(grid.top() > preview.bottom(), "narrow layout retains the stacked preview");
+    let dialog = window.debug_bounds("appearance-picker-dialog").unwrap();
+    let apply = window.debug_bounds("apply-appearance-picker").unwrap();
+    assert!(apply.bottom() <= dialog.bottom(), "the footer remains reachable");
+    press("home", &mut window);
+    pane.read_with(&mut window, |pane, _| {
+        let picker = pane.appearance_picker.as_ref().unwrap();
+        assert_eq!(Some(&picker.draft), picker.choices().first());
+    });
 }

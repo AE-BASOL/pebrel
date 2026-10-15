@@ -25,6 +25,7 @@ to rename all existing directories or create abstract interfaces everywhere.
 | `nebula_app/src/display/suggest_engine.rs` | Shared candidate calculation from input snapshots; compatibility adapter for pane state | A second source registry or access to the terminal grid during calculation |
 | `nebula_hook` | Small process/lifecycle hook bridge | An application dependency container |
 | `nebula_app/src/i18n` | Static lookup, locale resolution and formatting | Runtime catalog parsing or UI ownership |
+| `nebula_app/src/scrollbar.rs` | Shared overlay-scrollbar geometry, hit testing and drag mapping | A renderer, view owner or input dispatcher |
 | `nebula_app/src/math` | Parse, validate, layout, compile and cache responsibilities | A duplicated per-shell math engine |
 | `nebula_app/src/platform` | Explicit platform capabilities and native adapters | A dumping ground for unrelated logic |
 | `nebula_app/src/ai_hook` | Normalized provider facts, bounded ordering, one shared pane lifecycle and owned installation policy; native Windows/Unix transports | Screen keyword rules or a separate state machine per UI shell |
@@ -86,11 +87,19 @@ process. Measure hot-path effects instead of extrapolating a tiny benchmark to t
 whole product.
 
 Completion follows this boundary: the terminal view captures a verified input line
-and owns its pending task; `completion::Session` prepares an owned request and
+and caret, including an advertised native editor snapshot, and owns its pending
+task; `completion::Session` prepares an owned request and
 selects permitted sources; shared calculation takes only input/cwd/environment and
 returns candidates plus any remote-directory demand. The UI applies results only
 after checking the current input, environment and mode. Popup selection and viewport
-state remain UI-owned. The existing legacy adapter still accepts pane state, then
+state remain UI-owned. Git and project-script metadata follow a captured host,
+WSL or authenticated SSH execution scope; SSH connection generations separate
+cached snapshots. Queries use owned background processes or channels. Workspace
+selection and command argument roles remain shared rules, with local and guest
+catalogs using the same selection code. See the
+[metadata boundary](../architecture/notes/nebula_app/completion/2026-10-03-scoped-metadata.md)
+and [editor ownership](../architecture/notes/nebula_app/gpui_shell/terminal/view/2026-10-03-editor-snapshots.md).
+The existing legacy adapter still accepts pane state, then
 calls the same candidate calculation; it does not gain local Git discovery through
 this extraction. See the [request boundary decision](../architecture/notes/nebula_app/completion/2026-09-30-request-boundary.md).
 
