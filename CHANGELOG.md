@@ -18,6 +18,15 @@ Every release entry is provided in English and Simplified Chinese.
 - Added: Choose a completed shell command to search its retained output, jump to its start or end, or copy it. Supported command results also offer a copy control on hover with feedback. Command scopes require shell integration; copies are limited to 8 MiB, and expired or oversized output leaves the clipboard unchanged. ([#650](https://github.com/Kuddev/pebrel/pull/650))
 - Added: Hovering a Markdown link shows Edit, Open and Copy actions and a stronger underline. Open and Copy keep the full destination; Edit changes only the selected occurrence, preserves its label and supports cancel and undo. Files are saved separately, and documents without edit permission keep Edit disabled.
 
+#### Improved
+
+- Improved: Inline code in Markdown uses rounded backgrounds and horizontal padding while preserving original source text, copied content, links and selection offsets. ([#649](https://github.com/Kuddev/pebrel/pull/649))
+- Improved: Reader/source switching sits before the upper-right toolbar divider and uses the same sliding indicator transition as Settings, including continuous retargeting and reduced-motion behavior. The file menu brings together path/name copying and applicable local-file actions. ([#652](https://github.com/Kuddev/pebrel/pull/652))
+- Improved: Code-block language and copy controls appear along the top on hover or keyboard focus without reserving extra layout space. ([#652](https://github.com/Kuddev/pebrel/pull/652))
+- Improved: Terminal search appears before Command Manager in both tab layouts. Search and the command palette use compact controls with clearer spacing, search scope and match feedback. ([#652](https://github.com/Kuddev/pebrel/pull/652))
+- Improved: Add 351 Japanese translations from the 2.2.0 catalog for backup, phone remote, backgrounds, terminal effects, SSH forwarding and theme management. Newer untranslated entries continue to use the existing English fallback. ([#568](https://github.com/Kuddev/pebrel/pull/568))
+- Improved: Focus rings retain keyboard and pointer styling without repeatedly triggering theme updates when their color is unchanged. ([#648](https://github.com/Kuddev/pebrel/pull/648))
+
 #### Fixed
 
 - Fixed: macOS remote-backup setup saves WebDAV passwords and S3 secrets through the existing system credential store instead of rejecting the final step as Windows-only. Linux uses the existing Secret Service adapter; environment-variable precedence and storage failures retain their established behavior. Addresses [#561](https://github.com/Kuddev/pebrel/issues/561). ([#581](https://github.com/Kuddev/pebrel/pull/581))
@@ -45,15 +54,6 @@ Every release entry is provided in English and Simplified Chinese.
 - Fixed: Plugin manifests cannot grant themselves Runtime methods that the host has not opened to plugins. Package checks and native/Lua command dispatch enforce the same capability boundary. ([#647](https://github.com/Kuddev/pebrel/pull/647))
 - Fixed: Markdown reference links keep their resolved destinations through parsing and rendering, so hovering, opening and copying them receive the complete target instead of an empty URL.
 
-#### Improved
-
-- Improved: Inline code in Markdown uses rounded backgrounds and horizontal padding while preserving original source text, copied content, links and selection offsets. ([#649](https://github.com/Kuddev/pebrel/pull/649))
-- Improved: Reader/source switching sits before the upper-right toolbar divider and uses the same sliding indicator transition as Settings, including continuous retargeting and reduced-motion behavior. The file menu brings together path/name copying and applicable local-file actions. ([#652](https://github.com/Kuddev/pebrel/pull/652))
-- Improved: Code-block language and copy controls appear along the top on hover or keyboard focus without reserving extra layout space. ([#652](https://github.com/Kuddev/pebrel/pull/652))
-- Improved: Terminal search appears before Command Manager in both tab layouts. Search and the command palette use compact controls with clearer spacing, search scope and match feedback. ([#652](https://github.com/Kuddev/pebrel/pull/652))
-- Improved: Add 351 Japanese translations from the 2.2.0 catalog for backup, phone remote, backgrounds, terminal effects, SSH forwarding and theme management. Newer untranslated entries continue to use the existing English fallback. ([#568](https://github.com/Kuddev/pebrel/pull/568))
-- Improved: Focus rings retain keyboard and pointer styling without repeatedly triggering theme updates when their color is unchanged. ([#648](https://github.com/Kuddev/pebrel/pull/648))
-
 ### 中文
 
 #### 新增
@@ -65,6 +65,15 @@ Every release entry is provided in English and Simplified Chinese.
 - 新增：终端支持字面文本查找，可搜索当前保留的输出，显示匹配计数并前后跳转，支持大小写匹配。通过 Ctrl+Shift+H 打开，macOS 也可使用 Command+F；搜索输入不会发送到 Shell，也不会改变终端网格尺寸。 ([#650](https://github.com/Kuddev/pebrel/pull/650), [#652](https://github.com/Kuddev/pebrel/pull/652))
 - 新增：可选择已完成的 Shell 命令，搜索其保留输出、跳转到起止位置或复制整段输出；适用的命令结果还提供悬停复制与反馈。按命令限定范围依赖 Shell 集成；复制上限为 8 MiB，输出过期或过大时保留原剪贴板内容。 ([#650](https://github.com/Kuddev/pebrel/pull/650))
 - 新增：Markdown 链接悬停显示 Edit、Open、Copy，并加粗链接下划线。打开和复制保留完整目标；编辑只修改选中的链接，保留标签文字，支持取消与撤销。文件仍单独保存，无编辑权限的文档禁用 Edit。
+
+#### 改进
+
+- 改进：Markdown 行内代码采用圆角底色及水平留白，同时保留原始源码、复制内容、链接和选区位置。 ([#649](https://github.com/Kuddev/pebrel/pull/649))
+- 改进：阅读与源码切换放到右上工具栏竖线前，采用与设置相同的滑动指示器，快速反向切换可连续过渡，并遵循减少动态效果设置；文件菜单集中提供复制路径、复制文件名及适用的本地文件操作。 ([#652](https://github.com/Kuddev/pebrel/pull/652))
+- 改进：代码块的语言与复制控件在悬停或键盘焦点进入时显示于顶部，不额外占用正文布局空间。 ([#652](https://github.com/Kuddev/pebrel/pull/652))
+- 改进：两种标签布局都将终端搜索放到命令管理器前；终端查找与命令面板采用更紧凑的控件，并改善留白、搜索范围和匹配反馈的呈现。 ([#652](https://github.com/Kuddev/pebrel/pull/652))
+- 改进：补齐 2.2.0 文案目录中的 351 条日语翻译，覆盖备份、手机远程、背景、终端效果、SSH 转发及主题管理；后续尚未翻译的条目继续使用既有英文回退。 ([#568](https://github.com/Kuddev/pebrel/pull/568))
+- 改进：焦点环颜色未变化时不再反复触发主题更新，键盘与鼠标操作切换仍能更新正确的焦点样式。 ([#648](https://github.com/Kuddev/pebrel/pull/648))
 
 #### 修复
 
@@ -92,15 +101,6 @@ Every release entry is provided in English and Simplified Chinese.
 - 修复：Linux 静默启动遵循初始窗口可见性；通过客户端标题栏关闭时沿用工作区的会话驻留守卫，普通窗口与快速终端使用已安装的桌面身份。全局快捷键保留 portal 激活令牌，并反馈注册不可用的情况；唤起能力仍取决于 portal 和合成器支持。对应 [#629](https://github.com/Kuddev/pebrel/issues/629)、[#624](https://github.com/Kuddev/pebrel/issues/624)。 ([#642](https://github.com/Kuddev/pebrel/pull/642))
 - 修复：插件清单自行声明权限时，不能调用宿主尚未开放给插件的 Runtime 方法；包检查和 native/Lua 命令执行遵循同一能力边界。 ([#647](https://github.com/Kuddev/pebrel/pull/647))
 - 修复：Markdown 引用式链接在解析和渲染之间保留已解析地址，悬停、打开和复制可取得完整目标，不再得到空 URL。
-
-#### 改进
-
-- 改进：Markdown 行内代码采用圆角底色及水平留白，同时保留原始源码、复制内容、链接和选区位置。 ([#649](https://github.com/Kuddev/pebrel/pull/649))
-- 改进：阅读与源码切换放到右上工具栏竖线前，采用与设置相同的滑动指示器，快速反向切换可连续过渡，并遵循减少动态效果设置；文件菜单集中提供复制路径、复制文件名及适用的本地文件操作。 ([#652](https://github.com/Kuddev/pebrel/pull/652))
-- 改进：代码块的语言与复制控件在悬停或键盘焦点进入时显示于顶部，不额外占用正文布局空间。 ([#652](https://github.com/Kuddev/pebrel/pull/652))
-- 改进：两种标签布局都将终端搜索放到命令管理器前；终端查找与命令面板采用更紧凑的控件，并改善留白、搜索范围和匹配反馈的呈现。 ([#652](https://github.com/Kuddev/pebrel/pull/652))
-- 改进：补齐 2.2.0 文案目录中的 351 条日语翻译，覆盖备份、手机远程、背景、终端效果、SSH 转发及主题管理；后续尚未翻译的条目继续使用既有英文回退。 ([#568](https://github.com/Kuddev/pebrel/pull/568))
-- 改进：焦点环颜色未变化时不再反复触发主题更新，键盘与鼠标操作切换仍能更新正确的焦点样式。 ([#648](https://github.com/Kuddev/pebrel/pull/648))
 
 ### Contributors
 
