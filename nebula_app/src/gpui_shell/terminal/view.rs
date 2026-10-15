@@ -1152,7 +1152,7 @@ impl TerminalView {
         if !mods.alt
             && !mods.function
             && ((mods.control && mods.shift && ks.key.as_str() == "h")
-                || (cfg!(target_os = "macos")
+                || (crate::platform::Platform::current() == crate::platform::Platform::MacOS
                     && mods.platform
                     && !mods.shift
                     && ks.key.as_str() == "f"))
