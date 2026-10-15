@@ -924,6 +924,7 @@ impl NebulaWorkspace {
             .child(self.render_collapsed_tab_title(cx))
             .child(
                 window_titlebar::title_bar_right_controls()
+                    .child(self.render_terminal_find_button(settings_active, cx))
                     .child(
                         toolbar_button(
                             "toggle-command-manager",
@@ -931,6 +932,7 @@ impl NebulaWorkspace {
                                 .path(crate::gpui_shell::assets::nav::COMMAND_MANAGER),
                             false,
                         )
+                        .debug_selector(|| "command-manager-toggle".into())
                         .selected(self.command_manager_open)
                         .tooltip(language.text(Message::ChromeCommandList))
                         .on_click(cx.listener(|this, _, window, cx| {
