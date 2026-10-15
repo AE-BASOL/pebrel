@@ -231,8 +231,12 @@ impl NebulaWorkspace {
         rows
     }
 
-    pub(super) fn render_command_palette(&mut self, cx: &mut Context<Self>) -> gpui::AnyElement {
-        use crate::display::ui::tokens::{control, radius, space};
+    pub(super) fn render_command_palette(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
+        use crate::display::ui::tokens::{radius, space};
 
         let theme = cx.theme();
         let panel_bg = theme.popover;
@@ -240,6 +244,7 @@ impl NebulaWorkspace {
         let selected_bg = theme.list_active;
         let hover_bg = theme.list_hover;
         let accent = theme.primary;
+        let ring = theme.ring;
         let border = theme.border;
         let foreground = theme.foreground;
         let muted = theme.muted_foreground;
@@ -286,15 +291,14 @@ impl NebulaWorkspace {
             item_count as f32 * PALETTE_ROW_HEIGHT
                 + group_count as f32 * PALETTE_GROUP_HEADER_HEIGHT
                 + content_node_count.saturating_sub(1) as f32 * PALETTE_ROW_GAP
+                + 8.0
         };
         // 面板外框必须稳定：筛选结果变少时只留下空白，不能让居中的面板连同
         // 搜索框一起上下跳。Command Palette 没有筛选条，结果视口自然多占一行。
-        let chrome_gap_count = if has_filter_bar { 2.0 } else { 1.0 };
-        let results_height = PALETTE_PANEL_HEIGHT
-            - space::XS * 2.0
-            - control::MIN_HIT_TARGET
-            - if has_filter_bar { PALETTE_FILTER_BAR_HEIGHT } else { 0.0 }
-            - space::XS * chrome_gap_count;
+        let results_height = f32::from(window.viewport_size().height).min(PALETTE_PANEL_HEIGHT)
+            - 2.0
+            - 56.0
+            - if has_filter_bar { PALETTE_FILTER_BAR_HEIGHT } else { 0.0 };
         let results_scrollable = content_height > results_height;
         // 同一份 picker 只要有一行带图标，就为全部行保留固定 icon rail；常规
         // 命令目录没有图标时整列消失，不会凭空多出一层缩进。
@@ -316,7 +320,8 @@ impl NebulaWorkspace {
                             header.pr(px(PALETTE_SCROLLBAR_CONTENT_GUTTER))
                         })
                         .gap(px(space::XS))
-                        .items_center()
+                        .items_end()
+                        .pb(px(8.0))
                         .child(
                             div()
                                 .flex_shrink_0()
@@ -325,7 +330,6 @@ impl NebulaWorkspace {
                                 .text_color(muted)
                                 .child(item.group.clone()),
                         )
-                        .child(div().h(px(control::HAIRLINE)).flex_1().bg(border))
                         .into_any_element(),
                 );
             }
@@ -510,26 +514,51 @@ impl NebulaWorkspace {
             );
         }
 
-        // 搜索框采用紧凑表面、低对比描边和前置搜索图标；边界只包住
-        // 输入本身，避免再用整行分隔线把面板切成多层容器。
+        let focused = self.command_palette_input.read(cx).focus_handle(cx).is_focused(window);
+        let focus_line = window.use_keyed_state("workspace-palette-focus-line", cx, |_, _| {
+            crate::gpui_shell::motion::FocusUnderline::default()
+        });
+        let underline = focus_line.update(cx, |line, _| {
+            line.set_focused(focused);
+            line.underline(ring)
+        });
+        // 搜索直接成为面板顶部，不再套一层灰色输入卡片；分组由留白而非长横线分隔。
         let search_box = h_flex()
+            .debug_selector(|| "workspace-palette-search".to_owned())
+            .relative()
             .w_full()
-            .h(px(control::MIN_HIT_TARGET))
+            .h(px(56.0))
             .flex_shrink_0()
-            .rounded(px(radius::CONTROL))
-            .border_1()
-            .border_color(border)
-            .bg(surface_bg)
-            .overflow_hidden()
+            .px(px(16.0))
+            .gap(px(10.0))
+            .border_b_1()
+            .border_color(border.opacity(0.65))
+            .child(Icon::new(IconName::Search).size(px(18.0)).text_color(muted))
             .child(
                 Input::new(&self.command_palette_input)
-                    .w_full()
+                    .flex_1()
+                    .min_w_0()
                     .appearance(false)
+                    .bordered(false)
                     .focus_bordered(false)
                     .cleanable(true)
-                    .prefix(Icon::new(IconName::Search).xsmall().text_color(muted))
-                    .text_size(px(13.0)),
-            );
+                    .text_size(px(15.0)),
+            )
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .px(px(6.0))
+                    .py(px(3.0))
+                    .rounded(px(5.0))
+                    .border_1()
+                    .border_color(border)
+                    .bg(surface_bg.opacity(0.45))
+                    .font_family(mono_family.clone())
+                    .text_size(px(11.0))
+                    .text_color(muted)
+                    .child("esc"),
+            )
+            .child(underline);
 
         let filter_bar = palette_filters.map(|(selected_filter, counts)| {
             let chips = counts
@@ -543,8 +572,12 @@ impl NebulaWorkspace {
                         .gap(px(space::XXS))
                         .items_center()
                         .cursor_pointer()
-                        .rounded(px(radius::CONTROL))
-                        .when(selected, |chip| chip.bg(selected_bg))
+                        .rounded_full()
+                        .border_1()
+                        .border_color(gpui::transparent_black())
+                        .when(selected, |chip| {
+                            chip.bg(accent.opacity(0.08)).border_color(accent.opacity(0.3))
+                        })
                         .when(!selected, |chip| chip.hover(|chip| chip.bg(hover_bg)))
                         .child(
                             div()
@@ -569,7 +602,7 @@ impl NebulaWorkspace {
                 .h(px(PALETTE_FILTER_BAR_HEIGHT))
                 .flex_shrink_0()
                 .w_full()
-                .px_1()
+                .px(px(12.0))
                 .gap_1()
                 .items_center()
                 .children(chips)
@@ -581,22 +614,21 @@ impl NebulaWorkspace {
             .id("workspace-palette-results-scroll")
             .size_full()
             .gap(px(PALETTE_ROW_GAP))
+            .px(px(8.0))
+            .pb(px(8.0))
             .overflow_y_scroll()
             .track_scroll(&scroll_handle)
             .children(rows);
-        let results = div()
-            .relative()
-            .h(px(results_height))
-            .flex_shrink_0()
-            .min_h_0()
-            .overflow_hidden()
-            .child(result_list)
-            .when(results_scrollable, |results| {
-                results.child(
-                    gpui_component::scroll::Scrollbar::vertical(&scroll_handle)
-                        .scrollbar_show(gpui_component::scroll::ScrollbarShow::Always),
-                )
-            });
+        let results =
+            div().relative().flex_1().min_h_0().overflow_hidden().child(result_list).when(
+                results_scrollable,
+                |results| {
+                    results.child(
+                        gpui_component::scroll::Scrollbar::vertical(&scroll_handle)
+                            .scrollbar_show(gpui_component::scroll::ScrollbarShow::Always),
+                    )
+                },
+            );
 
         div()
             .absolute()
@@ -633,15 +665,14 @@ impl NebulaWorkspace {
             .child(
                 v_flex()
                     .w(px(PALETTE_PANEL_WIDTH))
+                    .max_w_full()
                     .h(px(PALETTE_PANEL_HEIGHT))
                     .max_h_full()
-                    .rounded(px(radius::OVERLAY))
+                    .rounded(px(16.0))
                     .border_1()
                     .border_color(border)
                     .bg(panel_bg)
                     .shadow_lg()
-                    .p(px(space::XS))
-                    .gap(px(space::XS))
                     .overflow_hidden()
                     .occlude()
                     .on_mouse_down(

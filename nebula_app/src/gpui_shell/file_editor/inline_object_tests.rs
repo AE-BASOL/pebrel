@@ -151,7 +151,7 @@ fn object_type(input: &Entity<InputState>, text: &str, cx: &mut VisualTestContex
 }
 
 #[gpui::test]
-fn reader_formula_draft_stays_below_text_cancels_and_commits_only_the_clicked_occurrence(
+fn reader_formula_draft_floats_without_moving_text_and_edits_only_the_clicked_occurrence(
     cx: &mut TestAppContext,
 ) {
     let dir = tempfile::tempdir().unwrap();
@@ -166,9 +166,10 @@ fn reader_formula_draft_stays_below_text_cancels_and_commits_only_the_clicked_oc
     click_part(second, &mut cx);
     let formula = cx.debug_bounds(format!("markdown-inline-part-0-{second}").leak()).unwrap();
     let panel = cx.debug_bounds("markdown-object-editor").unwrap();
-    assert!(panel.top() >= formula.bottom(), "editor must reserve space below its paragraph");
-    assert!(cx.debug_bounds("markdown-preview-block-1").unwrap().top() >= panel.bottom());
-    assert!(cx.debug_bounds("markdown-preview-block-1").unwrap().top() > following.top());
+    assert!(panel.top() >= formula.bottom(), "editor opens below its paragraph");
+    assert_eq!(cx.debug_bounds("markdown-preview-block-1").unwrap(), following);
+    let paragraph = cx.debug_bounds("markdown-preview-block-0").unwrap();
+    assert!((panel.center().x - paragraph.center().x).abs() < px(1.0));
     let input = file.read_with(&cx, |view, cx| {
         let edit = view.object_edit.as_ref().unwrap();
         assert_eq!(edit.part, second);

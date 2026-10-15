@@ -410,8 +410,8 @@ const PALETTE_METADATA_MAX_WIDTH: f32 = 260.0;
 /// 与 Shell 选择器的 launcher row 共用同一命中高度；不能只放大文字或底色，
 /// 否则 hover、点击和键盘选中会再次出现三套几何。
 const PALETTE_ROW_HEIGHT: f32 = 42.0;
-const PALETTE_GROUP_HEADER_HEIGHT: f32 = 26.0;
-const PALETTE_FILTER_BAR_HEIGHT: f32 = 26.0;
+const PALETTE_GROUP_HEADER_HEIGHT: f32 = 40.0;
+const PALETTE_FILTER_BAR_HEIGHT: f32 = 40.0;
 const PALETTE_ROW_GAP: f32 = 4.0;
 const PALETTE_SCROLLBAR_CONTENT_GUTTER: f32 = 16.0;
 

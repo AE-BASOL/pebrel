@@ -1,5 +1,6 @@
 {
   "terminal_reading": {
+    "options": "查找选项",
     "shortcut": "在终端中查找（Ctrl+Shift+H / ⌘F）",
     "match_case": "区分大小写",
     "no_matches": "没有匹配结果",
@@ -492,6 +493,7 @@
     "line_ending": "换行符",
     "status": "状态",
     "copy_name": "复制文件名",
+    "clipboard_copied": "已复制",
     "reveal": "在文件管理器中显示",
     "open_external": "用默认应用打开",
     "preview_limited": "此文档较大，富文本预览已缩短。切换到编辑可查看已加载的源码。",

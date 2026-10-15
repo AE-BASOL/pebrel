@@ -380,6 +380,7 @@ struct MathFormulaView {
     image_copy_task: Option<Task<()>>,
     toolbar_hovered: bool,
     formula_hovered: bool,
+    scroll: gpui::ScrollHandle,
     _latex_feedback_subscription: Subscription,
     _image_feedback_subscription: Subscription,
 }
@@ -399,6 +400,7 @@ impl MathFormulaView {
             image_copy_task: None,
             toolbar_hovered: false,
             formula_hovered: false,
+            scroll: gpui::ScrollHandle::new(),
             _latex_feedback_subscription: latex_feedback_subscription,
             _image_feedback_subscription: image_feedback_subscription,
         }
@@ -543,6 +545,9 @@ impl Render for MathFormulaView {
 
         let toolbar = h_flex()
             .id(("markdown-math-toolbar", key))
+            .debug_selector(|| "markdown-math-toolbar".to_owned())
+            .w(px(64.0))
+            .occlude()
             .on_hover(cx.listener(|view, hovered, _, cx| {
                 if view.toolbar_hovered != *hovered {
                     view.toolbar_hovered = *hovered;
@@ -560,7 +565,7 @@ impl Render for MathFormulaView {
             .child(latex_button)
             .child(image_button);
 
-        div()
+        let formula = div()
             .id(("markdown-formula-actions", key))
             .relative()
             .flex_shrink_0()
@@ -575,29 +580,63 @@ impl Render for MathFormulaView {
                 source,
                 display,
                 visible_pixel_size: self.visible_pixel_size.clone(),
-            })
-            .when(
-                self.formula_hovered
-                    || self.toolbar_hovered
-                    || latex_copied
-                    || image_copied
-                    || image_pending,
-                |view| {
-                    view.child(
-                        gpui::deferred(
-                            // 显式零尺寸锚点避免绝对定位的静态位置落到公式底部。
-                            div().absolute().top_0().left_0().size(px(0.0)).child(
+            });
+        let surface = if display {
+            div()
+                .id(("markdown-math-region", key))
+                .debug_selector(|| "markdown-math-region".to_owned())
+                .relative()
+                .w_full()
+                .min_w_0()
+                .child(
+                    div()
+                        .id(("markdown-math-scroll", key))
+                        .debug_selector(|| "markdown-math-scroll".to_owned())
+                        .w_full()
+                        .min_w_0()
+                        .flex()
+                        .items_center()
+                        .py(px(12.0))
+                        .overflow_x_scroll()
+                        .track_scroll(&self.scroll)
+                        // 自动边距只分配正的剩余宽度；长公式从左侧开始，避免居中后丢掉开头。
+                        .child(formula.mx_auto()),
+                )
+                .child(
+                    gpui_component::scroll::Scrollbar::horizontal(&self.scroll)
+                        .scrollbar_show(gpui_component::scroll::ScrollbarShow::Always),
+                )
+        } else {
+            formula
+        };
+        surface.when(
+            self.formula_hovered
+                || self.toolbar_hovered
+                || latex_copied
+                || image_copied
+                || image_pending,
+            |view| {
+                view.child(
+                    gpui::deferred(
+                        // 显式零尺寸锚点避免绝对定位的静态位置落到公式底部。
+                        div()
+                            .absolute()
+                            .top(px(if display { 12.0 } else { 0.0 }))
+                            .left(gpui::relative(0.5))
+                            .size(px(0.0))
+                            .child(
                                 gpui::anchored()
                                     .anchor(gpui::Anchor::BottomLeft)
                                     .position_mode(gpui::AnchoredPositionMode::Local)
+                                    .offset(point(px(-32.0), px(-4.0)))
                                     .snap_to_window_with_margin(px(4.0))
                                     .child(toolbar),
                             ),
-                        )
-                        .with_priority(1),
                     )
-                },
-            )
+                    .with_priority(1),
+                )
+            },
+        )
     }
 }
 
@@ -676,9 +715,14 @@ impl Element for MathView {
         let style = Style { flex_shrink: 0.0, ..Style::default() };
         let visible_pixel_size = self.visible_pixel_size.clone();
         let layout_id = window.request_measured_layout(style, move |_, available, window, cx| {
-            let max_width = match available.width {
-                AvailableSpace::Definite(width) => f32::from(width).max(8.0),
-                AvailableSpace::MinContent | AvailableSpace::MaxContent => f32::INFINITY,
+            let max_width = if display {
+                // 块级公式由外层横向滚动，不通过不断缩字号来塞进正文列。
+                f32::INFINITY
+            } else {
+                match available.width {
+                    AvailableSpace::Definite(width) => f32::from(width).max(8.0),
+                    AvailableSpace::MinContent | AvailableSpace::MaxContent => f32::INFINITY,
+                }
             };
             let assets = source_assets(cx);
             let fitted = assets

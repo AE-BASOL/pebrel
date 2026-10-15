@@ -1,10 +1,11 @@
-//! 小浮层只覆盖网格；复制是主动作，执行列表仅保存核心给出的有界元数据。
+//! 默认只显示一条查找栏；范围、大小写和输出操作收进菜单，保持原有输入隔离。
 use super::*;
 use gpui::prelude::FluentBuilder as _;
 use gpui_component::{
-    Disableable as _, IconName, Selectable as _,
+    Disableable as _, IconName,
     button::{Button, ButtonVariants as _},
     input::Input,
+    menu::DropdownMenu as _,
 };
 
 impl TerminalView {
@@ -42,7 +43,6 @@ impl TerminalView {
         };
         let copied = panel.feedback.read(cx).is_copied();
         let pending = panel.feedback.read(cx).is_pending();
-        let unavailable = panel.scope.is_none() || panel.source.is_none();
         let selected = panel.selected.map_or(0, |i| i + 1);
         let count = language.format(
             Message::TerminalReadingCount,
@@ -63,177 +63,131 @@ impl TerminalView {
                     })
             },
         );
-        let mut overlay = div()
-            .id("terminal-reading-overlay")
-            .debug_selector(|| "terminal-reading-overlay".to_owned())
-            .w_full()
-            .max_w(px(490.0))
-            .occlude()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .p_2()
-            .rounded_md()
-            .border_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().popover)
-            .text_color(cx.theme().foreground)
-            .text_sm()
-            .shadow_sm()
-            .on_key_down(cx.listener(Self::reading_key))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_1()
-                    .child(div().flex_1().min_w_0().child(t(Message::TerminalReadingOpen)))
-                    .child(
-                        Button::new("reading-close")
-                            .icon(IconName::Close)
-                            .small()
-                            .aria_label(t(Message::TerminalReadingClose))
-                            .tooltip(t(Message::TerminalReadingClose))
-                            .on_click(
-                                cx.listener(|view, _, window, cx| view.close_reading(window, cx)),
-                            ),
-                    ),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_1()
-                    .child(
-                        div()
-                            .id("reading-input-wrap")
-                            .debug_selector(|| "reading-input".to_owned())
-                            .relative()
-                            .flex_1()
-                            .min_w_0()
-                            .border_b_1()
-                            .border_color(cx.theme().border)
-                            .child(
-                                Input::new(&panel.input)
-                                    .small()
-                                    .appearance(false)
-                                    .bordered(false)
-                                    .focus_bordered(false),
-                            )
-                            .child(panel.focus_line.underline(cx.theme().ring)),
-                    )
-                    .child(
-                        Button::new("reading-previous")
-                            .icon(IconName::ChevronUp)
-                            .small()
-                            .aria_label(t(Message::TerminalReadingPrevious))
-                            .tooltip(t(Message::TerminalReadingPrevious))
-                            .disabled(panel.hits.is_empty())
-                            .on_click(
-                                cx.listener(|view, _, _, cx| view.navigate_reading_match(true, cx)),
-                            ),
-                    )
-                    .child(
-                        Button::new("reading-next")
-                            .icon(IconName::ChevronDown)
-                            .small()
-                            .aria_label(t(Message::TerminalReadingNext))
-                            .tooltip(t(Message::TerminalReadingNext))
-                            .disabled(panel.hits.is_empty())
-                            .on_click(
-                                cx.listener(|view, _, _, cx| {
+        let options = self.reading_options(cx);
+        let mut overlay =
+            div()
+                .id("terminal-reading-overlay")
+                .debug_selector(|| "terminal-reading-overlay".to_owned())
+                .w_full()
+                .max_w(px(440.0))
+                .occlude()
+                .flex()
+                .flex_col()
+                .rounded(px(8.0))
+                .border_1()
+                .border_color(cx.theme().border)
+                .bg(cx.theme().popover)
+                .text_color(cx.theme().foreground)
+                .text_size(px(13.0))
+                .shadow_sm()
+                .on_key_down(cx.listener(Self::reading_key))
+                .child(
+                    div()
+                        .debug_selector(|| "terminal-reading-search-row".to_owned())
+                        .h(px(40.0))
+                        .px(px(5.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(2.0))
+                        .child(
+                            div()
+                                .id("reading-input-wrap")
+                                .debug_selector(|| "reading-input".to_owned())
+                                .relative()
+                                .flex_1()
+                                .min_w_0()
+                                .border_b_1()
+                                .border_color(cx.theme().border.opacity(0.6))
+                                .child(
+                                    Input::new(&panel.input)
+                                        .appearance(false)
+                                        .bordered(false)
+                                        .focus_bordered(false)
+                                        .text_size(px(13.0)),
+                                )
+                                .child(panel.focus_line.underline(cx.theme().ring)),
+                        )
+                        .child(
+                            div()
+                                .min_w(px(38.0))
+                                .flex_shrink_0()
+                                .text_right()
+                                .text_size(px(11.0))
+                                .text_color(cx.theme().muted_foreground)
+                                .child(if panel.running { "…".to_owned() } else { count }),
+                        )
+                        .child(
+                            Button::new("reading-previous")
+                                .ghost()
+                                .size(px(28.0))
+                                .icon(IconName::ChevronUp)
+                                .aria_label(t(Message::TerminalReadingPrevious))
+                                .tooltip(t(Message::TerminalReadingPrevious))
+                                .disabled(panel.hits.is_empty())
+                                .on_click(cx.listener(|view, _, _, cx| {
+                                    view.navigate_reading_match(true, cx)
+                                })),
+                        )
+                        .child(
+                            Button::new("reading-next")
+                                .ghost()
+                                .size(px(28.0))
+                                .icon(IconName::ChevronDown)
+                                .aria_label(t(Message::TerminalReadingNext))
+                                .tooltip(t(Message::TerminalReadingNext))
+                                .disabled(panel.hits.is_empty())
+                                .on_click(cx.listener(|view, _, _, cx| {
                                     view.navigate_reading_match(false, cx)
-                                }),
+                                })),
+                        )
+                        .child(options)
+                        .child(
+                            Button::new("reading-close")
+                                .ghost()
+                                .size(px(28.0))
+                                .icon(IconName::Close)
+                                .aria_label(t(Message::TerminalReadingClose))
+                                .tooltip(t(Message::TerminalReadingClose))
+                                .on_click(cx.listener(|view, _, window, cx| {
+                                    view.close_reading(window, cx)
+                                })),
+                        ),
+                )
+                .when(panel.scope.is_some(), |overlay| {
+                    overlay.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .px_2()
+                            .pb_1()
+                            .text_size(px(11.0))
+                            .text_color(cx.theme().muted_foreground)
+                            .child(div().flex_1().min_w_0().truncate().child(title))
+                            .when(copied || pending, |row| {
+                                row.child(t(if copied {
+                                    Message::TerminalReadingCopied
+                                } else {
+                                    Message::TerminalReadingCopying
+                                }))
+                            })
+                            .child(
+                                Button::new("reading-clear-scope")
+                                    .ghost()
+                                    .size(px(24.0))
+                                    .icon(IconName::Close)
+                                    .aria_label(t(Message::TerminalReadingAll))
+                                    .tooltip(t(Message::TerminalReadingAll))
+                                    .on_click(cx.listener(|view, _, _, cx| {
+                                        view.choose_reading_scope(None, cx)
+                                    })),
                             ),
                     )
-                    .child(div().child(count)),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .gap_1()
-                    .child(
-                        Button::new("reading-match-case")
-                            .ghost()
-                            .small()
-                            .label("Aa")
-                            .selected(panel.match_case)
-                            .aria_label(t(Message::TerminalReadingMatchCase))
-                            .tooltip(t(Message::TerminalReadingMatchCase))
-                            .on_click(cx.listener(|view, _, _, cx| {
-                                if let Some(panel) = view.reading.panel.as_mut() {
-                                    panel.match_case = !panel.match_case;
-                                }
-                                view.restart_reading_search(cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("reading-refresh")
-                            .ghost()
-                            .small()
-                            .icon(IconName::Redo)
-                            .aria_label(t(Message::TerminalReadingRefresh))
-                            .tooltip(t(Message::TerminalReadingRefresh))
-                            .on_click(
-                                cx.listener(|view, _, _, cx| view.restart_reading_search(cx)),
-                            ),
-                    )
-                    .child(
-                        Button::new("reading-scope")
-                            .icon(IconName::Menu)
-                            .small()
-                            .label(t(Message::TerminalReadingChoose))
-                            .on_click(cx.listener(|view, _, _, cx| {
-                                view.refresh_reading_commands(cx);
-                                if let Some(panel) = view.reading.panel.as_mut() {
-                                    panel.commands_open = !panel.commands_open;
-                                }
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        Button::new("reading-copy")
-                            .small()
-                            .primary()
-                            .icon(if copied { IconName::Check } else { IconName::Copy })
-                            .label(t(if copied {
-                                Message::TerminalReadingCopied
-                            } else if pending {
-                                Message::TerminalReadingCopying
-                            } else {
-                                Message::TerminalReadingCopy
-                            }))
-                            .disabled(unavailable || pending)
-                            .on_click(cx.listener(|view, _, _, cx| view.copy_reading_command(cx))),
-                    )
-                    .child(
-                        Button::new("reading-start")
-                            .icon(IconName::ChevronUp)
-                            .small()
-                            .aria_label(t(Message::TerminalReadingStart))
-                            .tooltip(t(Message::TerminalReadingStart))
-                            .disabled(unavailable)
-                            .on_click(
-                                cx.listener(|view, _, _, cx| view.jump_reading_command(false, cx)),
-                            ),
-                    )
-                    .child(
-                        Button::new("reading-end")
-                            .icon(IconName::ChevronDown)
-                            .small()
-                            .aria_label(t(Message::TerminalReadingEnd))
-                            .tooltip(t(Message::TerminalReadingEnd))
-                            .disabled(unavailable)
-                            .on_click(
-                                cx.listener(|view, _, _, cx| view.jump_reading_command(true, cx)),
-                            ),
-                    ),
-            )
-            .child(div().min_w_0().truncate().child(title));
+                });
         if panel.commands_open {
             let mut list = div()
                 .id("reading-command-list")
+                .p_2()
                 .flex()
                 .flex_col()
                 .gap_1()
@@ -296,19 +250,10 @@ impl TerminalView {
                 ReadingIssue::CopyTooLarge => Message::TerminalReadingCopyLimit,
                 ReadingIssue::EmptyOutput => Message::TerminalReadingEmpty,
             })
-            .or_else(|| {
-                if panel.running {
-                    Some(Message::TerminalReadingSearching)
-                } else if panel.truncated {
-                    Some(Message::TerminalReadingTruncated)
-                } else if panel.hits.is_empty() && !panel.input.read(cx).value().is_empty() {
-                    Some(Message::TerminalReadingNoMatches)
-                } else {
-                    None
-                }
-            });
-        overlay =
-            overlay.when_some(notice, |overlay, notice| overlay.child(div().child(t(notice))));
+            .or_else(|| panel.truncated.then_some(Message::TerminalReadingTruncated));
+        overlay = overlay.when_some(notice, |overlay, notice| {
+            overlay.child(div().px_2().pb_2().text_size(px(11.0)).child(t(notice)))
+        });
         // Bubble listeners let the Input/Button consume its own event first; occlude alone
         // does not prevent ancestor terminal handlers from reporting mouse input to a TUI.
         for button in [MouseButton::Left, MouseButton::Right, MouseButton::Middle] {
@@ -328,6 +273,83 @@ impl TerminalView {
             .flex()
             .justify_end()
             .child(overlay)
+            .into_any_element()
+    }
+
+    fn reading_options(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let panel = self.reading.panel.as_ref().expect("reading panel");
+        let language = crate::gpui_shell::config::ui_language(cx);
+        let match_case = panel.match_case;
+        let unavailable = panel.scope.is_none() || panel.source.is_none();
+        let copying = panel.feedback.read(cx).is_pending();
+        let owner = cx.weak_entity();
+        Button::new("reading-options")
+            .ghost()
+            .size(px(28.0))
+            .icon(IconName::Ellipsis)
+            .aria_label(language.text(Message::TerminalReadingOptions))
+            .tooltip(language.text(Message::TerminalReadingOptions))
+            .dropdown_menu(move |menu, _, _| {
+                use gpui_component::menu::PopupMenuItem;
+                let case_owner = owner.clone();
+                let refresh_owner = owner.clone();
+                let scope_owner = owner.clone();
+                let copy_owner = owner.clone();
+                let start_owner = owner.clone();
+                let end_owner = owner.clone();
+                menu.item(
+                    PopupMenuItem::new(language.text(Message::TerminalReadingMatchCase))
+                        .checked(match_case)
+                        .on_click(move |_, _, cx| {
+                            let _ = case_owner.update(cx, |view, cx| {
+                                if let Some(panel) = view.reading.panel.as_mut() {
+                                    panel.match_case = !panel.match_case;
+                                }
+                                view.restart_reading_search(cx);
+                            });
+                        }),
+                )
+                .item(PopupMenuItem::new(language.text(Message::TerminalReadingRefresh)).on_click(
+                    move |_, _, cx| {
+                        let _ =
+                            refresh_owner.update(cx, |view, cx| view.restart_reading_search(cx));
+                    },
+                ))
+                .item(PopupMenuItem::new(language.text(Message::TerminalReadingChoose)).on_click(
+                    move |_, _, cx| {
+                        let _ = scope_owner.update(cx, |view, cx| {
+                            view.refresh_reading_commands(cx);
+                            if let Some(panel) = view.reading.panel.as_mut() {
+                                panel.commands_open = true;
+                            }
+                            cx.notify();
+                        });
+                    },
+                ))
+                .item(
+                    PopupMenuItem::new(language.text(Message::TerminalReadingCopy))
+                        .disabled(unavailable || copying)
+                        .on_click(move |_, _, cx| {
+                            let _ = copy_owner.update(cx, |view, cx| view.copy_reading_command(cx));
+                        }),
+                )
+                .item(
+                    PopupMenuItem::new(language.text(Message::TerminalReadingStart))
+                        .disabled(unavailable)
+                        .on_click(move |_, _, cx| {
+                            let _ = start_owner
+                                .update(cx, |view, cx| view.jump_reading_command(false, cx));
+                        }),
+                )
+                .item(
+                    PopupMenuItem::new(language.text(Message::TerminalReadingEnd))
+                        .disabled(unavailable)
+                        .on_click(move |_, _, cx| {
+                            let _ = end_owner
+                                .update(cx, |view, cx| view.jump_reading_command(true, cx));
+                        }),
+                )
+            })
             .into_any_element()
     }
 }

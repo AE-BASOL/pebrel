@@ -1,5 +1,6 @@
 {
   "terminal_reading": {
+    "options": "Search options",
     "open": "Find in terminal",
     "placeholder": "Find literal text",
     "shortcut": "Find in terminal (Ctrl+Shift+H / ⌘F)",
@@ -492,6 +493,7 @@
     "line_ending": "Line ending",
     "status": "Status",
     "copy_name": "Copy file name",
+    "clipboard_copied": "Copied",
     "reveal": "Reveal in file manager",
     "open_external": "Open with default app",
     "preview_limited": "The rich preview is shortened for this large document. Switch to Edit to read the loaded source.",

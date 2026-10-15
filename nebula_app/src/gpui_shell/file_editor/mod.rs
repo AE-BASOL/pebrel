@@ -1038,7 +1038,6 @@ impl Render for TextFileView {
                     })
                 },
             ))
-            .when(self.markdown, |root| root.child(self.render_status_bar(cx)))
             .when(self.details_resize_anchor.is_some(), |root| {
                 root.child(
                     div()
