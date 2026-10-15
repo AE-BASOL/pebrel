@@ -150,7 +150,9 @@ pub(super) fn options(
                 // 与旧壳一致：无系统标题栏，但保留 Nebula 自绘标题栏及三枚
                 // 窗口按钮。TitleBar options 负责 Windows 客户区命中测试。
                 titlebar: Some(gpui_component::TitleBar::title_bar_options()),
-                app_id: Some("pebrel-quick-terminal".to_owned()),
+                app_id: Some(crate::platform::window_chrome::application_id(
+                    "pebrel-quick-terminal",
+                )),
                 window_background: crate::gpui_shell::wallpaper::initial_background_appearance(),
                 focus: !cfg!(windows),
                 show: !cfg!(windows),
@@ -233,7 +235,7 @@ pub(super) fn regular_options(
         }),
         window_min_size: Some(size(px(760.0), px(540.0)).min(&bounds.size)),
         titlebar: Some(gpui_component::TitleBar::title_bar_options()),
-        app_id: Some("pebrel".to_owned()),
+        app_id: Some(crate::platform::window_chrome::application_id("pebrel")),
         window_background: crate::gpui_shell::wallpaper::initial_background_appearance(),
         focus,
         display_id,

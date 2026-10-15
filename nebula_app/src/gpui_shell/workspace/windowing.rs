@@ -8,6 +8,8 @@ mod shutdown;
 pub(crate) use shutdown::{quit_all, quit_for_update};
 mod startup;
 use startup::{initial_startup, runtime_window_startup};
+#[cfg(all(test, feature = "gpui-test-support"))]
+mod linux_native_tests;
 pub(super) mod startup_geometry;
 pub(super) use startup_geometry::prepare_initial_grid;
 
@@ -18,7 +20,6 @@ mod quick_window;
 #[cfg(not(windows))]
 #[path = "windowing/quick_window_unix.rs"]
 mod quick_window;
-pub(crate) use quick_window::toggle_quick_terminal_window;
 pub(super) use quick_window::{observe_window_bounds, quick_terminal_bounds_changed};
 
 use std::cell::RefCell;
@@ -39,6 +40,55 @@ use serde_json::json;
 use super::session_persistence::{SaveReason, SessionPersistence, combine_sessions};
 use super::{NebulaWorkspace, TabMeta, WorkspaceTab, dock_tree};
 use crate::gpui_shell::GpuiShellEvent;
+
+pub(crate) fn toggle_quick_terminal_window(cx: &mut App) {
+    toggle_quick_terminal_window_with_token(cx, None);
+}
+
+pub(super) fn report_quick_terminal_failure(error: &str, cx: &mut App) -> bool {
+    let handle = entries_by_mru(cx).into_iter().find_map(|entry| {
+        entry
+            .workspace
+            .upgrade()
+            .filter(|workspace| !workspace.read(cx).window_hidden)
+            .map(|_| entry.handle)
+    });
+    let Some(handle) = handle else { return false };
+    handle
+        .update(cx, |_, window, cx| {
+            let language = crate::gpui_shell::config::ui_language(cx);
+            crate::gpui_shell::toast::banner(
+                window,
+                cx,
+                crate::display::ToastKind::Warning,
+                language.format(
+                    crate::i18n::Message::SettingsQuickTerminalUnavailable,
+                    &[("error", error)],
+                ),
+            );
+        })
+        .is_ok()
+}
+
+pub(crate) fn toggle_quick_terminal_window_with_token(cx: &mut App, token: Option<&str>) {
+    quick_window::toggle_quick_terminal_window(cx);
+    let Some(token) = token else { return };
+    let handle = if nebula_settings::RuntimeSettings::load().quick_terminal_mode
+        == nebula_settings::QuickTerminalMode::Existing
+    {
+        entries_by_mru(cx).first().map(|entry| entry.handle)
+    } else {
+        cx.global::<WindowRegistry>()
+            .quick_terminal
+            .as_ref()
+            .filter(|quick| quick.target_visible)
+            .map(|quick| quick.handle)
+    };
+    // 收起操作不重新激活；首次创建时框架将令牌保留到真实首帧提交之后。
+    if let Some(handle) = handle {
+        let _ = handle.update(cx, |_, window, _| window.activate_window_with_token(token));
+    }
+}
 #[cfg(windows)]
 use crate::motion::{MotionClock, MotionPolicy, MotionRole, Tween};
 use crate::runtime_api::{
