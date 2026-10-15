@@ -6,10 +6,12 @@ use std::sync::mpsc::Receiver;
 
 // Keep the terminal entity off the layout tree so tests control each viewport
 // and PTY event explicitly, while using real GPUI tasks and terminal parsing.
-struct Surface;
+struct Surface {
+    focus: FocusHandle,
+}
 impl Render for Surface {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div().size_full()
+        div().id("terminal-test-surface").size_full().track_focus(&self.focus)
     }
 }
 
@@ -23,6 +25,24 @@ impl TerminalView {
         self.exec_context = None;
         self.suggest.suggest_env = crate::display::SuggestEnv::Wsl { distro: "Debian".into() };
         receiver
+    }
+
+    pub(crate) fn install_remote_files_test_session(
+        &mut self,
+        destination: &str,
+        cx: &mut Context<Self>,
+    ) -> Receiver<Msg> {
+        let receiver = self.install_completion_test_session();
+        self.ssh_destination = Some(destination.into());
+        self.suggest.suggest_env =
+            crate::display::SuggestEnv::Ssh { destination: destination.into() };
+        self.cwd.clear();
+        self.apply_ssh_stage(crate::ssh_session::SshStage::Ready, cx);
+        receiver
+    }
+
+    pub(crate) fn remote_files_test_event(&mut self, event: TermEvent, cx: &mut Context<Self>) {
+        self.process_event(event, cx);
     }
 
     pub(crate) fn completion_test_state(
@@ -71,8 +91,11 @@ fn open_at(
             )
         });
         let receiver = view.update(cx, |view, _| view.install_completion_test_session());
+        // 测试直接发送按键前也需聚焦终端；只挂接焦点，不让真实布局改变手动设置的网格。
+        let focus = view.read(cx).focus_handle.clone();
+        window.focus(&focus, cx);
         result = Some((view, receiver));
-        Root::new(cx.new(|_| Surface), window, cx)
+        Root::new(cx.new(|_| Surface { focus }), window, cx)
     });
     let (view, receiver) = result.unwrap();
     (view, window, receiver)

@@ -5,9 +5,10 @@ use nebula_terminal::event::{Event, EventListener, WindowSize};
 use nebula_terminal::event_loop::StreamProcessor;
 use nebula_terminal::grid::Dimensions;
 use nebula_terminal::index::{Column, Line};
-use nebula_terminal::inline_image::ImageOptions;
+use nebula_terminal::inline_image::{ImageCell, ImageIdentity, ImageOptions};
 use nebula_terminal::render::{RenderSnapshot, SnapshotConfig};
 use nebula_terminal::term::Config;
+use nebula_terminal::term::reading::{ReadingError, ReadingPoint};
 
 #[derive(Clone, Default)]
 struct Listener(Arc<Mutex<Vec<Event>>>);
@@ -239,4 +240,109 @@ fn image_replay_does_not_change_application_title_stack() {
         })
         .collect();
     assert_eq!(titles, ["outer", "inner", "outer"]);
+}
+
+const COMMAND_START: &str = "\x1b]133;A\x07$ \x1b]133;B\x07cat pic\r\n\x1b]133;C\x07";
+const COMMAND_DONE: &str = "\x1b]133;D;7\x07";
+
+fn image_output() -> String {
+    format!("left{}right", image("width=3;height=2;preserveAspectRatio=0"))
+}
+
+fn assert_image_command(term: &Term<Listener>, listener: &Listener) {
+    let commands: Vec<_> = term.completed_commands().collect();
+    assert_eq!(commands.len(), 1);
+    let command = commands[0];
+    assert_eq!(command.command, "cat pic");
+    assert_eq!(command.exit_code, Some(7));
+    assert_eq!(command.output.start, ReadingPoint { line: 1, column: 0 });
+    assert_eq!(command.output.end, ReadingPoint { line: 2, column: 12 });
+    assert_eq!(term.command_output_span(command.id).unwrap(), command.output);
+    let chunk = term.reading_chunk(command.output, None, 100, 100).unwrap();
+    assert!(chunk.next.is_none());
+    assert_eq!(chunk.rows.len(), 2);
+    assert_eq!(chunk.rows[0].text, "left                ");
+    assert!(chunk.rows[0].hard_break);
+    assert_eq!(chunk.rows[1].text, "       right");
+    assert!(!chunk.rows[1].hard_break);
+    let runs = snap(term).image_runs;
+    assert_eq!(runs.len(), 2);
+    assert_eq!((runs[0].row, runs[0].column, runs[0].columns), (1, 4, 3));
+    assert_eq!((runs[1].row, runs[1].column, runs[1].source_row), (2, 4, 1));
+    assert_eq!(
+        listener
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|e| matches!(e, Event::InlineImage { .. }))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn command_output_with_images_preserves_reading_at_every_split() {
+    for (begin, end) in [("", ""), ("\x1b[?2026h", "\x1b[?2026l")] {
+        let bytes = format!("{COMMAND_START}{begin}{}{end}{COMMAND_DONE}", image_output());
+        for split in 0..=bytes.len() {
+            let (mut term, mut stream, listener) = setup();
+            stream.feed(&mut term, &listener, &bytes.as_bytes()[..split]);
+            stream.feed(&mut term, &listener, &bytes.as_bytes()[split..]);
+            assert_image_command(&term, &listener);
+        }
+        let (mut term, mut stream, listener) = setup();
+        for byte in bytes.as_bytes().chunks(1) {
+            stream.feed(&mut term, &listener, byte);
+        }
+        assert_image_command(&term, &listener);
+    }
+}
+
+#[test]
+fn timed_out_image_frame_commits_before_command_output_is_recorded() {
+    let (mut term, mut stream, listener) = setup();
+    let bytes = format!("{COMMAND_START}\x1b[?2026h{}", image_output());
+    stream.feed(&mut term, &listener, bytes.as_bytes());
+    assert!(snap(&term).image_runs.is_empty());
+    assert_eq!(term.completed_commands().count(), 0);
+    stream.stop_sync(&mut term);
+    stream.feed(&mut term, &listener, COMMAND_DONE.as_bytes());
+    assert_image_command(&term, &listener);
+}
+
+#[test]
+fn uncommitted_command_markers_do_not_record_image_output() {
+    for bytes in [
+        format!("{COMMAND_START}\x1b[?2026h{}{COMMAND_DONE}\x1b[?2026l", image_output()),
+        format!("\x1b[?2026h{COMMAND_START}{}{COMMAND_DONE}\x1b[?2026l", image_output()),
+    ] {
+        let (mut term, mut stream, listener) = setup();
+        for byte in bytes.as_bytes().chunks(1) {
+            stream.feed(&mut term, &listener, byte);
+        }
+        assert_eq!(term.completed_commands().count(), 0);
+        assert_eq!(snap(&term).image_runs.len(), 2);
+    }
+}
+
+#[test]
+fn external_image_cells_invalidate_reading_and_release_after_eviction() {
+    let listener = Listener::default();
+    let mut term = Term::new(
+        Config { scrolling_history: 0, ..Config::default() },
+        &Size(20, 8),
+        listener.clone(),
+    );
+    let mut stream = StreamProcessor::default();
+    stream.feed(&mut term, &listener, b"\n\n\n\n\n\n\n\n");
+    let span = term.reading_span();
+    let image = ImageIdentity::new();
+    let lifetime = Arc::downgrade(&image);
+    term.grid_mut()[Line(0)][Column(0)].set_image(ImageCell { image, column: 0, row: 0 });
+    assert_eq!(term.reading_chunk(span, None, 1, 1), Err(ReadingError::StaleEpoch));
+    assert_eq!(snap(&term).image_runs.len(), 1);
+    stream.feed(&mut term, &listener, b"\n");
+    assert!(snap(&term).image_runs.is_empty());
+    assert!(lifetime.upgrade().is_none());
 }

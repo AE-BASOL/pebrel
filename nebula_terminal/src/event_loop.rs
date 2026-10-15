@@ -225,10 +225,16 @@ impl StreamProcessor {
             match event {
                 OscEvent::Cwd(cwd) => event_proxy.send_event(Event::CwdReport(cwd)),
                 OscEvent::CommandStart => {
+                    terminal.reading_shell_marker(b'C', None, self.parser.sync_bytes_count() == 0);
                     terminal.nebula_end_prompt();
                     event_proxy.send_event(Event::CommandStart);
                 },
                 OscEvent::CommandDone { exit_code } => {
+                    terminal.reading_shell_marker(
+                        b'D',
+                        exit_code,
+                        self.parser.sync_bytes_count() == 0,
+                    );
                     terminal.nebula_end_prompt();
                     event_proxy.send_event(Event::CommandDone { exit_code })
                 },
@@ -245,9 +251,13 @@ impl StreamProcessor {
                     }
                 },
                 OscEvent::PromptMark => {
+                    terminal.reading_shell_marker(b'A', None, self.parser.sync_bytes_count() == 0);
                     terminal.nebula_add_prompt_mark();
                 },
-                OscEvent::PromptInput => terminal.nebula_mark_prompt_input(),
+                OscEvent::PromptInput => {
+                    terminal.reading_shell_marker(b'B', None, self.parser.sync_bytes_count() == 0);
+                    terminal.nebula_mark_prompt_input();
+                },
                 OscEvent::InlineImage { data, width, height, options } => {
                     let viewport = self.window_size.unwrap_or(WindowSize {
                         num_cols: terminal.columns() as u16,
