@@ -173,7 +173,12 @@ fn search_input_and_overlay_mouse_never_write_pty_or_resize(cx: &mut TestAppCont
     cx.simulate_input("world");
     cx.simulate_keystrokes("left backspace");
     draw(&mut cx);
-    let at = cx.debug_bounds("terminal-reading-overlay").unwrap().center();
+    let overlay = cx.debug_bounds("terminal-reading-overlay").unwrap();
+    // 紧凑搜索条的中央属于输入框；右键会打开 Linux 菜单并先消费 Esc。
+    // 此处验证面板留白的鼠标隔离，明确命中输入框之外的内边距。
+    let at = gpui::point(overlay.left() + px(2.0), overlay.center().y);
+    assert!(overlay.contains(&at));
+    assert!(!cx.debug_bounds("reading-input").unwrap().contains(&at));
     for button in [MouseButton::Middle, MouseButton::Right] {
         cx.simulate_mouse_down(at, button, Modifiers::default());
         cx.simulate_mouse_up(at, button, Modifiers::default());
