@@ -19,7 +19,8 @@ def run_backend(backend: str, output: Path) -> None:
     environment = os.environ.copy()
     environment.update(PEBREL_DESKTOP_QA_DIR=str(output),
                        PEBREL_CONFIG_DIR=str(output / 'config'),
-                       NEBULA_CONFIG_DIR=str(output / 'config'))
+                       NEBULA_CONFIG_DIR=str(output / 'config'),
+                       LEAK_BACKTRACE='1')
     compositor = None
     compositor_log = None
     try:

@@ -179,7 +179,9 @@ fn native_linux_silent_start_close_and_restore_keep_the_same_session() {
                 )
                 .unwrap();
                 handle.update(cx, |_, window, _| window.remove_window()).unwrap();
-                cx.update(|cx| cx.quit());
+                // 验收任务也持有 workspace；退出前释放它，让窗口删除先完成实体回收。
+                drop(workspace);
+                cx.update(|cx| cx.defer(|cx| cx.quit()));
             })
             .detach();
         });

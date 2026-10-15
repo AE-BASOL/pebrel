@@ -37,8 +37,9 @@ initial configure handshake while hidden but submits no window buffer until show
 the first visible frame consumes a queued token once. A forced frame restores a
 scene whose earlier hidden presentation was intentionally skipped.
 
-The component fork at `5ae661caa9ffb3b19729fa797ad3aa3a6d722f26` changes only its
-five framework pins to the same revision. Updating only the application's pins
+The component fork at `ce8ef64313b4e4145cd4f9eedf2dd9612d4b842a` retains the
+current reader component APIs and aligns its five framework pins with that revision.
+Updating only the application's pins
 leaves two framework sources and fails locked resolution. Cargo regenerates the
 lockfile; locked metadata contains one GPUI identity, with no unrelated package
 version changes.
