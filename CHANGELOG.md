@@ -41,6 +41,9 @@ Every release entry is provided in English and Simplified Chinese.
 - Fixed: Long display formulas keep their text size and scroll horizontally without widening the page or shifting surrounding content. ([#652](https://github.com/Kuddev/pebrel/pull/652))
 - Fixed: Ctrl-click resolves HTTP(S) URLs split across aligned continuation rows in bordered terminal table cells, without including padding or neighboring columns. Normal terminal soft wraps and OSC 8 targets keep their complete destination; artificial search limits no longer produce clickable URL prefixes. Addresses [#620](https://github.com/Kuddev/pebrel/issues/620).
 - Fixed: Android forwards alternate-screen gestures through negotiated mouse or arrow input in direct SSH sessions and desktop mirroring, including phone-only line reflow. Primary-screen history stays independent even when a program enables mouse tracking; a queued application gesture arriving after fullscreen exit does not move PC history. Fullscreen program changes remain shared between devices.
+- Fixed: Linux silent startup respects initial window visibility; closing through the client titlebar follows the workspace's keep-session guard, and normal and quick-terminal windows use the installed desktop identity. Global-shortcut activation retains portal tokens and reports unavailable registration. Portal and compositor support still govern activation. Addresses [#629](https://github.com/Kuddev/pebrel/issues/629) and [#624](https://github.com/Kuddev/pebrel/issues/624). ([#642](https://github.com/Kuddev/pebrel/pull/642))
+- Fixed: Plugin manifests cannot grant themselves Runtime methods that the host has not opened to plugins. Package checks and native/Lua command dispatch enforce the same capability boundary. ([#647](https://github.com/Kuddev/pebrel/pull/647))
+- Fixed: Markdown reference links keep their resolved destinations through parsing and rendering, so hovering, opening and copying them receive the complete target instead of an empty URL.
 
 #### Improved
 
@@ -49,6 +52,7 @@ Every release entry is provided in English and Simplified Chinese.
 - Improved: Code-block language and copy controls appear along the top on hover or keyboard focus without reserving extra layout space. ([#652](https://github.com/Kuddev/pebrel/pull/652))
 - Improved: Terminal search appears before Command Manager in both tab layouts. Search and the command palette use compact controls with clearer spacing, search scope and match feedback. ([#652](https://github.com/Kuddev/pebrel/pull/652))
 - Improved: Add 351 Japanese translations from the 2.2.0 catalog for backup, phone remote, backgrounds, terminal effects, SSH forwarding and theme management. Newer untranslated entries continue to use the existing English fallback. ([#568](https://github.com/Kuddev/pebrel/pull/568))
+- Improved: Focus rings retain keyboard and pointer styling without repeatedly triggering theme updates when their color is unchanged. ([#648](https://github.com/Kuddev/pebrel/pull/648))
 
 ### 中文
 
@@ -85,6 +89,9 @@ Every release entry is provided in English and Simplified Chinese.
 - 修复：长显示公式保持字号并支持横向滚动，不再撑宽页面或挤动周围正文。 ([#652](https://github.com/Kuddev/pebrel/pull/652))
 - 修复：Ctrl 点击终端有边框表格内对齐续行的 HTTP(S) 链接时，拼接同一单元格的完整地址，不夹入留白或相邻列；普通终端自动折行与 OSC 8 链接保留完整目标，搜索人为限额不再生成可点击的 URL 前缀。对应 [#620](https://github.com/Kuddev/pebrel/issues/620)。
 - 修复：Android 直接 SSH 和桌面镜像中的备用屏手势按协商后的鼠标或方向键协议发送，也支持手机独立换行显示。主屏即使启用鼠标追踪仍保留手机独立历史；全屏退出后才到达的排队手势不会滚动 PC 历史。全屏程序内容的变化仍由两端共享。
+- 修复：Linux 静默启动遵循初始窗口可见性；通过客户端标题栏关闭时沿用工作区的会话驻留守卫，普通窗口与快速终端使用已安装的桌面身份。全局快捷键保留 portal 激活令牌，并反馈注册不可用的情况；唤起能力仍取决于 portal 和合成器支持。对应 [#629](https://github.com/Kuddev/pebrel/issues/629)、[#624](https://github.com/Kuddev/pebrel/issues/624)。 ([#642](https://github.com/Kuddev/pebrel/pull/642))
+- 修复：插件清单自行声明权限时，不能调用宿主尚未开放给插件的 Runtime 方法；包检查和 native/Lua 命令执行遵循同一能力边界。 ([#647](https://github.com/Kuddev/pebrel/pull/647))
+- 修复：Markdown 引用式链接在解析和渲染之间保留已解析地址，悬停、打开和复制可取得完整目标，不再得到空 URL。
 
 #### 改进
 
@@ -93,6 +100,7 @@ Every release entry is provided in English and Simplified Chinese.
 - 改进：代码块的语言与复制控件在悬停或键盘焦点进入时显示于顶部，不额外占用正文布局空间。 ([#652](https://github.com/Kuddev/pebrel/pull/652))
 - 改进：两种标签布局都将终端搜索放到命令管理器前；终端查找与命令面板采用更紧凑的控件，并改善留白、搜索范围和匹配反馈的呈现。 ([#652](https://github.com/Kuddev/pebrel/pull/652))
 - 改进：补齐 2.2.0 文案目录中的 351 条日语翻译，覆盖备份、手机远程、背景、终端效果、SSH 转发及主题管理；后续尚未翻译的条目继续使用既有英文回退。 ([#568](https://github.com/Kuddev/pebrel/pull/568))
+- 改进：焦点环颜色未变化时不再反复触发主题更新，键盘与鼠标操作切换仍能更新正确的焦点样式。 ([#648](https://github.com/Kuddev/pebrel/pull/648))
 
 ### Contributors
 
