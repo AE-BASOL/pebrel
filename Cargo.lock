@@ -3387,7 +3387,7 @@ dependencies = [
 [[package]]
 name = "gpui-component"
 version = "0.5.2"
-source = "git+https://github.com/Kuddev/gpui-component?rev=5dd6e5b24c4384e580cacde74d42ef5db48970f8#5dd6e5b24c4384e580cacde74d42ef5db48970f8"
+source = "git+https://github.com/Kuddev/gpui-component?rev=51e57405c599a4a3f6c7409ff14b8bfd8e0cca43#51e57405c599a4a3f6c7409ff14b8bfd8e0cca43"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -3470,7 +3470,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-assets"
 version = "0.5.1"
-source = "git+https://github.com/Kuddev/gpui-component?rev=5dd6e5b24c4384e580cacde74d42ef5db48970f8#5dd6e5b24c4384e580cacde74d42ef5db48970f8"
+source = "git+https://github.com/Kuddev/gpui-component?rev=51e57405c599a4a3f6c7409ff14b8bfd8e0cca43#51e57405c599a4a3f6c7409ff14b8bfd8e0cca43"
 dependencies = [
  "anyhow",
  "gpui",
@@ -3484,7 +3484,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-macros"
 version = "0.5.1"
-source = "git+https://github.com/Kuddev/gpui-component?rev=5dd6e5b24c4384e580cacde74d42ef5db48970f8#5dd6e5b24c4384e580cacde74d42ef5db48970f8"
+source = "git+https://github.com/Kuddev/gpui-component?rev=51e57405c599a4a3f6c7409ff14b8bfd8e0cca43#51e57405c599a4a3f6c7409ff14b8bfd8e0cca43"
 dependencies = [
  "proc-macro2",
  "quote",
