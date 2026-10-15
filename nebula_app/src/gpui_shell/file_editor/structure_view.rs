@@ -108,6 +108,8 @@ impl TextFileView {
                     .debug_selector(move || format!("markdown-math-block-{block}"))
                     .w_full()
                     .min_h(px(40.0))
+                    .relative()
+                    .justify_center()
                     .cursor_text()
                     .when(object && self.object_editable(), |frame| {
                         frame
@@ -115,8 +117,7 @@ impl TextFileView {
                             .tab_stop(true)
                             .cursor_pointer()
                             .rounded(px(6.0))
-                            .hover(|style| style.bg(cx.theme().muted.opacity(0.6)))
-                            .focus_visible(|style| style.bg(cx.theme().muted))
+                            .focus_visible(|style| style.bg(cx.theme().muted.opacity(0.35)))
                             .on_key_down(cx.listener(
                                 move |view, event: &gpui::KeyDownEvent, window, cx| {
                                     if view.object_edit.as_ref().is_some_and(|edit| {
@@ -131,6 +132,12 @@ impl TextFileView {
                                 },
                             ))
                     })
+                    .when(
+                        self.object_edit
+                            .as_ref()
+                            .is_some_and(|edit| edit.block == block && edit.part == part),
+                        |frame| frame.bg(cx.theme().muted.opacity(0.45)),
+                    )
                     .on_click(cx.listener(move |view, event, window, cx| {
                         if object {
                             view.begin_object_edit(block, part, Some(event), window, cx);
@@ -159,6 +166,10 @@ impl TextFileView {
                         .w_full()
                         .min_w_0()
                         .scrollable(false)
+                        .style(TextViewStyle {
+                            paragraph_gap: gpui::rems(0.0),
+                            ..Default::default()
+                        })
                         .into_any_element()
                     })
                     .when(
@@ -256,6 +267,7 @@ impl TextFileView {
                     .border_1()
                     .border_color(cx.theme().border)
                     .rounded(px(6.0))
+                    .rounded_t(px(reader_presentation::TABLE_TOP_RADIUS))
                     .overflow_hidden();
                 for (row_index, row) in rows.iter().enumerate() {
                     let mut line = h_flex()

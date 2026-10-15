@@ -1,4 +1,4 @@
-//! 输入区参与正文布局；行内对象的输入放在所在段落下方，保留段落的基线和换行。
+//! 对象输入悬浮在正文之上；锚点不占布局空间，输入状态仍由文档拥有。
 
 use super::object_source::ObjectSource;
 use super::*;
@@ -32,22 +32,28 @@ impl TextFileView {
             ObjectSource::Math { .. } => Message::EditorObjectLatexSource,
             ObjectSource::Image { .. } => Message::EditorObjectImage,
         };
-        v_flex()
+        // 列表绘制子项时持有自身可变借用；浮层以窗口为边界，不能在这里重入读取列表。
+        let available = window.viewport_size().width - px(16.0);
+        let width = px(456.0).min(available.max(px(1.0)));
+        let panel = v_flex()
             .id("markdown-object-editor")
             .debug_selector(|| "markdown-object-editor".to_owned())
             .key_context("MarkdownObject")
-            .w_full()
-            .max_w(px(456.0))
+            .w(width)
+            .max_h((window.viewport_size().height - px(16.0)).max(px(1.0)))
             .min_w_0()
-            .mt(px(12.0))
-            .mb(px(8.0))
+            .overflow_y_scroll()
+            .occlude()
             .p(px(16.0))
             .rounded(px(10.0))
             .border_1()
             .border_color(cx.theme().border)
-            .bg(super::super::theme::code_block_background(cx))
+            .bg(cx.theme().popover)
+            .shadow_md()
             .gap(px(12.0))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(MouseButton::Middle, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
             .on_click(|_, _, cx| cx.stop_propagation())
             .child(
                 h_flex()
@@ -203,7 +209,24 @@ impl TextFileView {
                             })),
                     ),
             )
-            .into_any_element()
+            .into_any_element();
+        // 零尺寸锚点随段落移动，浮层宽度居中；滚动或展开时不改变后文的位置。
+        gpui::deferred(
+            div()
+                .absolute()
+                .top(gpui::relative(1.0))
+                .left(gpui::relative(0.5))
+                .size(px(0.0))
+                .child(
+                    gpui::anchored()
+                        .position_mode(gpui::AnchoredPositionMode::Local)
+                        .offset(gpui::point(-width * 0.5, px(8.0)))
+                        .snap_to_window_with_margin(px(8.0))
+                        .child(panel),
+                ),
+        )
+        .with_priority(2)
+        .into_any_element()
     }
 
     fn object_field(

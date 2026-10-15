@@ -312,7 +312,11 @@ impl TextFileView {
             paragraph_gap: gpui::rems(0.7),
             heading_base_font_size: px(reader_presentation::HEADING_BASE),
             table: {
-                let mut style = gpui::StyleRefinement::default();
+                let mut frame = div()
+                    .rounded(px(6.0))
+                    .rounded_t(px(reader_presentation::TABLE_TOP_RADIUS))
+                    .overflow_hidden();
+                let mut style = frame.style().clone();
                 style.overflow.x = Some(gpui::Overflow::Scroll);
                 style
             },
@@ -340,6 +344,18 @@ impl TextFileView {
             .px(px(reader_presentation::PAGE_MARGIN))
             .pt(px(reader_presentation::TOP_MARGIN))
             .debug_selector(|| "markdown-preview-viewport".to_owned())
+            .on_scroll_wheel(cx.listener(|view, event: &gpui::ScrollWheelEvent, _, cx| {
+                // 列表只接收正文列内的滚轮；两侧和顶部留白也使用同一个滚动位置。
+                // 正文列内的事件交给列表，避免一次滚轮被处理两次。
+                if !view.scroll.viewport_bounds().contains(&event.position) {
+                    let delta = event.delta.pixel_delta(px(20.0)).y;
+                    if delta != px(0.0) {
+                        view.scroll.scroll_by(-delta);
+                        cx.stop_propagation();
+                        cx.notify();
+                    }
+                }
+            }))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| {

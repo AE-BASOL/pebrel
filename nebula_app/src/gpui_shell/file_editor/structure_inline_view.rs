@@ -20,6 +20,7 @@ impl TextFileView {
             let part = run.part;
             let object = run.object && !self.live_mode;
             let spec = &structure.parts[part];
+            let math = matches!(spec.kind, PartKind::Math);
             let active = self
                 .live_edit
                 .as_ref()
@@ -45,8 +46,10 @@ impl TextFileView {
                             .tab_stop(true)
                             .cursor_pointer()
                             .rounded(px(5.0))
-                            .hover(|style| style.bg(cx.theme().muted.opacity(0.6)))
-                            .focus_visible(|style| style.bg(cx.theme().muted))
+                            .when(!math, |frame| {
+                                frame.hover(|style| style.bg(cx.theme().muted.opacity(0.45)))
+                            })
+                            .focus_visible(|style| style.bg(cx.theme().muted.opacity(0.35)))
                             .on_key_down(cx.listener(
                                 move |view, event: &gpui::KeyDownEvent, window, cx| {
                                     if view.object_edit.as_ref().is_some_and(|edit| {
@@ -61,6 +64,13 @@ impl TextFileView {
                                 },
                             ))
                     })
+                    .when(
+                        math && self
+                            .object_edit
+                            .as_ref()
+                            .is_some_and(|edit| edit.block == block && edit.part == part),
+                        |frame| frame.bg(cx.theme().muted.opacity(0.45)),
+                    )
                     .on_click(cx.listener(move |view, event, window, cx| {
                         if object {
                             view.begin_object_edit(block, part, Some(event), window, cx);
@@ -195,6 +205,7 @@ impl TextFileView {
             line = line.child(frame);
         }
         v_flex()
+            .relative()
             .w_full()
             .min_w_0()
             .child(line)
