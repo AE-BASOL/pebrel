@@ -169,7 +169,11 @@ fn link_edit_cancel_apply_and_reader_undo_change_only_the_selected_occurrence(
         cx.update(|window, cx| {
             window.draw(cx).clear(cx);
         });
-        cx.simulate_keystrokes("ctrl-a");
+        let modifier = match crate::platform::Platform::current() {
+            crate::platform::Platform::MacOS => "cmd",
+            _ => "ctrl",
+        };
+        cx.simulate_keystrokes(&format!("{modifier}-a"));
         cx.simulate_input("https://new.example/full7");
         let button = cx
             .debug_bounds(if cancel { "confirm-dialog-cancel" } else { "confirm-dialog-ok" })
