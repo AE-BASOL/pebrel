@@ -131,6 +131,12 @@ impl NebulaWorkspace {
         let native_layout = crate::platform::window_chrome::layout(window);
         let title_bar_height = effective_title_bar_height(self.density, native_layout);
         let bar = TitleBar::new()
+            .on_close_window(cx.listener(|workspace, _, window, cx| {
+                // Linux 的客户端标题栏默认直接销毁窗口；必须复用系统关窗的会话与文档守卫。
+                if workspace.should_close_window(window, cx) {
+                    window.remove_window();
+                }
+            }))
             .h(px(title_bar_height))
             .when(!settings_active, |bar| bar.bg(gpui::transparent_black()).border_b_0())
             .when(settings_active, |bar| {
