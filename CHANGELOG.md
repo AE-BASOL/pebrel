@@ -15,10 +15,10 @@ Every release entry is provided in English and Simplified Chinese.
 - `Pebrel-v2.2.2-windows-x64-setup.exe`: `PENDING FINAL BUILD`
 - `Pebrel-v2.2.2-windows-arm64.zip`: `PENDING FINAL BUILD`
 - `Pebrel-v2.2.2-windows-arm64-setup.exe`: `PENDING FINAL BUILD`
-- `Pebrel-v2.2.2-android-universal-preview.apk`: `PENDING FINAL BUILD`
-- `Pebrel-v2.2.2-relay-manual.tar.gz`: `PENDING FINAL BUILD`
 
 ### English
+
+This release updates Windows, macOS and Linux. Android Preview remains at [2.2.1](https://github.com/Kuddev/pebrel/releases/tag/v2.2.1).
 
 #### Added
 
@@ -46,6 +46,8 @@ Every release entry is provided in English and Simplified Chinese.
 - Fixed: Local file links with trailing line-count annotations, including terminal-truncated annotations, resolve to an existing base file. Existing filenames containing parentheses still take precedence; this does not add line-number navigation. Addresses [#619](https://github.com/Kuddev/pebrel/issues/619). ([#663](https://github.com/Kuddev/pebrel/pull/663))
 
 ### 中文
+
+本版更新 Windows、macOS 和 Linux；Android Preview 保持为已发布的 [2.2.1](https://github.com/Kuddev/pebrel/releases/tag/v2.2.1)。
 
 #### 新增
 
