@@ -881,8 +881,9 @@ mod tests {
         std::fs::write(&path, "fixture").unwrap();
         let native = path.to_string_lossy().replace('\\', "/");
         let uri = format!("file:/{}", native.trim_start_matches('/'));
-        let targets = std::iter::once(uri.clone())
-            .chain(cfg!(windows).then(|| path.to_string_lossy().into_owned()));
+        let targets = std::iter::once(uri.clone()).chain(
+            (Platform::current() == Platform::Windows).then(|| path.to_string_lossy().into_owned()),
+        );
         for target in targets {
             for text in [
                 format!("{target} (121 行)"),
