@@ -753,14 +753,12 @@ pub struct NebulaWorkspace {
     sidebar_logo_load: logos::LogoLoad,
     /// 跟随系统深浅：OS 外观切换的监听（旧壳 ThemeChanged 的对应物）。
     _appearance_sub: Subscription,
-    /// spinner 在窗口失焦时冻结为静态状态；重新聚焦后由一次 render 恢复按需帧循环。
+    /// 失焦但仍可见时继续显示活动状态，仅在最小化或隐藏时停止动画。
     spinner_window_active: bool,
     _spinner_activation_sub: Subscription,
-    /// 侧栏「运行中」spinner 的相位（0..1，旧壳 `SPINNER_PERIOD` 800ms 一
-    /// 圈）与上次帧时刻。侧栏和顶栏共用 GPUI 屏幕帧时钟。
-    spinner_phase: f32,
-    spinner_last: std::time::Instant,
-    /// render 与 next-frame 回调之间的单槽门闩：防止其他 UI 更新重复挂帧。
+    /// 侧栏和顶栏共用的三点运行指示器相位，每 250ms 推进一次。
+    spinner_phase: usize,
+    /// render 与延迟回调之间的单槽门闩，避免多个标签重复创建计时器。
     spinner_frame_pending: std::cell::Cell<bool>,
     /// 上一次 render 是否真的画出了运行态徽章；滚出视口后不应继续唤醒窗口。
     spinner_visible: std::cell::Cell<bool>,
@@ -860,7 +858,6 @@ impl NebulaWorkspace {
                 }
                 if workspace.spinner_window_active != active {
                     workspace.spinner_window_active = active;
-                    workspace.spinner_last = std::time::Instant::now();
                     cx.notify();
                 }
             });
@@ -986,8 +983,7 @@ impl NebulaWorkspace {
             _appearance_sub: appearance_sub,
             spinner_window_active,
             _spinner_activation_sub: spinner_activation_sub,
-            spinner_phase: 0.0,
-            spinner_last: std::time::Instant::now(),
+            spinner_phase: 0,
             spinner_frame_pending: std::cell::Cell::new(false),
             spinner_visible: std::cell::Cell::new(false),
             window_close_confirm_open: false,

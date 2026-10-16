@@ -106,53 +106,24 @@ impl NebulaWorkspace {
         f32::from(line.width).ceil().clamp(minimum, maximum.max(minimum))
     }
 
-    /// 旧壳 `icons::push_spinner` 的 canvas 复刻：暗轨道 + 绕行亮弧（占
-    /// 整圈 1/3），半径 5.5、笔画 0.30r，中性灰（spinner 表达「还在跑」，
-    /// 不抢品牌色）。phase 由 render 侧的帧循环推进。
-    pub(super) fn spinner(phase: f32, track: gpui::Rgba, head: gpui::Rgba) -> impl IntoElement {
+    /// 保持原徽章的固定槽位与主题配色，用低频三点代替需要连续重绘的圆环。
+    pub(super) fn spinner(phase: usize, track: gpui::Rgba, head: gpui::Rgba) -> impl IntoElement {
         canvas(
             move |_, _, _| {},
             move |bounds, _, window, _| {
                 let ox = f32::from(bounds.origin.x);
                 let oy = f32::from(bounds.origin.y);
-                let side = f32::from(bounds.size.width);
-                let (cx, cy) = (ox + side * 0.5, oy + side * 0.5);
-                let radius = 5.5_f32;
-                let stroke = (radius * 0.30).max(1.0);
-                // 点铺在轨道中线上：外缘正好落在 radius 上。
-                let mid = radius - stroke * 0.5;
-                // 与旧壳 `push_spinner` 完全同式：相邻圆点约重叠 50%，既不
-                // 留珠链缝，也不以过密叠加制造额外模糊。
-                let steps =
-                    ((mid * std::f32::consts::TAU / (stroke * 0.5)).ceil() as usize).clamp(24, 96);
-                const ARC: f32 = 0.34;
-                for step in 0..steps {
-                    let at = step as f32 / steps as f32;
-                    let angle = at * std::f32::consts::TAU - std::f32::consts::FRAC_PI_2;
-                    let behind = (phase - at).rem_euclid(1.0);
-                    let t = (1.0 - behind / ARC).clamp(0.0, 1.0);
-                    // 旧壳在 RGB 域插值，不在 HSL 域绕色相；两端均已预合成
-                    // 为不透明色，圆点相交处不会积累 alpha。
-                    let mix = |a: f32, b: f32| a + (b - a) * t;
-                    let c: gpui::Hsla = gpui::Rgba {
-                        r: mix(track.r, head.r),
-                        g: mix(track.g, head.g),
-                        b: mix(track.b, head.b),
-                        a: 1.0,
-                    }
-                    .into();
-                    let x0 = cx + mid * angle.cos() - stroke * 0.5;
-                    let y0 = cy + mid * angle.sin() - stroke * 0.5;
-                    // 旧壳不对组成圆环的每个点单独做像素吸附。圆周点本来就落
-                    // 在连续坐标上，强制取整会让相邻点忽近忽远、半径跳变，低
-                    // DPI 下尤其容易显成锯齿珠链；交给 GPUI 统一抗锯齿才与
-                    // `icons::push_spinner` 的几何一致。
+                for step in 0..3 {
+                    let color = if step == phase { head } else { track };
                     window.paint_quad(
                         gpui::fill(
-                            Bounds::new(gpui::point(px(x0), px(y0)), size(px(stroke), px(stroke))),
-                            c,
+                            Bounds::new(
+                                gpui::point(px(ox + 0.5 + step as f32 * 4.0), px(oy + 4.5)),
+                                size(px(2.0), px(2.0)),
+                            ),
+                            color,
                         )
-                        .corner_radii(px(stroke * 0.5)),
+                        .corner_radii(px(1.0)),
                     );
                 }
             },
@@ -765,8 +736,9 @@ impl NebulaWorkspace {
                     ),
             )
             .child(self.render_tabs_section(items, cx));
-        self.spinner_visible.set(items_running.get());
-        if items_running.get() {
+        self.spinner_visible
+            .set(items_running.get() && !self.tabs_section_collapsed && !self.sidebar_collapsed);
+        if self.spinner_visible.get() {
             self.arm_activity_spinner_frame(window, cx);
         }
         sidebar

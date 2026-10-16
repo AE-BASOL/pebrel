@@ -109,38 +109,33 @@ fn window_minimized(_window: &Window) -> bool {
 }
 
 impl NebulaWorkspace {
-    /// 只为当前可见的运行态徽章挂一帧。下一帧必须由随后的实际 render 续期，
-    /// 因此任务结束、窗口不可见或徽章滚出视口时会自然断链，不留下常驻
-    /// animation loop；由 GPUI 的帧源调度，才能跟随显示器刷新节奏。
-    ///
-    /// 断链判据是「像素到不了屏幕」而不是「窗口没聚焦」：一边看 Agent 跑、
-    /// 一边在浏览器或编辑器里干活，正是这个转圈唯一的用武之地；失焦即冻结
-    /// 会让它在最需要的场景里失效，而窗口就在旁边亮着不动，用户只能读成
-    /// 「Agent 卡死了」。非活跃窗口的开销由 GPUI 帧循环自己压到 30fps
-    /// （`next_frame_callbacks` 非空 + 窗口非活跃即节流），不必在这里再停
-    /// 一次。
+    /// 状态动画会使整个工作区失效，不能为了 11px 徽章订阅显示器的每一帧。
+    /// 三点指示器只需低频换位；由实际 render 续期，结束或不可见时自然断链。
+    /// 失焦但仍可见时继续反馈运行状态，系统减少动态效果时保留静态指示器。
     pub(super) fn arm_activity_spinner_frame(&self, window: &mut Window, cx: &mut Context<Self>) {
-        const PERIOD_SECS: f32 = 0.8;
-
         if self.spinner_frame_pending.get()
             || !self.spinner_visible.get()
             || self.spinner_offscreen(window)
+            || cx.reduce_motion()
         {
             return;
         }
         self.spinner_frame_pending.set(true);
-        cx.on_next_frame(window, |workspace, window, cx| {
-            workspace.spinner_frame_pending.set(false);
-            if !workspace.spinner_visible.get() || workspace.spinner_offscreen(window) {
-                return;
-            }
-            let now = std::time::Instant::now();
-            let delta = now.saturating_duration_since(workspace.spinner_last);
-            workspace.spinner_last = now;
-            workspace.spinner_phase =
-                (workspace.spinner_phase + delta.as_secs_f32() / PERIOD_SECS).rem_euclid(1.0);
-            cx.notify();
-        });
+        cx.spawn_in(window, async move |this, cx| {
+            cx.background_executor().timer(Duration::from_millis(250)).await;
+            let _ = this.update_in(cx, |workspace, window, cx| {
+                workspace.spinner_frame_pending.set(false);
+                if !workspace.spinner_visible.get()
+                    || workspace.spinner_offscreen(window)
+                    || cx.reduce_motion()
+                {
+                    return;
+                }
+                workspace.spinner_phase = (workspace.spinner_phase + 1) % 3;
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// 转圈没有观众只有两种情况：托盘隐藏（Nebula 自己记账）和最小化。

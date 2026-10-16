@@ -2,6 +2,98 @@
 
 use super::*;
 
+#[cfg(feature = "gpui-test-support")]
+mod activity_indicator_tests {
+    use super::*;
+    use gpui::TestAppContext;
+
+    #[gpui::test]
+    fn activity_indicator_waits_for_its_deadline_and_stops_when_not_presented(
+        cx: &mut TestAppContext,
+    ) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            crate::gpui_shell::math_view::register(cx);
+            crate::gpui_shell::file_editor::init(cx);
+            crate::gpui_shell::workspace::init(cx);
+            windowing::initialize(cx, crate::runtime_api::RuntimeHub::new());
+            cx.set_reduce_motion(false);
+        });
+        let mut workspace = None;
+        let (_, window) = cx.add_window_view(|window, cx| {
+            let view = cx.new(|cx| {
+                NebulaWorkspace::new(
+                    window,
+                    None,
+                    None,
+                    1,
+                    crate::runtime_api::RuntimeHub::new(),
+                    windowing::WorkspaceStartup::Empty,
+                    windowing::WindowRole::Regular,
+                    cx,
+                )
+            });
+            workspace = Some(view.clone());
+            Root::new(view, window, cx)
+        });
+        let mut window = window.clone();
+        let workspace = workspace.unwrap();
+        cx.run_until_parked();
+        window.update(|window, cx| {
+            workspace.update(cx, |workspace, cx| {
+                workspace.spinner_visible.set(true);
+                // 多个运行标签和无关 UI 更新不能各自再挂一个动画计时器。
+                for _ in 0..8 {
+                    workspace.arm_activity_spinner_frame(window, cx);
+                }
+            });
+        });
+        cx.run_until_parked();
+        cx.executor().advance_clock(Duration::from_millis(249));
+        cx.run_until_parked();
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(workspace.spinner_phase, 0);
+            assert!(workspace.spinner_frame_pending.get());
+        });
+        cx.executor().advance_clock(Duration::from_millis(1));
+        cx.run_until_parked();
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(workspace.spinner_phase, 1, "八次挂帧也只能推进一次");
+            assert!(!workspace.spinner_frame_pending.get());
+        });
+        window.update(|window, cx| {
+            workspace.update(cx, |workspace, cx| {
+                workspace.spinner_visible.set(true);
+                workspace.arm_activity_spinner_frame(window, cx);
+                workspace.settings_open = true;
+                cx.notify();
+            });
+            window.draw(cx).clear(cx);
+        });
+        workspace.read_with(cx, |workspace, _| {
+            assert!(!workspace.spinner_visible.get(), "设置页不构建标签，不能沿用旧可见标记");
+        });
+        cx.run_until_parked();
+        cx.executor().advance_clock(Duration::from_millis(250));
+        cx.run_until_parked();
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(workspace.spinner_phase, 1, "运行标签不再可见后，旧回调不得更新工作区");
+            assert!(!workspace.spinner_frame_pending.get());
+        });
+        for reduced_motion in [false, true] {
+            window.update(|window, cx| {
+                cx.set_reduce_motion(reduced_motion);
+                workspace.update(cx, |workspace, cx| {
+                    workspace.spinner_visible.set(true);
+                    workspace.window_hidden = !reduced_motion;
+                    workspace.arm_activity_spinner_frame(window, cx);
+                    assert!(!workspace.spinner_frame_pending.get());
+                });
+            });
+        }
+    }
+}
+
 #[test]
 fn ssh_host_icons_are_confined_to_the_selected_configuration_directory() {
     let temporary = tempfile::tempdir().unwrap();

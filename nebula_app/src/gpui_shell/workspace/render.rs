@@ -3,6 +3,8 @@ use super::*;
 
 impl Render for NebulaWorkspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // 设置页、阅读专注或折叠侧栏可能完全不构建标签，不能沿用上一帧的可见标记。
+        self.spinner_visible.set(false);
         let theme_transition = self.theme_transition.render(window, cx);
         crate::gpui_shell::theme::sync_component_focus_ring(window, cx);
         if window.is_window_active() {
