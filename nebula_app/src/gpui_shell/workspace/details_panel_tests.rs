@@ -114,7 +114,10 @@ fn file_path_edit_navigates_and_keeps_the_last_directory_on_error_or_escape(
         crate::platform::Platform::MacOS => "cmd-a",
         _ => "ctrl-a",
     };
-    let directory = tempfile::tempdir().unwrap();
+    let fixture_root = tempfile::tempdir().unwrap();
+    let fixture_parent = tempfile::tempdir_in(fixture_root.path()).unwrap();
+    // 系统临时目录的深度因平台而异；主动嵌套才能稳定覆盖三级面包屑的祖先菜单。
+    let directory = tempfile::tempdir_in(fixture_parent.path()).unwrap();
     let path = directory.path().join("sidebar.md");
     let target = directory.path().join("中文 folder");
     std::fs::write(&path, "# Heading").unwrap();
