@@ -374,6 +374,11 @@ impl SettingsPane {
                     if this.provider_ui.sequence != sequence
                         || this.provider_ui.editing.as_ref() != Some(&expected_id)
                     {
+                        // 用户在系统凭据读取期间编辑了草稿；旧读取结果不得覆盖
+                        // 新输入，但也不能把保存按钮永久锁在 loading 状态。
+                        this.provider_ui.loading_auth = false;
+                        this.provider_ui.auth_task = None;
+                        cx.notify();
                         return;
                     }
                     this.provider_ui.loading_auth = false;
