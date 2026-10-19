@@ -28,7 +28,11 @@ trait default and fail.
 
 ## Decision
 
-- Select an `av_player` animated backend on macOS. One `AVQueuePlayer` and
+- Keep AVFoundation handles and platform selection in `platform/video_underlay`;
+  wallpaper owns the monitor, source lifetime and surface/error presentation. The
+  native adapter accepts geometry/visibility inputs and never reads wallpaper
+  globals or starts its own timer. This keeps the platform cfg budget unchanged.
+  One `AVQueuePlayer` and
   `AVPlayerLooper` per source; each window owns a clip view inserted directly below
   the GPUI view. All AppKit and AVFoundation calls stay on the main thread.
 - Painting does not touch the GPUI scene. The wallpaper paint callback only updates
@@ -41,6 +45,11 @@ trait default and fail.
 - A 500 ms monitor owned by the source plays only when a placement window is visible
   (occlusion state, not miniaturized), the opacity is non-zero and reduced motion is
   off. It also detects decoder failure and reports the existing typed media error.
+- Source destruction explicitly pauses playback and removes placements. Decode or
+  native placement failure restores the regular surfaces and ends monitoring.
+- Explicit ANSI backgrounds, INVERSE and DIM retain their normal terminal semantics.
+  Video visibility changes the default surface composition, not application cell
+  colors; colored terminal regions can therefore cover the video.
 
 ## Rejected alternatives
 
