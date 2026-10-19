@@ -188,9 +188,8 @@ fn real_bundled_font_shapes_ligatures_and_preserves_the_cached_natural_layout() 
             .map(|g| (g.id, g.index, g.position))
             .collect::<Vec<_>>();
         let unit = text_system.shape_line("M".into(), px(15.0), &[run(false)], None).width;
-        let mut layout = (**cached).clone();
-        let font_id = layout.runs[0].font_id;
-        let glyph = layout.runs[0].glyphs[0].clone();
+        let font_id = cached.runs[0].font_id;
+        let glyph = cached.runs[0].glyphs[0].clone();
         let mut glyphs = Vec::new();
         let mut byte = 0;
         while byte < sample.len() {
@@ -204,8 +203,14 @@ fn real_bundled_font_shapes_ligatures_and_preserves_the_cached_natural_layout() 
                 1
             };
         }
-        layout.width = unit * glyphs.len() as f32;
-        layout.runs = vec![gpui::ShapedRun { font_id, glyphs }];
+        let layout = gpui::LineLayout {
+            font_size: cached.font_size,
+            width: unit * glyphs.len() as f32,
+            ascent: cached.ascent,
+            descent: cached.descent,
+            runs: vec![gpui::ShapedRun { font_id, glyphs }],
+            len: cached.len(),
+        };
         let mut collapsed = cached.clone();
         *collapsed = std::sync::Arc::new(layout);
         let expanded = crate::gpui_shell::terminal::ligatures::expand_collapsed_ligatures(
