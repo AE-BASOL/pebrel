@@ -218,33 +218,6 @@ fn refresh_surface_opacity(cx: &mut App) {
     sync_root_background(cx);
 }
 
-/// Whether explicit terminal cell backgrounds sit above a native video layer.
-pub fn cell_backgrounds_over_underlay(cx: &App) -> bool {
-    native_underlay_active(cx)
-}
-
-/// Every explicit cell background above a native video layer becomes the same
-/// light black veil, whatever its color: opaque fills would hide the video.
-const UNDERLAY_CELL_BACKGROUND: gpui::Rgba = gpui::Rgba { r: 0.0, g: 0.0, b: 0.0, a: 0.15 };
-
-/// Final fill for an explicit cell background.
-pub fn cell_background(color: gpui::Rgba, over_underlay: bool) -> gpui::Rgba {
-    if over_underlay { UNDERLAY_CELL_BACKGROUND } else { color }
-}
-
-/// Over a native video every cell background is the same black veil, so text
-/// keeps its own color: inverse cells are not swapped, and contrast is judged
-/// against the default background.
-pub fn keep_text_colors_under_veil(snap: &mut nebula_terminal::render::RenderSnapshot) {
-    use nebula_terminal::vte::ansi::{Color, NamedColor};
-    for cell in snap.segments.iter_mut().flat_map(|segment| segment.cells.iter_mut()) {
-        if cell.inverse {
-            cell.fg = cell.bg;
-        }
-        cell.bg = Color::Named(NamedColor::Background);
-    }
-}
-
 /// Whether a native wallpaper layer is composited below the GPUI scene.
 pub fn native_underlay_active(cx: &App) -> bool {
     animated::underlay_ready(cx)
