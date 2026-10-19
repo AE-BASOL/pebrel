@@ -290,16 +290,11 @@ mod tests {
         assert!(backup_path(&temp.path().join("config.toml")).exists());
         assert!(backup_path(&temp.path().join("auth.json")).exists());
         assert_eq!(std::fs::read(legacy_backup).unwrap(), b"previous export backup");
-        #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
             for name in
                 ["auth.json", "config.toml", "auth.json.pebrel.bak", "config.toml.pebrel.bak"]
             {
-                assert_eq!(
-                    std::fs::metadata(temp.path().join(name)).unwrap().permissions().mode() & 0o777,
-                    0o600
-                );
+                crate::platform::private_file::assert_private(&temp.path().join(name));
             }
         }
     }

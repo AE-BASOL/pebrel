@@ -136,14 +136,9 @@ mod tests {
         assert_eq!(result["env"]["CLAUDE_CODE_EFFORT_LEVEL"], "max");
         assert_eq!(result["env"]["ANTHROPIC_BASE_URL"], "https://api.anthropic.com");
         assert!(temp.path().join("settings.json.pebrel.bak").exists());
-        #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
             for name in ["settings.json", "settings.json.pebrel.bak"] {
-                assert_eq!(
-                    std::fs::metadata(temp.path().join(name)).unwrap().permissions().mode() & 0o777,
-                    0o600
-                );
+                crate::platform::private_file::assert_private(&temp.path().join(name));
             }
         }
     }

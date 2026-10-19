@@ -34,13 +34,9 @@ fn write_with_permissions(path: &Path, contents: &[u8], private: bool) -> io::Re
     let result = (|| {
         let mut options = OpenOptions::new();
         options.write(true).create_new(true);
-        #[cfg(unix)]
         if private {
-            use std::os::unix::fs::OpenOptionsExt as _;
-            options.mode(0o600);
+            crate::platform::private_file::restrict_creation(&mut options);
         }
-        #[cfg(not(unix))]
-        let _ = private;
         let mut file = options.open(&temporary)?;
         file.write_all(contents)?;
         file.sync_all()?;
@@ -208,20 +204,6 @@ pub(crate) fn replace(source: &Path, destination: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{try_lifetime_lock, try_lock, write};
-
-    #[cfg(unix)]
-    #[test]
-    fn private_write_restricts_new_and_replaced_files() {
-        use std::os::unix::fs::PermissionsExt;
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("auth.json");
-        super::write_private(&path, b"first").unwrap();
-        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
-        super::write_private(&path, b"replacement").unwrap();
-        assert_eq!(std::fs::read(&path).unwrap(), b"replacement");
-        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
-    }
 
     #[test]
     fn atomic_write_replaces_and_lock_is_exclusive() {

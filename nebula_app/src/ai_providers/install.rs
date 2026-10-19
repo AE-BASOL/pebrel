@@ -3,8 +3,9 @@ use crate::ai_agents::AgentKind;
 use crate::session::LaunchSession;
 
 pub fn launch(agent: AgentKind) -> Option<(LaunchSession, String)> {
-    let script = script(agent, cfg!(windows))?;
-    let (program, args, command) = if cfg!(windows) {
+    let windows = crate::platform::Platform::current() == crate::platform::Platform::Windows;
+    let script = script(agent, windows)?;
+    let (program, args, command) = if windows {
         // 不拼接用户输入；安装正文以 PowerShell 自身的字符串规则传给子会话。
         use base64::Engine as _;
         let encoded = base64::engine::general_purpose::STANDARD.encode(script.as_bytes());
@@ -102,7 +103,14 @@ mod tests {
             else {
                 panic!("native shell expected")
             };
-            assert_eq!(program, if cfg!(windows) { "powershell.exe" } else { "/bin/bash" });
+            assert_eq!(
+                program,
+                if crate::platform::Platform::current() == crate::platform::Platform::Windows {
+                    "powershell.exe"
+                } else {
+                    "/bin/bash"
+                }
+            );
             assert!(
                 !args.iter().any(|arg| arg.contains("install")),
                 "restoring a tab must not reinstall"
