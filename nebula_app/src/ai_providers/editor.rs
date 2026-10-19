@@ -169,6 +169,7 @@ pub fn save_provider_draft(
     let result = (|| {
         crate::ssh_credentials::store_generic_secret(&auth_target, auth.as_bytes())?;
         auth_written = true;
+        provider.auth_document_set = true;
         if let Some(key) = key {
             store_provider_api_key(&mut provider, &key)?;
             key_written = true;

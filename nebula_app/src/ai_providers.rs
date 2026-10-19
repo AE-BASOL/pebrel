@@ -155,6 +155,8 @@ pub struct AiProvider {
     #[serde(default)]
     pub api_key_set: bool,
     #[serde(default)]
+    pub auth_document_set: bool,
+    #[serde(default)]
     pub api_key_hint: String,
     #[serde(default)]
     pub full_url: bool,
@@ -184,6 +186,7 @@ impl AiProvider {
             config_toml: String::new(),
             enabled: true,
             api_key_set: false,
+            auth_document_set: false,
             api_key_hint: String::new(),
             full_url: false,
             codex_goals: false,

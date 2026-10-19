@@ -360,7 +360,7 @@ impl SettingsPane {
                 .unwrap_or_default();
         self.provider_ui.auth.update(cx, |input, cx| input.set_value(auth, window, cx));
         self.sync_provider_auth(false, window, cx);
-        if provider.api_key_set {
+        if provider.api_key_set || provider.auth_document_set {
             self.provider_ui.loading_auth = true;
             let id = provider.id.clone();
             let sequence = self.provider_ui.sequence;
