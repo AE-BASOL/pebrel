@@ -14,6 +14,15 @@ static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(1);
 
 /// Atomically replace `path` with `contents`, syncing the temporary file first.
 pub(crate) fn write(path: &Path, contents: &[u8]) -> io::Result<()> {
+    write_with_permissions(path, contents, false)
+}
+
+/// CLI 凭据导出使用私有新文件权限；原子替换不会把 0600 放宽为 umask 默认值。
+pub(crate) fn write_private(path: &Path, contents: &[u8]) -> io::Result<()> {
+    write_with_permissions(path, contents, true)
+}
+
+fn write_with_permissions(path: &Path, contents: &[u8], private: bool) -> io::Result<()> {
     let parent = path.parent().ok_or_else(|| io::Error::other("state path has no parent"))?;
     std::fs::create_dir_all(parent)?;
 
@@ -23,7 +32,16 @@ pub(crate) fn write(path: &Path, contents: &[u8]) -> io::Result<()> {
         parent.join(format!(".{file_name}.nebula-tmp-{}-{sequence}", std::process::id()));
 
     let result = (|| {
-        let mut file = OpenOptions::new().write(true).create_new(true).open(&temporary)?;
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        if private {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            options.mode(0o600);
+        }
+        #[cfg(not(unix))]
+        let _ = private;
+        let mut file = options.open(&temporary)?;
         file.write_all(contents)?;
         file.sync_all()?;
         drop(file);
@@ -190,6 +208,20 @@ pub(crate) fn replace(source: &Path, destination: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{try_lifetime_lock, try_lock, write};
+
+    #[cfg(unix)]
+    #[test]
+    fn private_write_restricts_new_and_replaced_files() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("auth.json");
+        super::write_private(&path, b"first").unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        super::write_private(&path, b"replacement").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"replacement");
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    }
 
     #[test]
     fn atomic_write_replaces_and_lock_is_exclusive() {

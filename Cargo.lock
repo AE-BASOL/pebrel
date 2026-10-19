@@ -5347,6 +5347,7 @@ dependencies = [
  "rand 0.10.2",
  "raw-window-handle",
  "regex",
+ "resvg 0.46.0",
  "rfd",
  "rsa",
  "rusqlite",

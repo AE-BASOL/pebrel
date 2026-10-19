@@ -15,6 +15,16 @@ use zeroize::Zeroizing;
 use crate::event::{Event, EventType};
 use crate::provider_test::ProviderTestOutcome;
 
+mod agent_config;
+mod editor;
+pub mod install;
+pub use editor::{
+    apply_config_draft, config_text, load_auth_document, parse_auth_draft, save_provider_draft,
+};
+mod models;
+pub use agent_config::apply_claude_provider;
+pub use models::{configured_models, fetch_models, parse_model_list};
+
 const STORE_FILE: &str = "pebrel_providers.json";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -126,6 +136,19 @@ pub struct AiProvider {
     pub kind: ProviderKind,
     pub base_url: String,
     pub model: String,
+    /// 旧配置没有这几个字段时继续使用原默认模型；密钥仍只属于供应商。
+    #[serde(default)]
+    pub models: Vec<String>,
+    #[serde(default)]
+    pub reasoning_effort: String,
+    #[serde(default)]
+    pub subagent_model: Option<String>,
+    #[serde(default)]
+    pub agent: String,
+    #[serde(default)]
+    pub wire_api: String,
+    #[serde(default)]
+    pub config_toml: String,
     #[serde(default)]
     pub enabled: bool,
     /// A credential reference only. The actual key is held by the OS store.
@@ -153,6 +176,12 @@ impl AiProvider {
             kind,
             base_url: kind.default_base_url().to_owned(),
             model: kind.default_model().to_owned(),
+            models: Vec::new(),
+            reasoning_effort: String::new(),
+            subagent_model: None,
+            agent: String::new(),
+            wire_api: String::new(),
+            config_toml: String::new(),
             enabled: true,
             api_key_set: false,
             api_key_hint: String::new(),
@@ -160,6 +189,15 @@ impl AiProvider {
             codex_goals: false,
             codex_remote_compaction: false,
         }
+    }
+
+    pub fn agent_kind(&self) -> crate::ai_agents::AgentKind {
+        use crate::ai_agents::AgentKind;
+        AgentKind::parse(&self.agent).unwrap_or(match self.kind {
+            ProviderKind::Anthropic => AgentKind::Claude,
+            ProviderKind::Google => AgentKind::Gemini,
+            _ => AgentKind::Codex,
+        })
     }
 }
 
@@ -169,6 +207,9 @@ pub struct ProviderStore {
     pub active_id: String,
     #[serde(default)]
     pub providers: Vec<AiProvider>,
+    /// CLI 的已应用状态独立于内置助手选中项，也独立于其他 CLI。
+    #[serde(default)]
+    pub cli_active: std::collections::BTreeMap<String, String>,
 }
 
 /// Editable non-secret provider fields shared by both presentations.
@@ -240,29 +281,14 @@ pub fn load() -> ProviderStore {
     store
 }
 
-/// Older builds only materialized a preset after it was clicked. Keep those
-/// records intact, but fill the missing presets so the visible list can be a
-/// real, index-addressable collection and multiple custom entries remain
-/// independently editable.
+/// 首次使用提供预设；已有目录保持用户的添加、删除和线路顺序。
 fn normalize(store: &mut ProviderStore) {
-    let mut existing = std::mem::take(&mut store.providers);
-    let mut ordered = Vec::with_capacity(ProviderKind::PRESETS.len().max(existing.len()));
-    for kind in ProviderKind::PRESETS {
-        if kind == ProviderKind::Custom {
-            continue;
-        }
-        if let Some(index) = existing.iter().position(|provider| provider.kind == kind) {
-            ordered.push(existing.remove(index));
-        } else {
-            ordered.push(AiProvider::preset(kind, preset_id(kind)));
-        }
+    if store.providers.is_empty() {
+        store.providers = ProviderKind::PRESETS
+            .into_iter()
+            .map(|kind| AiProvider::preset(kind, preset_id(kind)))
+            .collect();
     }
-    let had_custom = existing.iter().any(|provider| provider.kind == ProviderKind::Custom);
-    ordered.extend(existing.into_iter().filter(|provider| provider.kind == ProviderKind::Custom));
-    if !had_custom {
-        ordered.push(AiProvider::preset(ProviderKind::Custom, preset_id(ProviderKind::Custom)));
-    }
-    store.providers = ordered;
     if !store.providers.iter().any(|provider| provider.id == store.active_id) {
         store.active_id =
             store.providers.first().map(|provider| provider.id.clone()).unwrap_or_default();
@@ -295,7 +321,7 @@ pub fn save(store: &ProviderStore) -> io::Result<()> {
     }
     let text = serde_json::to_string_pretty(store)
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-    std::fs::write(path, text)
+    crate::atomic_file::write(&path, text.as_bytes())
 }
 
 pub fn credential_target(id: &str) -> String {
@@ -340,11 +366,13 @@ pub fn delete_api_key(id: &str) -> io::Result<()> {
 /// transition. Metadata is mutated only after credential deletion succeeds,
 /// avoiding an unreachable orphaned secret.
 pub fn remove_provider(store: &mut ProviderStore, id: &str) -> io::Result<()> {
+    editor::delete_auth_document(id)?;
     delete_api_key(id)?;
     let Some(index) = store.providers.iter().position(|provider| provider.id == id) else {
         return Err(io::Error::new(io::ErrorKind::NotFound, "provider not found"));
     };
     store.providers.remove(index);
+    store.cli_active.retain(|_, active| active != id);
     if store.active_id == id {
         store.active_id =
             store.providers.first().map(|provider| provider.id.clone()).unwrap_or_default();
@@ -418,8 +446,20 @@ pub fn test_provider(provider: &AiProvider) -> ProviderTestResult {
     };
     let config = ureq::config::Config::builder()
         .timeout_global(Some(Duration::from_secs(12)))
-        .http_status_as_error(false)
-        .build();
+        .max_redirects(0)
+        .http_status_as_error(false);
+    let loopback = url
+        .parse::<ureq::http::Uri>()
+        .ok()
+        .and_then(|uri| uri.host().map(str::to_owned))
+        .is_some_and(|host| {
+            host.eq_ignore_ascii_case("localhost")
+                || host
+                    .trim_matches(['[', ']'])
+                    .parse::<std::net::IpAddr>()
+                    .is_ok_and(|ip| ip.is_loopback())
+        });
+    let config = if loopback { config.proxy(None) } else { config }.build();
     let agent: ureq::Agent = config.new_agent();
     let mut request = agent.get(&url);
     request = match provider.kind {
@@ -526,6 +566,7 @@ mod tests {
     #[test]
     fn normalization_preserves_multiple_custom_entries() {
         let mut store = ProviderStore {
+            cli_active: Default::default(),
             active_id: "custom-2".to_owned(),
             providers: vec![
                 AiProvider::preset(ProviderKind::Custom, "custom-1"),
@@ -539,6 +580,28 @@ mod tests {
         );
         assert_eq!(store.active_id, "custom-2");
         assert_eq!(next_custom_id(&store), "custom-3");
+    }
+
+    #[test]
+    fn legacy_metadata_and_duplicate_protocol_routes_survive_reload() {
+        let original = AiProvider::preset(ProviderKind::Anthropic, "one");
+        let mut json = serde_json::to_value(&original).unwrap();
+        for field in ["models", "reasoning_effort", "subagent_model", "agent"] {
+            json.as_object_mut().unwrap().remove(field);
+        }
+        let restored: AiProvider = serde_json::from_value(json).unwrap();
+        assert_eq!(restored, original);
+        let mut store = ProviderStore {
+            cli_active: Default::default(),
+            active_id: "two".into(),
+            providers: vec![original, AiProvider::preset(ProviderKind::Anthropic, "two")],
+        };
+        normalize(&mut store);
+        assert_eq!(store.providers.len(), 2);
+        assert_eq!(store.active_id, "two");
+        store.providers.remove(0);
+        normalize(&mut store);
+        assert_eq!(store.providers.len(), 1);
     }
 
     #[test]
