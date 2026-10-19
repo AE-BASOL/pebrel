@@ -188,7 +188,7 @@ fn real_bundled_font_shapes_ligatures_and_preserves_the_cached_natural_layout() 
             .map(|g| (g.id, g.index, g.position))
             .collect::<Vec<_>>();
         let unit = text_system.shape_line("M".into(), px(15.0), &[run(false)], None).width;
-        let mut layout = (*cached).clone();
+        let mut layout = (**cached).clone();
         let font_id = layout.runs[0].font_id;
         let glyph = layout.runs[0].glyphs[0].clone();
         let mut glyphs = Vec::new();
