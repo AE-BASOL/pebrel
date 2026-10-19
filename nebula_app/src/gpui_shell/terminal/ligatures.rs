@@ -130,7 +130,7 @@ fn collapsed_cluster_ranges(natural: &LineLayout, natural_advance: f32) -> Vec<(
     ranges
 }
 
-fn expand_collapsed_ligatures(
+pub(super) fn expand_collapsed_ligatures(
     natural: &ShapedLine,
     text_system: &WindowTextSystem,
     font_size: Pixels,
@@ -156,9 +156,14 @@ fn expand_collapsed_ligatures(
         .collect();
     let mut placed = Vec::with_capacity(text.len());
     let mut index = 0;
+    // glyph 和 range 都按 cluster 顺序排列；单调游标避免每个 glyph 重扫全部 range。
+    let mut ranges = ranges.into_iter().peekable();
     while index < flat.len() {
         let start = flat[index].1.index;
-        if let Some(&(_, end)) = ranges.iter().find(|(range_start, _)| *range_start == start) {
+        while ranges.peek().is_some_and(|(range_start, _)| *range_start < start) {
+            ranges.next();
+        }
+        if let Some((_, end)) = ranges.next_if(|(range_start, _)| *range_start == start) {
             let end = end.min(text.len());
             for byte in start..end {
                 let column = byte..byte + 1;

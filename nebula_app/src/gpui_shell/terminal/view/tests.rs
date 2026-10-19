@@ -174,6 +174,62 @@ fn real_bundled_font_shapes_ligatures_and_preserves_the_cached_natural_layout() 
                 .collect::<Vec<_>>()
         );
     }
+
+    // 用真实 shaper 展开构造的坍缩 cluster；Linux 不解析 Monaco 的 AAT，
+    // 此处只模拟它的输入布局，避免把改造字体当作 macOS 原字体的证据。
+    for sample in ["fi", "fl", "fifi", "afile", "afl"] {
+        let mut template = run(true);
+        template.len = sample.len();
+        let cached = text_system.shape_line(sample.into(), px(15.0), &[template.clone()], None);
+        let before = cached
+            .runs
+            .iter()
+            .flat_map(|r| &r.glyphs)
+            .map(|g| (g.id, g.index, g.position))
+            .collect::<Vec<_>>();
+        let unit = text_system.shape_line("M".into(), px(15.0), &[run(false)], None).width;
+        let mut layout = (*cached).clone();
+        let font_id = layout.runs[0].font_id;
+        let glyph = layout.runs[0].glyphs[0].clone();
+        let mut glyphs = Vec::new();
+        let mut byte = 0;
+        while byte < sample.len() {
+            let mut glyph = glyph.clone();
+            glyph.index = byte;
+            glyph.position.x = unit * glyphs.len() as f32;
+            glyphs.push(glyph);
+            byte += if sample[byte..].starts_with("fi") || sample[byte..].starts_with("fl") {
+                2
+            } else {
+                1
+            };
+        }
+        layout.width = unit * glyphs.len() as f32;
+        layout.runs = vec![gpui::ShapedRun { font_id, glyphs }];
+        let mut collapsed = cached.clone();
+        *collapsed = std::sync::Arc::new(layout);
+        let expanded = crate::gpui_shell::terminal::ligatures::expand_collapsed_ligatures(
+            &collapsed,
+            &text_system,
+            px(15.0),
+            &template,
+        )
+        .expect("constructed fi/fl cluster must expand");
+        let indices =
+            expanded.runs.iter().flat_map(|r| &r.glyphs).map(|g| g.index).collect::<Vec<_>>();
+        assert_eq!(indices, (0..sample.len()).collect::<Vec<_>>(), "{sample}");
+        assert!(expanded.runs.iter().all(|r| r.font_id == font_id));
+        let after = text_system.shape_line(sample.into(), px(15.0), &[template], None);
+        assert_eq!(
+            before,
+            after
+                .runs
+                .iter()
+                .flat_map(|r| &r.glyphs)
+                .map(|g| (g.id, g.index, g.position))
+                .collect::<Vec<_>>()
+        );
+    }
 }
 
 #[test]
@@ -231,7 +287,6 @@ fn theme_line_height_none_preserves_shaped_metrics() {
     assert_eq!(themed, legacy);
 }
 
-#[test]
 #[test]
 fn theme_line_height_uses_font_size_and_keeps_device_pixel_flooring() {
     // 15px * 1.5 = 22.5 logical px; at 150% DPI with a 4px device offset,
