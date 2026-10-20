@@ -1,6 +1,6 @@
 //! Edit real Git Bash input through the product PTY and VT parser.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -29,10 +29,15 @@ struct BashSession {
     term: Term<Replies>,
     parser: ansi::Processor,
     replies: Replies,
+    locale: &'static str,
+    last_input: Vec<u8>,
+    last_reply: Option<String>,
+    output_tail: VecDeque<u8>,
 }
 
 impl BashSession {
     fn send(&mut self, bytes: &[u8]) {
+        self.last_input = bytes.to_vec();
         write_pty(&mut self.pty, bytes);
     }
 
@@ -42,8 +47,13 @@ impl BashSession {
         loop {
             match self.pty.reader().read(&mut buffer) {
                 Ok(count) if count > 0 => {
+                    self.output_tail.extend(&buffer[..count]);
+                    while self.output_tail.len() > 1024 {
+                        self.output_tail.pop_front();
+                    }
                     self.parser.advance(&mut self.term, &buffer[..count]);
                     for reply in self.replies.0.lock().unwrap().drain(..) {
+                        self.last_reply = Some(reply.clone());
                         write_pty(&mut self.pty, reply.as_bytes());
                     }
                     if expected(&self.term) {
@@ -56,10 +66,14 @@ impl BashSession {
             }
             assert!(
                 Instant::now() < deadline,
-                "{label}: cursor {:?}, rows {:?} / {:?}",
+                "{} / {label}: cursor {:?}, rows {:?} / {:?}; last input {:?}, last reply {:?}, output tail {:?}",
+                self.locale,
                 self.term.grid().cursor.point,
                 row(&self.term, 0),
-                row(&self.term, 1)
+                row(&self.term, 1),
+                String::from_utf8_lossy(&self.last_input),
+                self.last_reply,
+                String::from_utf8_lossy(&self.output_tail.iter().copied().collect::<Vec<_>>()),
             );
             thread::sleep(Duration::from_millis(5));
         }
@@ -139,6 +153,10 @@ fn git_bash_wrapped_input_can_be_fully_erased_in_byte_and_utf8_locales() {
                 term: Term::new(config, &TermSize::new(40, 24), replies.clone()),
                 parser: ansi::Processor::new(),
                 replies,
+                locale,
+                last_input: Vec::new(),
+                last_reply: None,
+                output_tail: VecDeque::new(),
             };
             session.wait_for(locale, |term| blank_input(term, mark));
             session.send(b"relay/package.json");
@@ -150,24 +168,36 @@ fn git_bash_wrapped_input_can_be_fully_erased_in_byte_and_utf8_locales() {
             session.wait_for("short backspace", |term| blank_input(term, mark));
 
             let long = b"relay/package.jsonrelay/package.jsonrelay/package.jsonrelay/package.json";
-            for erase in [vec![127; long.len()], vec![21]] {
+            let text = std::str::from_utf8(long).unwrap();
+            let content_matches = |term: &Term<Replies>| {
+                row(term, 0) == format!("{mark} {}", &text[..38])
+                    && row(term, 1).trim_end() == &text[38..]
+            };
+            for (erase_name, erase) in [("backspace", vec![127; long.len()]), ("Ctrl-U", vec![21])]
+            {
                 session.send(long);
-                session.wait_for("wrapped input", |term| {
-                    term.grid().cursor.point.line == Line(1)
+                // 光标位置可能先于一次重绘的全部字符到达；等文本也完整后再发送下一项编辑。
+                session.wait_for(&format!("{erase_name}: wrapped input"), |term| {
+                    content_matches(term)
+                        && term.grid().cursor.point.line == Line(1)
                         && term.grid().cursor.point.column == Column(34)
                 });
                 session.send(&[1]);
-                session.wait_for("wrapped Home", |term| {
-                    term.grid().cursor.point.line == Line(0)
+                session.wait_for(&format!("{erase_name}: wrapped Home"), |term| {
+                    content_matches(term)
+                        && term.grid().cursor.point.line == Line(0)
                         && term.grid().cursor.point.column == Column(2)
                 });
                 session.send(&[5]);
-                session.wait_for("wrapped End", |term| {
-                    term.grid().cursor.point.line == Line(1)
+                session.wait_for(&format!("{erase_name}: wrapped End"), |term| {
+                    content_matches(term)
+                        && term.grid().cursor.point.line == Line(1)
                         && term.grid().cursor.point.column == Column(34)
                 });
                 session.send(&erase);
-                session.wait_for("erase wrapped input", |term| blank_input(term, mark));
+                session.wait_for(&format!("{erase_name}: erase wrapped input"), |term| {
+                    blank_input(term, mark)
+                });
             }
             // No probe command or user history is executed; dropping owns this PTY.
             session.send(b"exit\r");
