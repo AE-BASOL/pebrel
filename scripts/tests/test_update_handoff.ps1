@@ -24,9 +24,13 @@ if ($LASTEXITCODE) { throw 'Could not build same-version candidate fixture' }
 if ($LASTEXITCODE) { throw 'Could not build installer fixture' }
 
 function Assert([bool]$Condition, [string]$Message) { if (-not $Condition) { throw $Message } }
-function Wait-File([string]$Path, [int]$Seconds = 12) {
+function Wait-File([string]$Path, [int]$Seconds = 12, [string]$FailurePath = '') {
     $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
     while (-not (Test-Path -LiteralPath $Path)) {
+        if ($FailurePath -and (Test-Path -LiteralPath $FailurePath)) {
+            $failure = Get-Content -LiteralPath $FailurePath -Raw -Encoding UTF8 | ConvertFrom-Json
+            throw ('Helper rejected preparation: ' + $failure.error)
+        }
         if ([DateTime]::UtcNow -ge $deadline) { throw "Timed out waiting for $Path" }
         Start-Sleep -Milliseconds 50
     }
@@ -36,6 +40,11 @@ function Write-Json([string]$Path, $Value) {
 }
 
 $results = @()
+$identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+try {
+    $elevated = [System.Security.Principal.WindowsPrincipal]::new($identity).IsInRole(
+        [System.Security.Principal.WindowsBuiltInRole]::Administrator)
+} finally { $identity.Dispose() }
 # Load the actual production functions without starting an installation transaction.
 $parseTokens = $null
 $parseErrors = $null
@@ -84,13 +93,14 @@ Check-UnpreparedProcesses @($unloading)
 $results += @{ scenario = 'module-unloaded-before-exit-signal'; passed = $true }
 Write-Output 'module-unloaded-before-exit-signal : passed'
 
-foreach ($scenario in @('cancel', 'success', 'checksum', 'creation-time', 'installer-failure', 'other-process', 'late-process', 'reinstall', 'repair-identical', 'upgrade-noop', 'helper-unlocked', 'helper-held')) {
+foreach ($scenario in @('cancel', 'success', 'checksum', 'creation-time', 'privilege-mismatch', 'installer-failure', 'other-process', 'late-process', 'reinstall', 'repair-identical', 'upgrade-noop', 'helper-unlocked', 'helper-held')) {
     $directory = Join-Path $OutputRoot $scenario
     $installation = Join-Path $directory 'installed app'
     $transaction = Join-Path $directory 'transaction'
     $config = Join-Path $directory 'config'
     $null = New-Item -ItemType Directory -Path $installation, $transaction, $config -Force
-    $executable = Join-Path $installation 'pebrel.exe'
+    # Keep real user/admin Pebrel processes outside the fixture's image-name scan.
+    $executable = Join-Path $installation 'pebrel-handoff-fixture.exe'
     Copy-Item -LiteralPath $old -Destination $executable
     $payload = if ($scenario -eq 'reinstall') { $reinstall } elseif ($scenario -eq 'repair-identical') { $old } else { $candidate }
     Copy-Item -LiteralPath $payload -Destination (Join-Path $directory 'candidate.exe')
@@ -113,6 +123,7 @@ foreach ($scenario in @('cancel', 'success', 'checksum', 'creation-time', 'insta
         }
         $plan = @{
             schema = 1; transaction = $scenario; executable = $executable; installation = $installation
+            elevated = $elevated
             config_directory = $config; installer = $installer
             bytes = (Get-Item -LiteralPath $installer).Length
             sha256 = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash
@@ -120,6 +131,7 @@ foreach ($scenario in @('cancel', 'success', 'checksum', 'creation-time', 'insta
             participants = @(@{ pid = $parent.Id; created = $parent.StartTime.ToUniversalTime().ToFileTimeUtc().ToString() })
         }
         if ($scenario -eq 'checksum') { $plan.sha256 = '0' * 64 }
+        if ($scenario -eq 'privilege-mismatch') { $plan.elevated = -not $elevated }
         if ($scenario -in @('reinstall', 'repair-identical')) { $plan.version = '1.8.0' }
         if ($scenario -eq 'creation-time') { $plan.participants[0].created = '1' }
         if ($scenario -eq 'other-process') {
@@ -131,12 +143,12 @@ foreach ($scenario in @('cancel', 'success', 'checksum', 'creation-time', 'insta
             '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
             ('"' + $helper + '"'), '-PlanPath', ('"' + $planPath + '"')) -WindowStyle Hidden -PassThru
         $resultPath = Join-Path $transaction 'result.json'
-        if ($scenario -in @('checksum', 'creation-time', 'other-process')) {
+        if ($scenario -in @('checksum', 'creation-time', 'privilege-mismatch', 'other-process')) {
             Wait-File $resultPath
             Assert (-not $parent.HasExited) 'Rejected plan must leave the original process open'
             Assert (-not (Test-Path (Join-Path $directory 'installer-started'))) 'Rejected plan started setup'
         } else {
-            Wait-File (Join-Path $transaction 'ready.json')
+            Wait-File (Join-Path $transaction 'ready.json') -FailurePath $resultPath
             Assert (-not $parent.HasExited) 'Readiness must not stop the original process'
             Assert (-not (Test-Path (Join-Path $directory 'installer-started'))) 'Setup ran before commit'
             $locked = $false

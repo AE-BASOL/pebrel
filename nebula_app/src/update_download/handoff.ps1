@@ -10,6 +10,7 @@ $guard = $null
 $installerGuard = $null
 $committed = $false
 $originalDigest = $null
+$directoryPins = @()
 
 function Write-State([string]$Name, $Value) {
     $destination = Join-Path $transaction $Name
@@ -111,9 +112,54 @@ function Wait-RuntimeHelperFiles {
     }
 }
 
+function Pin-PrivilegedTransaction {
+    # 应用在 ready 前持有祖先句柄；助手必须先接过同样的锁，才能允许原进程退出。
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+public static class PebrelUpdateDirectory {
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern SafeFileHandle CreateFile(string path, uint access, uint share,
+        IntPtr security, uint disposition, uint flags, IntPtr template);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetFileInformationByHandleEx(SafeFileHandle file, int kind,
+        out AttributeTagInfo info, uint length);
+    [StructLayout(LayoutKind.Sequential)]
+    private struct AttributeTagInfo { public uint Attributes; public uint ReparseTag; }
+    public static SafeFileHandle Pin(string path) {
+        var handle = CreateFile(path, 0x80000000, 3, IntPtr.Zero, 3, 0x02200000, IntPtr.Zero);
+        if (handle.IsInvalid) {
+            int error = Marshal.GetLastWin32Error(); handle.Dispose(); throw new Win32Exception(error);
+        }
+        AttributeTagInfo info;
+        if (!GetFileInformationByHandleEx(handle, 9, out info, 8)) {
+            int error = Marshal.GetLastWin32Error(); handle.Dispose(); throw new Win32Exception(error);
+        }
+        if ((info.Attributes & 0x10) == 0 || (info.Attributes & 0x400) != 0) {
+            handle.Dispose(); throw new InvalidOperationException("Update directories cannot contain reparse points");
+        }
+        return handle;
+    }
+}
+'@
+    $paths = [System.Collections.Generic.Stack[string]]::new()
+    $directory = [System.IO.DirectoryInfo]::new([System.IO.Path]::GetFullPath($transaction))
+    while ($directory) { $paths.Push($directory.FullName); $directory = $directory.Parent }
+    foreach ($path in $paths) { $script:directoryPins += [PebrelUpdateDirectory]::Pin($path) }
+}
+
 try {
+    $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+    try {
+        $elevated = [System.Security.Principal.WindowsPrincipal]::new($identity).IsInRole(
+            [System.Security.Principal.WindowsBuiltInRole]::Administrator)
+    } finally { $identity.Dispose() }
+    if ($elevated) { Pin-PrivilegedTransaction }
     if ((Get-Item -LiteralPath $PlanPath).Length -gt 1048576) { throw 'Update plan exceeds limit' }
     $plan = Get-Content -LiteralPath $PlanPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ([bool]$plan.elevated -ne $elevated) { throw 'Update privilege identity differs' }
     if ($plan.schema -ne 1 -or $plan.transaction -notmatch '^[a-zA-Z0-9-]{1,96}$') {
         throw 'Invalid update plan'
     }
@@ -227,4 +273,5 @@ try {
     foreach ($process in $handles) { $process.Dispose() }
     if ($installerGuard) { $installerGuard.Dispose() }
     if ($guard) { $guard.Dispose() }
+    foreach ($directory in $directoryPins) { $directory.Dispose() }
 }
