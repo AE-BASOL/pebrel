@@ -1,4 +1,4 @@
-# Runs from the transaction directory, outside the installation being replaced.
+﻿# Runs from the transaction directory, outside the installation being replaced.
 # The application grants installation only by writing commit.json after ready.json.
 param([Parameter(Mandatory = $true)][string]$PlanPath)
 $ErrorActionPreference = 'Stop'
@@ -25,6 +25,9 @@ function Write-State([string]$Name, $Value) {
 }
 
 function Same-Path([string]$First, [string]$Second) {
+    if ([string]::IsNullOrWhiteSpace($First) -or [string]::IsNullOrWhiteSpace($Second)) {
+        return $false
+    }
     return [string]::Equals([System.IO.Path]::GetFullPath($First).TrimEnd('\'),
         [System.IO.Path]::GetFullPath($Second).TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)
 }
@@ -56,11 +59,28 @@ function Launch-Workspace {
     Start-Process -FilePath $exe -WorkingDirectory $installation | Out-Null
 }
 
-function Check-UnpreparedProcesses {
-    foreach ($other in [System.Diagnostics.Process]::GetProcessesByName([System.IO.Path]::GetFileNameWithoutExtension($exe))) {
+function Check-UnpreparedProcesses($Processes = $null) {
+    if ($null -eq $Processes) {
+        $Processes = [System.Diagnostics.Process]::GetProcessesByName([System.IO.Path]::GetFileNameWithoutExtension($exe))
+    }
+    foreach ($other in $Processes) {
         try {
-            if ((Same-Path $other.MainModule.FileName $exe) -and
+            # 枚举只取得进程快照；短命版本探测可能在读取 MainModule 前退出。
+            # 只跳过已经证实退出的进程，活进程身份不可读仍然阻止安装。
+            if ($other.HasExited) { continue }
+            try { $otherPath = $other.MainModule.FileName }
+            catch {
+                if ($other.HasExited -or $other.WaitForExit(250)) { continue }
+                throw
+            }
+            if ([string]::IsNullOrWhiteSpace($otherPath)) {
+                # 模块卸载和进程退出信号不保证同时可见；有界等待仍以真实退出为准。
+                if ($other.HasExited -or $other.WaitForExit(250)) { continue }
+                throw ('Could not identify active application process ' + $other.Id + ' before installation')
+            }
+            if ((Same-Path $otherPath $exe) -and
                 -not (@($plan.participants | Where-Object { [int]$_.pid -eq $other.Id }).Count)) {
+                if ($other.HasExited) { continue }
                 throw 'Another process from this installation is not prepared for update'
             }
         } finally { $other.Dispose() }
