@@ -177,6 +177,9 @@ mod tests {
                         Err(error) => panic!("{error}"),
                     }
                 };
+                // Windows accepts inherit the listener's nonblocking mode.
+                // Header reads below use a blocking stream with a bounded timeout.
+                stream.set_nonblocking(false).unwrap();
                 stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
                 let mut bytes = Vec::new();
                 while !bytes.ends_with(b"\r\n\r\n") {
