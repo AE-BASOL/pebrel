@@ -19,6 +19,9 @@ import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.roundToInt
 
+/** The desktop grid scale is independent of the user's base font size. */
+fun normalizedSnapshotZoom(value: Float): Float = value.takeIf { it.isFinite() }?.coerceIn(.5f, 5f) ?: 1f
+
 /** A grid mirror with optional authorized input. Gestures never resize the PC PTY. */
 class TerminalSnapshotView(context: Context) : View(context) {
     private var inputGeneration = 0
@@ -86,6 +89,7 @@ class TerminalSnapshotView(context: Context) : View(context) {
     private var multiTouch = false
     var pinchZoom = true
     var onZoomChanged: ((Int, Boolean) -> Unit)? = null
+    var onZoomCommitted: ((Float) -> Unit)? = null
     var pasteTarget: TerminalInputTarget? = null
     private var scrollRemainder = 0f
     var scrollTarget: TerminalInputTarget? = null
@@ -157,6 +161,20 @@ class TerminalSnapshotView(context: Context) : View(context) {
         selection.clear()
         paint.typeface = typeface
         fontPixels = pixels
+        metrics()
+        reproject()
+        constrainOffsets()
+        invalidate()
+    }
+
+    fun restoreZoom(value: Float) {
+        // 指示器会在手势中触发重组；旧偏好不得覆盖尚未提交的缩放比例。
+        if (scaling.isInProgress) return
+        val restored = normalizedSnapshotZoom(value)
+        if (zoom == restored) return
+        stopScrolling()
+        selection.clear()
+        zoom = restored
         metrics()
         reproject()
         constrainOffsets()
@@ -286,7 +304,7 @@ class TerminalSnapshotView(context: Context) : View(context) {
             if (!pinchZoom) return false
             val oldWidth = cellWidth
             val oldHeight = cellHeight
-            zoom = (zoom * detector.scaleFactor).coerceIn(.5f, 5f)
+            zoom = normalizedSnapshotZoom(zoom * detector.scaleFactor)
             metrics()
             reproject()
             offsetX = (offsetX + detector.focusX) * cellWidth / oldWidth - detector.focusX
@@ -300,6 +318,8 @@ class TerminalSnapshotView(context: Context) : View(context) {
     })
 
     private fun reportZoom(gesturing: Boolean) {
+        // 保存精确比例而非取整后的有效字号，避免基础字号与比例在重组时重复相乘。
+        if (!gesturing) onZoomCommitted?.invoke(zoom)
         onZoomChanged?.invoke((fontPixels * zoom / resources.displayMetrics.scaledDensity).roundToInt(), gesturing)
     }
 

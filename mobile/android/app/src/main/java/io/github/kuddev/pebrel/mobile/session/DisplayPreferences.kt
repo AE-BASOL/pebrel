@@ -1,6 +1,7 @@
 package io.github.kuddev.pebrel.mobile.session
 
 import android.content.Context
+import io.github.kuddev.pebrel.terminal.normalizedSnapshotZoom
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
@@ -25,6 +26,8 @@ data class TerminalPreferences(
     val suggestions: Boolean = true,
     val directInput: Boolean = true,
     val scrollbackLines: Int = 1000,
+    val desktopWrapLines: Boolean = false,
+    val desktopZoom: Float = 1f,
 ) {
     /** Preserve the persisted contract when callers pass a stale or unknown value. */
     fun normalized(): TerminalPreferences = copy(
@@ -35,6 +38,7 @@ data class TerminalPreferences(
         },
         fontSize = fontSize.coerceIn(TerminalPreferenceValues.MIN_FONT_SIZE, TerminalPreferenceValues.MAX_FONT_SIZE),
         scrollbackLines = scrollbackLines.coerceIn(500, 5000),
+        desktopZoom = normalizedSnapshotZoom(desktopZoom),
         cursorStyle = when (cursorStyle) {
             TerminalPreferenceValues.BAR_CURSOR -> TerminalPreferenceValues.BAR_CURSOR
             TerminalPreferenceValues.UNDERLINE_CURSOR -> TerminalPreferenceValues.UNDERLINE_CURSOR
@@ -73,6 +77,8 @@ class DisplayPreferences(context: Context) {
             suggestions = stored.getBoolean("suggestions", true),
             directInput = stored.getBoolean("direct_input", true),
             scrollbackLines = stored.getInt("scrollback_lines", 1000),
+            desktopWrapLines = stored.getBoolean("desktop_wrap_lines", false),
+            desktopZoom = stored.getFloat("desktop_zoom", 1f),
         ).normalized().let { it.copy(scrollbackLines = it.scrollbackLines.coerceAtMost(maxScrollbackLines)) },
     )
     val state = current.asStateFlow()
@@ -94,6 +100,8 @@ class DisplayPreferences(context: Context) {
             .putBoolean("pinch_zoom", current.value.pinchZoom)
             .putBoolean("suggestions", current.value.suggestions)
             .putBoolean("direct_input", current.value.directInput)
+            .putBoolean("desktop_wrap_lines", current.value.desktopWrapLines)
+            .putFloat("desktop_zoom", current.value.desktopZoom)
             .putInt("scrollback_lines", current.value.scrollbackLines).apply()
     }
 
