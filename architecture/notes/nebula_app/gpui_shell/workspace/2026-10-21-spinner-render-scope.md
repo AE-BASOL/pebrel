@@ -131,6 +131,11 @@ pass. The production build passes
 Workspace formatting, `git diff --check` and
 `python3 scripts/check_architecture.py --base 2085557d` pass.
 
+After integration with OSC 7501, the same nineteen layout/control regressions
+and 145 terminal-view regressions pass (four existing ignored cases). The
+production check, formatting and architecture check against the integrated
+protocol commit also pass.
+
 The following tests in `workspace::terminal_activity::tests` use an actual
 `Root` containing `NebulaWorkspace`. A test-only, per-App
 [snapshot probe](../../../../../nebula_app/src/gpui_shell/terminal/element/snapshot_probe.rs)
