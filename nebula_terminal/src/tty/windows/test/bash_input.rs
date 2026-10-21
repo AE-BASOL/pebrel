@@ -50,11 +50,16 @@ impl BashSession {
             EditKey::Redraw => (0x4c, 0x0c, 0x08, 0x0c), // Ctrl+L
         };
         if self.term.mode().contains(TermMode::WIN32_INPUT_MODE) {
+            use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+                MAPVK_VK_TO_VSC, MapVirtualKeyW,
+            };
+
             // Match the product's negotiated special-key path, including key-up.
-            // Scan code 0 is valid for these synthetic keys; VK/Uc carry their
-            // identity. Keep repeated presses in one write to retain burst coverage.
+            // The GPUI and runtime encoders obtain the scan code from Windows.
+            // Keep repeated presses in one write to retain burst coverage.
+            let scan_code = unsafe { MapVirtualKeyW(virtual_key, MAPVK_VK_TO_VSC) };
             let press = format!(
-                "\x1b[{virtual_key};0;{character};1;{modifiers};1_\x1b[{virtual_key};0;{character};0;{modifiers};1_"
+                "\x1b[{virtual_key};{scan_code};{character};1;{modifiers};1_\x1b[{virtual_key};{scan_code};{character};0;{modifiers};1_"
             );
             self.send(press.repeat(count).as_bytes());
         } else {
