@@ -104,8 +104,9 @@ fn update_restore_tickets_cover_success_rollback_and_acknowledgement() {
     assert_eq!(restore_ticket_from(&directory.join("plan.json")).unwrap().len(), 1);
     assert!(!acknowledge_restore(3), "unrelated windows do not acknowledge the ticket");
     assert!(acknowledge_restore(1));
-    #[cfg(windows)]
-    scheduled_snapshot_scope();
+    if crate::platform::Platform::current() == crate::platform::Platform::Windows {
+        scheduled_snapshot_scope();
+    }
     if plan.elevated {
         // 私有存储在配置临时目录之外；只删除此夹具创建的已知文件，保留任何意外内容。
         for name in
@@ -122,7 +123,6 @@ fn update_restore_tickets_cover_success_rollback_and_acknowledgement() {
     }
 }
 
-#[cfg(windows)]
 fn scheduled_snapshot_scope() {
     let elevated = crate::platform::elevation::is_elevated().unwrap();
     let ordinary = Session::new(
