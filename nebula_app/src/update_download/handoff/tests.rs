@@ -75,7 +75,11 @@ fn update_restore_tickets_cover_success_rollback_and_acknowledgement() {
         assert!(restore_ticket().is_none(), "a ticket cannot cross the actual token scope");
         plan.elevated = !plan.elevated;
         save("plan.json", serde_json::to_value(&plan).unwrap());
-        assert_eq!(pending_restore_path().unwrap(), directory.join("plan.json"));
+        // 恢复入口返回规范路径；macOS 临时目录的 /var 与 /private/var 指向同一对象。
+        assert_eq!(
+            pending_restore_path().unwrap(),
+            canonical(&directory.join("plan.json")).unwrap()
+        );
         assert!(
             !directory.join("restore-attempts.json").exists()
                 || read_json::<u32>(&directory.join("restore-attempts.json")) == Some(0)
