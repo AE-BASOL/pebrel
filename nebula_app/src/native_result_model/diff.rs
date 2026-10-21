@@ -30,6 +30,7 @@ pub(crate) struct File {
     pub rows: Arc<[Row]>,
     pub added: usize,
     pub deleted: usize,
+    pub max_line: u32,
 }
 
 pub(crate) struct Patch {
@@ -74,6 +75,13 @@ impl Pending {
             details: self.details,
             source: self.start..end,
             body: Arc::from(body),
+            max_line: self
+                .rows
+                .iter()
+                .flat_map(|row| [row.old, row.new])
+                .flatten()
+                .max()
+                .unwrap_or(1),
             rows: self.rows.into(),
             added: self.added,
             deleted: self.deleted,
@@ -129,6 +137,9 @@ impl Patch {
                 file.body_start.get_or_insert(start);
                 file.rows.push(Row { old: None, new: None, kind: Kind::Hunk });
                 continue;
+            }
+            if line.starts_with("@@") {
+                return Err("format");
             }
             if let Some(hunk) = file.hunk.as_mut() {
                 let kind = match line.as_bytes().first() {
@@ -225,11 +236,22 @@ fn path_value(source: &str) -> Result<String, &'static str> {
     if !source.starts_with('"') {
         return Ok(source.split('\t').next().unwrap_or("").to_owned());
     }
+    let (path, rest) = quoted_path(source)?;
+    if !rest.is_empty() && !rest.starts_with('\t') {
+        return Err("format");
+    }
+    Ok(path)
+}
+
+fn quoted_path(source: &str) -> Result<(String, &str), &'static str> {
     let mut bytes = source.as_bytes()[1..].iter().copied();
     let mut output = Vec::new();
     while let Some(byte) = bytes.next() {
         match byte {
-            b'"' => return String::from_utf8(output).map_err(|_| "format"),
+            b'"' => {
+                let path = String::from_utf8(output).map_err(|_| "format")?;
+                return Ok((path, &source[source.len() - bytes.len()..]));
+            },
             b'\\' => {
                 let escaped = bytes.next().ok_or("format")?;
                 output.push(match escaped {
@@ -258,6 +280,13 @@ fn path_value(source: &str) -> Result<String, &'static str> {
 }
 
 fn header_path(header: &str) -> String {
+    if header.starts_with('"')
+        && let Ok((_, rest)) = quoted_path(header)
+        && let Some(new) = rest.strip_prefix(' ')
+        && let Ok(new) = path_value(new)
+    {
+        return new.strip_prefix("b/").unwrap_or(&new).to_owned();
+    }
     if let Some((old, new)) = header.rsplit_once(" b/")
         && old.strip_prefix("a/") == Some(new)
     {
@@ -305,6 +334,9 @@ mod tests {
         assert_eq!(patch.files[1].rows[1].new, Some(1));
         assert_eq!(patch.files[1].rows[2].kind, Kind::Note);
         assert!(path_value("\"unterminated").is_err());
+        assert!(path_value("\"path\"junk").is_err());
+        let mode = "diff --git \"a/\\344\\270\\255\\346\\226\\207.txt\" \"b/\\344\\270\\255\\346\\226\\207.txt\"\nold mode 100644\nnew mode 100755\n";
+        assert_eq!(Patch::parse(mode, false).unwrap().files[0].path, "中文.txt");
     }
 
     #[test]
@@ -312,6 +344,7 @@ mod tests {
         for text in [
             "not a patch",
             "diff --cc file\n@@@ -1 +1 +1 @@@\n line\n",
+            "diff --git a/x b/x\n@@@ -1 +1 +1 @@@\n line\n",
             "diff --git a/x b/x\nGIT binary patch\nliteral 3\nabc\n",
             "diff --git a/x b/x\n@@ -1,2 +1 @@\n line\n",
             "diff --git a/x b/x\n@@ -0 +1 @@\n+line\n",

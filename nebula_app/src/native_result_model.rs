@@ -2,8 +2,8 @@ use serde_json::Value;
 use std::cmp::Ordering;
 use std::ops::Range;
 
-mod directory;
 pub(crate) mod diff;
+mod directory;
 pub(crate) use directory::{FileKind, FileMetadata};
 
 pub(crate) const MAX_TABLE_ROWS: usize = 20_000;
