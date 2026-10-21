@@ -109,6 +109,13 @@ pub(crate) fn discover_wsl(
         entries: 4096,
         limited: false,
     };
+    // 后台发现只接受此刻仍运行的发行版；不能为列出别名而唤醒已停止的 guest。
+    if !crate::platform::shell::running_wsl_distros(TIMEOUT, cancelled)?
+        .iter()
+        .any(|distro| distro == request.distro)
+    {
+        return Err(io::ErrorKind::NotConnected.into());
+    }
     let command = crate::shell_detect::wsl_exec_command(request.distro, request.user);
     let Reply::Identity { user, home } = query(command, "identity", "", 0, &budget)? else {
         return Err(invalid());
