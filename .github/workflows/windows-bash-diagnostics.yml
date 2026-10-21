@@ -1,0 +1,58 @@
+name: Windows Bash input diagnostics
+
+on:
+  push:
+    branches: [diagnostics/bash-input-20261021]
+
+permissions:
+  contents: read
+
+jobs:
+  bash-input:
+    name: Bash diagnostic (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-11-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      CARGO_TERM_COLOR: never
+      RUST_BACKTRACE: "1"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.97.1"
+      - name: Record native environment
+        shell: pwsh
+        run: |
+          rustc -vV
+          [Environment]::OSVersion.VersionString
+          & 'C:\Program Files\Git\bin\bash.exe' --version
+          if ('${{ matrix.os }}' -eq 'windows-11-arm') {
+            if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne 'Arm64') {
+              throw 'The ARM64 diagnostic requires a native ARM64 host.'
+            }
+            $compiler = rustc -vV
+            if ($compiler -notcontains 'host: aarch64-pc-windows-msvc') {
+              throw 'The ARM64 diagnostic requires a native ARM64 compiler.'
+            }
+          }
+      - name: Repeat the unchanged regression and retain every failure
+        shell: pwsh
+        run: |
+          $testName = 'tty::windows::test::bash_input::git_bash_wrapped_input_can_be_fully_erased_in_byte_and_utf8_locales'
+          cargo test --config .github/ci-profile.toml --profile ci --locked -p nebula_terminal --lib --no-run
+          if ($LASTEXITCODE -ne 0) { throw 'Diagnostic compilation failed.' }
+          $failures = 0
+          for ($iteration = 1; $iteration -le 12; $iteration++) {
+            Write-Output "Bash diagnostic iteration $iteration / 12"
+            cargo test --config .github/ci-profile.toml --profile ci --locked -p nebula_terminal --lib $testName -- --exact --nocapture
+            if ($LASTEXITCODE -ne 0) { $failures++ }
+          }
+          Write-Output "Bash diagnostic failures: $failures / 12"
+          if ($failures -ne 0) { throw "$failures diagnostic iterations failed." }
