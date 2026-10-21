@@ -795,9 +795,13 @@ impl TerminalView {
         self.image_paste.observe_input(&bytes);
         self.confirmation.observe_input(&bytes);
         self.awaiting_input = false;
+        let mut status_acknowledged = false;
         if let Some(session) = &self.session {
             {
                 let mut term = session.term.lock();
+                if !bytes.is_empty() {
+                    status_acknowledged = term.acknowledge_program_status_results();
+                }
                 // Match the parser's Term-lock order before attributing queued prompts.
                 let preserves_prompt = super::event_mailbox::preserves_native_prompt(&bytes);
                 session.native_prompt.observe_input(self.prompt_input_epoch, preserves_prompt);
@@ -808,6 +812,9 @@ impl TerminalView {
                 term.selection = None;
             }
             session.notifier.notify(bytes);
+        }
+        if status_acknowledged {
+            self.refresh_program_status(cx);
         }
         self.sync_native_prompt();
         self.restart_cursor_blink(cx);

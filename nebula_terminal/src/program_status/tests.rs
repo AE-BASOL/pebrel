@@ -123,3 +123,21 @@ fn prompts_and_exit_retain_results_without_heartbeat_expiry() {
     assert_eq!(records.iter().count(), 0);
     assert!(!records.seen());
 }
+
+#[test]
+fn acknowledging_results_keeps_live_children_and_rearms_on_a_new_report() {
+    let mut records = Records::default();
+    apply(&mut records, "state=done:app=codex");
+    apply(&mut records, "state=error:id=failed");
+    apply(&mut records, "state=blocked:id=worker");
+    assert!(records.acknowledge_results());
+    assert!(!records.acknowledge_results());
+    let child = records.iter().find(|r| !r.result_acknowledged).unwrap();
+    assert_eq!(child.id, "worker");
+    assert_eq!(records.app_for(child), Some("codex"));
+    assert_eq!(records.iter().count(), 3);
+    apply(&mut records, "state=clear:id=worker");
+    assert!(records.iter().all(|r| r.result_acknowledged));
+    apply(&mut records, "state=done:app=codex");
+    assert!(!records.iter().last().unwrap().result_acknowledged);
+}

@@ -17,13 +17,16 @@ impl ProgramStatus {
     fn select(records: &Records) -> Option<Self> {
         // A blocked child must remain visible under a working/idle root.
         // Equal priorities use the latest update, matching the core's LRU order.
-        let record = records.iter().max_by_key(|record| match record.state {
-            State::Blocked => 5,
-            State::Error => 4,
-            State::Working => 3,
-            State::Done => 2,
-            State::Idle => 1,
-        })?;
+        let record =
+            records.iter().filter(|record| !record.result_acknowledged).max_by_key(|record| {
+                match record.state {
+                    State::Blocked => 5,
+                    State::Error => 4,
+                    State::Working => 3,
+                    State::Done => 2,
+                    State::Idle => 1,
+                }
+            })?;
         Some(Self {
             app: records.app_for(record).map(str::to_owned),
             state: record.state,
@@ -59,8 +62,9 @@ impl ProgramStatus {
 
 impl TerminalView {
     pub(super) fn effective_program_status(&self) -> Option<&ProgramStatus> {
-        if (self.agent_activity.hook_seen() && self.exited.is_none())
-            || self.error.is_some()
+        // Explicit program state wins over Hook and screen/process fallback.
+        // Hook ownership still supplies session identity, answers and requests.
+        if self.error.is_some()
             || self.pty_failed
             || matches!(self.ssh_stage, Some(crate::ssh_session::SshStage::Failed(_)))
         {

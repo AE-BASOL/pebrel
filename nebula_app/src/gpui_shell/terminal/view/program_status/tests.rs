@@ -121,21 +121,133 @@ fn osc7501_drives_agent_state_child_priority_and_progress_without_notifications(
 }
 
 #[gpui::test]
-fn osc7501_cannot_override_hooks_or_pane_failures(cx: &mut TestAppContext) {
+fn osc7501_overrides_conflicting_hooks_in_either_arrival_order(cx: &mut TestAppContext) {
+    for hook_first in [true, false] {
+        let session = if hook_first { "osc7501-hook-first" } else { "osc7501-hook-last" };
+        let (view, window, _) = open(cx);
+        view.update(window, |view, cx| {
+            let mut wire = Wire::install(view);
+            for (index, (report, state, badge, progress)) in [
+                ("idle", RuntimeTaskState::Idle, SidebarActivity::Idle, TaskProgress::None),
+                (
+                    "working:progress=35",
+                    RuntimeTaskState::Running,
+                    SidebarActivity::Running,
+                    TaskProgress::Value(35),
+                ),
+                ("done", RuntimeTaskState::Finished, SidebarActivity::Done, TaskProgress::None),
+                (
+                    "blocked:kind=question",
+                    RuntimeTaskState::Attention,
+                    SidebarActivity::Attention,
+                    TaskProgress::Paused(None),
+                ),
+                (
+                    "blocked:kind=permission:progress=40",
+                    RuntimeTaskState::Attention,
+                    SidebarActivity::Attention,
+                    TaskProgress::Paused(Some(40)),
+                ),
+                (
+                    "blocked:kind=auth",
+                    RuntimeTaskState::Attention,
+                    SidebarActivity::Attention,
+                    TaskProgress::Paused(None),
+                ),
+                (
+                    "error",
+                    RuntimeTaskState::Failed,
+                    SidebarActivity::CommandFailed,
+                    TaskProgress::Error(None),
+                ),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                wire.feed(view, cx, b"\x1b]7501;state=clear\x07");
+                let name = if state == RuntimeTaskState::Running {
+                    "PermissionRequest"
+                } else {
+                    "UserPromptSubmit"
+                };
+                let event = hook(session, name, index as u64 + 1);
+                if hook_first {
+                    assert!(view.handle_ai_hook(&event, cx));
+                }
+                let bytes = format!("\x1b]7501;state={report}:app=claude-code\x07");
+                wire.feed(view, cx, bytes.as_bytes());
+                if !hook_first {
+                    assert!(view.handle_ai_hook(&event, cx));
+                }
+                view.refresh_agent_screen_state(cx);
+                assert_eq!(view.runtime_task_state(), state, "{report}, hook_first={hook_first}");
+                assert_eq!(view.sidebar_activity(), badge);
+                assert_eq!(view.progress, progress);
+                let agent = view.runtime_agent().unwrap();
+                assert_eq!(agent.state_source, RuntimeAgentStateSource::Osc7501);
+                assert_eq!(agent.session_id.as_deref(), Some(session));
+                assert!(agent.hook_seen);
+            }
+        });
+    }
+}
+
+fn hook(session: &str, name: &str, sequence: u64) -> crate::ai_hook::AiHookEvent {
+    let payload = serde_json::json!({
+        "hook_event_name": name,
+        "session_id": session,
+        "bridge_sequence": sequence,
+    });
+    let envelope = format!("nebula-hook/1 source=claude pane=42\n{payload}");
+    crate::ai_hook::parse_remote_envelope(envelope.as_bytes(), Some(42)).unwrap()
+}
+
+#[gpui::test]
+fn absent_or_cleared_osc7501_falls_back_to_hooks_then_screen(cx: &mut TestAppContext) {
     let (view, window, _) = open(cx);
     view.update(window, |view, cx| {
         let mut wire = Wire::install(view);
-        wire.feed(view, cx, b"\x1b]7501;state=blocked:app=codex\x07");
-        let event = crate::ai_hook::parse_remote_envelope(
-            b"nebula-hook/1 source=claude pane=42\n{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"osc7501-authority\",\"bridge_sequence\":1}",
-            Some(42),
-        ).unwrap();
-        assert!(view.handle_ai_hook(&event, cx));
+        view.running_program = Some("claude".into());
+        wire.feed(
+            view,
+            cx,
+            "Do you want to proceed?\r\n❯ 1. Yes\r\n2. No\r\nEsc to cancel".as_bytes(),
+        );
+        view.refresh_agent_screen_state(cx);
+        assert_eq!(view.runtime_task_state(), RuntimeTaskState::Attention);
+        assert_eq!(view.runtime_agent().unwrap().state_source, RuntimeAgentStateSource::Screen);
+        wire.feed(view, cx, b"\x1b]7501;state=done:app=claude-code\x07");
+        assert_eq!(view.runtime_task_state(), RuntimeTaskState::Finished);
+        wire.feed(view, cx, b"\x1b]7501;state=clear\x07");
+        assert_eq!(view.runtime_task_state(), RuntimeTaskState::Attention);
+        assert_eq!(view.runtime_agent().unwrap().state_source, RuntimeAgentStateSource::Screen);
+
+        assert!(view.handle_ai_hook(&hook("osc7501-fallback", "UserPromptSubmit", 1), cx));
+        view.refresh_agent_screen_state(cx);
         assert_eq!(view.runtime_task_state(), RuntimeTaskState::Running);
-        wire.feed(view, cx, b"\x1b]7501;state=error:app=codex\x07");
+        assert_eq!(view.runtime_agent().unwrap().state_source, RuntimeAgentStateSource::Hook);
+        wire.feed(view, cx, b"\x1b]7501;state=error:app=claude-code\x07");
+        assert_eq!(view.runtime_task_state(), RuntimeTaskState::Failed);
+        wire.feed(view, cx, b"\x1b]7501;state=clear\x07\x1b]7501;state=invalid\x07");
         assert_eq!(view.runtime_task_state(), RuntimeTaskState::Running);
         assert_eq!(view.runtime_agent().unwrap().state_source, RuntimeAgentStateSource::Hook);
         assert_eq!(view.progress, TaskProgress::None);
+        wire.feed(view, cx, b"\x1b]7501;state=idle:app=claude-code\x07");
+        assert_eq!(view.runtime_task_state(), RuntimeTaskState::Idle);
+        wire.feed(view, cx, b"\x1bc");
+        assert_eq!(view.runtime_task_state(), RuntimeTaskState::Running);
+        assert_eq!(view.runtime_agent().unwrap().state_source, RuntimeAgentStateSource::Hook);
+    });
+}
+
+#[gpui::test]
+fn osc7501_cannot_override_pane_failures(cx: &mut TestAppContext) {
+    let (view, window, _) = open(cx);
+    view.update(window, |view, cx| {
+        let mut wire = Wire::install(view);
+        assert!(view.handle_ai_hook(&hook("osc7501-pane-failure", "UserPromptSubmit", 1), cx));
+        wire.feed(view, cx, b"\x1b]7501;state=done:app=claude-code\x07");
+        assert_eq!(view.runtime_task_state(), RuntimeTaskState::Finished);
         view.error = Some("fixture transport failure".into());
         assert_eq!(view.runtime_task_state(), RuntimeTaskState::Failed);
         assert_eq!(view.sidebar_activity(), SidebarActivity::Failed);
@@ -163,5 +275,52 @@ fn osc7501_error_and_ris_do_not_leave_stale_taskbar_state(cx: &mut TestAppContex
         wire.feed(view, cx, b"\x1b]7501;state=clear\x07");
         assert_eq!(view.runtime_task_state(), RuntimeTaskState::Idle);
         assert_eq!(view.progress, TaskProgress::None);
+    });
+}
+
+#[gpui::test]
+fn retained_results_are_acknowledged_by_input_or_the_next_shell_command(cx: &mut TestAppContext) {
+    for result in ["done", "error"] {
+        let (view, window, _) = open(cx);
+        view.update(window, |view, cx| {
+            let mut wire = Wire::install(view);
+            let report = format!("\x1b]7501;state={result}:app=codex\x07");
+            wire.feed(view, cx, report.as_bytes());
+            wire.feed(view, cx, b"\x1b]133;A\x07");
+            assert!(view.effective_program_status().is_some(), "the prompt retains results");
+            view.suggest.last_committed = "sleep 10".into();
+            wire.feed(view, cx, b"\x1b]133;C\x07");
+            assert_eq!(view.runtime_task_state(), RuntimeTaskState::Running);
+            assert_eq!(view.progress, TaskProgress::None);
+            assert!(view.runtime_agent().is_none(), "the old app cannot identify the new command");
+
+            wire.feed(view, cx, report.as_bytes());
+            assert!(view.effective_program_status().is_some(), "a fresh report rearms the result");
+            view.write_input(vec![b'x'], cx);
+            assert!(view.effective_program_status().is_none());
+            assert_eq!(view.runtime_task_state(), RuntimeTaskState::Running);
+            assert_eq!(view.progress, TaskProgress::None);
+            wire.feed(view, cx, b"\x1b]7501;state=blocked:app=codex\x07");
+            view.write_input(vec![b'y'], cx);
+            assert_eq!(view.runtime_task_state(), RuntimeTaskState::Attention);
+            assert_eq!(
+                view.runtime_agent().unwrap().state_source,
+                RuntimeAgentStateSource::Osc7501
+            );
+        });
+    }
+}
+
+#[gpui::test]
+fn command_start_cannot_acknowledge_a_later_report_in_the_same_read(cx: &mut TestAppContext) {
+    let (view, window, _) = open(cx);
+    view.update(window, |view, cx| {
+        let mut wire = Wire::install(view);
+        wire.feed(view, cx, b"\x1b]7501;state=done:app=codex\x07\x1b]133;A\x07");
+        view.suggest.last_committed = "codex".into();
+        wire.feed(view, cx, b"\x1b]133;C\x07\x1b]7501;state=error:app=codex\x07");
+        assert_eq!(view.runtime_task_state(), RuntimeTaskState::Failed);
+        assert_eq!(view.progress, TaskProgress::Error(None));
+        assert_eq!(view.runtime_agent().unwrap().state_source, RuntimeAgentStateSource::Osc7501);
     });
 }

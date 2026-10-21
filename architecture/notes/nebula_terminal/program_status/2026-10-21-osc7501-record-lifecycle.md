@@ -32,11 +32,26 @@ Reject invalid ids instead of redirecting them to root. Clear subtrees on segmen
 boundaries. Resolve `app` from the nearest existing ancestor when read. Keep
 updates in LRU order without wall clocks, heartbeat expiry or a new worker.
 
-OSC 133 A and process/transport end drop live records; done/error survive. RIS
+OSC 133 A and attached-process/transport end drop live records; done/error survive. RIS
 clears all records and protocol preference; DECSTR and alternate-screen changes
 leave them alone. Move `Term::exit` alongside this lifecycle so local and remote
 successful exits use the same cleanup. SSH error handling invokes cleanup while
 preserving the existing failed-pane presentation.
+
+User input or the next OSC 133 C acknowledges done/error results so they cannot
+mask a later command without protocol support. Acknowledgement hides results
+without deleting ancestor identity needed by live children. A fresh report
+rearms that record. The command-start acknowledgement runs at the ordered core
+boundary, never while replaying a delayed UI event that could hide a newer report.
+Hook edges and process heuristics alone do not acknowledge or invalidate valid
+protocol state. The parser cancels aborted OSC reports at CAN/SUB or a new ESC
+sequence so a pre-reset report cannot be published after RIS.
+
+The stream boundary also owns RIS ordering for program facts. VTE may replay a
+synchronized frame later, so `StreamProcessor` preserves records while advancing
+or flushing VTE and applies the sniffer's RIS event in byte order. A buffered old
+reset cannot erase a newer report, and this does not flush the frame early or add
+a pending report queue. Direct `Term` resets still clear program records.
 
 Reply to feature queries with a fixed constant before a subsequent DA response.
 Ignore reflected replies. Suppress OSC 9;4 progress events after the first valid
@@ -45,9 +60,10 @@ program's explicit blocked state.
 
 The GPUI product projects the highest-priority record as blocked, error, working,
 done, then idle; latest update breaks ties. This is presentation policy, not a
-semantic relationship between parent and child work. Pane/transport failure and
-accepted live Hook ownership take priority. Otherwise 7501 drives the existing
-sidebar, taskbar and Runtime API before screen/process inference. Known `app`
+semantic relationship between parent and child work. Pane/transport failure takes
+priority. Otherwise valid 7501 state drives the existing sidebar, taskbar and
+Runtime API before Hooks, then screen/process inference. Arrival order does not
+change that preference; clearing/resetting records restores the fallback. Known `app`
 identifiers can identify an Agent; they cannot create a Hook or resumable session.
 The Runtime API reports this source as `osc7501`. The legacy renderer keeps the
 shared parser/records but does not gain the GPUI status projection.
@@ -70,7 +86,9 @@ formatting/direction overrides and retain the originating pane identity.
   explicitly forbids message interpretation and heartbeat expiry.
 - Storing only the last report: an idle root would hide a blocked child and
   subtree clearing/app inheritance would become impossible.
-- Overwriting authenticated Hooks or importing OSC app names into Hook ownership:
+- Letting Hook status suppress valid program reports: partial Hook integrations
+  can retain an older state even when the program explicitly reports a new one.
+- Importing OSC app names into authenticated Hook ownership:
   unrelated programs on the same PTY could change session/answer ownership.
 - Mapping each report to a new UI event snapshot or desktop alert: redundant
   allocations and queued work grow with output volume, and Hook alerts duplicate.
@@ -80,36 +98,38 @@ formatting/direction overrides and retain the originating pane identity.
 No dependencies, settings, persistent data or threads are added. Clients must
 actually emit the protocol to benefit. OSC 7501 state does not supply the session
 identity, answer payload or actionable permission request provided by Hooks.
-Partial/completion-only Hook integrations retain their existing precedence while
-their command owns the pane; this implementation does not infer cross-channel
-turn ordering. Actual native CLI adoption and multi-platform rendering require
-separate acceptance evidence.
+Hooks continue consuming their lifecycle while valid program reports own status
+presentation, so clearing the protocol restores the current Hook fallback.
+This implementation does not infer cross-channel turn ordering. Actual native
+CLI adoption and multi-platform rendering require separate acceptance evidence.
 
 ## Validation
 
 Core tests cover every split boundary, BEL/ST, malformed and oversized reports,
 UTF-8/base64/control rejection, replacement, inherited app, LRU, subtree clearing,
 prompt/exit/reset lifetime, fixed query replies and OSC 9;4 precedence. GPUI
-regressions cover child attention, identity/evidence, Hook priority, failure,
-result retention, no extra notifications, taskbar clearing and mailbox flooding.
+regressions cover child attention, identity/evidence, protocol priority in both
+Hook arrival orders, Hook/screen fallback after clear/reset, pane failure,
+result retention/acknowledgement, no extra notifications, taskbar clearing and
+mailbox flooding.
 
-On Linux ARM64, `cargo test -p nebula_terminal --locked` passed 340 tests with two
-pre-existing ignored tests; the scoped GPUI/Runtime API run passed 76 tests.
+On Linux ARM64, `cargo test -p nebula_terminal --locked` passed 345 tests with two
+pre-existing ignored tests; the scoped GPUI/Runtime API run passed 80 tests.
 The real GPUI product check (including tests), architecture check against main,
 format check, 55 governance tests, 99 settings tests, 24 i18n contract tests (one
 ignored), and both file-budget tests passed. Windows/macOS native operation and
 visual acceptance were not run on this host.
 
 The local ARM64 `rustc -O` sniffer probe used five runs per input: 32,112,640 bytes
-of plain output took 43.23–43.57 ms before and 43.32–43.53 ms after; 26,869,760
-bytes of mixed ANSI/OSC 9;4 took 104.93–136.38 ms before and 102.49–140.10 ms
-after. A separate 100,000-report parse/store probe at the 256-record cap took
-32.16 ms and retained 256 records. These isolated measurements are local cost
+of plain output took 43.23–43.65 ms before and 3.00–3.14 ms after a ground-state
+slice-search fast path; 26,869,760 bytes of mixed ANSI/OSC 9;4 took 111.25–112.44 ms
+before and 107.24–107.85 ms after. A separate 100,000-report parse/store probe at the 256-record cap took
+33.39 ms and retained 256 records. These isolated measurements are local cost
 evidence, not throughput or allocation guarantees for the application.
 
 ## Supersedes
 
-None. Hook ownership and screen fallback rules remain authoritative.
+None. Hook identity/answer/request ownership and screen fallback rules remain authoritative.
 
 ## Revisit when
 

@@ -36,6 +36,9 @@ pub struct Record {
     pub progress: Option<u8>,
     pub title: Option<String>,
     pub message: Option<String>,
+    /// The terminal may stop presenting a result after user acknowledgement.
+    /// Keep the record so children can still inherit its app identity.
+    pub result_acknowledged: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -116,6 +119,17 @@ impl Records {
         let count = self.entries.len();
         self.entries.retain(|entry| matches!(entry.state, State::Done | State::Error));
         count != self.entries.len()
+    }
+
+    pub(crate) fn acknowledge_results(&mut self) -> bool {
+        let mut changed = false;
+        for entry in &mut self.entries {
+            if matches!(entry.state, State::Done | State::Error) && !entry.result_acknowledged {
+                entry.result_acknowledged = true;
+                changed = true;
+            }
+        }
+        changed
     }
 
     pub(crate) fn reset(&mut self) -> bool {
@@ -229,6 +243,7 @@ pub(crate) fn parse(body: &[u8]) -> Option<Report> {
         app,
         title,
         message,
+        result_acknowledged: false,
         kind: (state == State::Blocked).then_some(kind).flatten(),
         progress: matches!(state, State::Working | State::Blocked).then_some(progress).flatten(),
     }))

@@ -48,8 +48,9 @@ when working on the relevant capability; do not mix a whole-app rewrite into a f
 OSC 7501 program records belong to each `Term`, with bounded validation and
 prompt/process/reset lifetime shared by local PTYs and SSH. The GPUI product
 projects those records into existing status badges, progress and Runtime API
-states, below accepted live Hooks and above screen/process inference. Reports do
-not create Hook ownership, session ids or additional desktop notifications. See
+states, before Hooks and screen/process inference. Pane/transport failure still
+takes precedence. Reports do not create Hook ownership, session ids or additional
+desktop notifications. See
 the [protocol boundary](../architecture/notes/nebula_terminal/program_status/2026-10-21-osc7501-record-lifecycle.md).
 
 ## Rust module names are not file locations
