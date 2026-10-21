@@ -9,7 +9,7 @@ use std::{env, fs, thread};
 use crate::Term;
 use crate::event::{Event, EventListener, WindowSize};
 use crate::index::{Column, Line};
-use crate::term::{Config, test::TermSize};
+use crate::term::{Config, TermMode, test::TermSize};
 use crate::tty::{self, EventedReadWrite};
 use vte::ansi;
 
@@ -39,6 +39,26 @@ impl BashSession {
     fn send(&mut self, bytes: &[u8]) {
         self.last_input = bytes.to_vec();
         write_pty(&mut self.pty, bytes);
+    }
+
+    fn edit(&mut self, key: EditKey, count: usize) {
+        let (virtual_key, character, modifiers, legacy) = match key {
+            EditKey::Backspace => (0x08, 0x08, 0, 0x7f),
+            EditKey::Home => (0x41, 0x01, 0x08, 0x01), // Ctrl+A
+            EditKey::End => (0x45, 0x05, 0x08, 0x05),  // Ctrl+E
+            EditKey::KillLine => (0x55, 0x15, 0x08, 0x15), // Ctrl+U
+        };
+        if self.term.mode().contains(TermMode::WIN32_INPUT_MODE) {
+            // Match the product's negotiated special-key path, including key-up.
+            // Scan code 0 is valid for these synthetic keys; VK/Uc carry their
+            // identity. Keep repeated presses in one write to retain burst coverage.
+            let press = format!(
+                "\x1b[{virtual_key};0;{character};1;{modifiers};1_\x1b[{virtual_key};0;{character};0;{modifiers};1_"
+            );
+            self.send(press.repeat(count).as_bytes());
+        } else {
+            self.send(&vec![legacy; count]);
+        }
     }
 
     fn wait_for(&mut self, label: &str, expected: impl Fn(&Term<Replies>) -> bool) {
@@ -78,6 +98,14 @@ impl BashSession {
             thread::sleep(Duration::from_millis(5));
         }
     }
+}
+
+#[derive(Clone, Copy)]
+enum EditKey {
+    Backspace,
+    Home,
+    End,
+    KillLine,
 }
 
 fn write_pty(pty: &mut tty::Pty, mut bytes: &[u8]) {
@@ -164,7 +192,7 @@ fn git_bash_wrapped_input_can_be_fully_erased_in_byte_and_utf8_locales() {
                 row(term, 0).trim_end() == format!("{mark} relay/package.json")
                     && term.grid().cursor.point.column == Column(20)
             });
-            session.send(&[127; 18]);
+            session.edit(EditKey::Backspace, 18);
             session.wait_for("short backspace", |term| blank_input(term, mark));
 
             let long = b"relay/package.jsonrelay/package.jsonrelay/package.jsonrelay/package.json";
@@ -173,7 +201,8 @@ fn git_bash_wrapped_input_can_be_fully_erased_in_byte_and_utf8_locales() {
                 row(term, 0) == format!("{mark} {}", &text[..38])
                     && row(term, 1).trim_end() == &text[38..]
             };
-            for (erase_name, erase) in [("backspace", vec![127; long.len()]), ("Ctrl-U", vec![21])]
+            for (erase_name, erase, count) in
+                [("backspace", EditKey::Backspace, long.len()), ("Ctrl-U", EditKey::KillLine, 1)]
             {
                 session.send(long);
                 // 光标位置可能先于一次重绘的全部字符到达；等文本也完整后再发送下一项编辑。
@@ -182,19 +211,19 @@ fn git_bash_wrapped_input_can_be_fully_erased_in_byte_and_utf8_locales() {
                         && term.grid().cursor.point.line == Line(1)
                         && term.grid().cursor.point.column == Column(34)
                 });
-                session.send(&[1]);
+                session.edit(EditKey::Home, 1);
                 session.wait_for(&format!("{erase_name}: wrapped Home"), |term| {
                     content_matches(term)
                         && term.grid().cursor.point.line == Line(0)
                         && term.grid().cursor.point.column == Column(2)
                 });
-                session.send(&[5]);
+                session.edit(EditKey::End, 1);
                 session.wait_for(&format!("{erase_name}: wrapped End"), |term| {
                     content_matches(term)
                         && term.grid().cursor.point.line == Line(1)
                         && term.grid().cursor.point.column == Column(34)
                 });
-                session.send(&erase);
+                session.edit(erase, count);
                 session.wait_for(&format!("{erase_name}: erase wrapped input"), |term| {
                     blank_input(term, mark)
                 });
