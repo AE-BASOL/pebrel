@@ -9,7 +9,7 @@ struct Slot {
     id: u64,
     start: i64,
     rows: u16,
-    height: usize,
+    height: f64,
     hide_source: bool,
 }
 
@@ -50,7 +50,7 @@ impl Projection {
                 break;
             }
             let used = (source - slot.start as f64).min(f64::from(slot.rows));
-            extra += used * (slot.height as f64 / f64::from(slot.rows) - 1.0);
+            extra += used * (slot.height / f64::from(slot.rows) - 1.0);
         }
         source + extra
     }
@@ -61,11 +61,10 @@ impl Projection {
             if visual <= start {
                 break;
             }
-            if visual < start + slot.height as f64 {
-                return slot.start as f64
-                    + (visual - start) * f64::from(slot.rows) / slot.height as f64;
+            if visual < start + slot.height {
+                return slot.start as f64 + (visual - start) * f64::from(slot.rows) / slot.height;
             }
-            extra += slot.height as f64 - f64::from(slot.rows);
+            extra += slot.height - f64::from(slot.rows);
         }
         visual - extra
     }
@@ -151,7 +150,7 @@ impl Views {
                 || p.slots.iter().any(|slot| {
                     slot.id == *id && {
                         let top = p.visual(slot.start as f64) - p.top;
-                        top < p.screen as f64 && top + slot.height as f64 > 0.0
+                        top < p.screen as f64 && top + slot.height > 0.0
                     }
                 })
         });
@@ -234,7 +233,7 @@ impl Views {
         let anchor = projection.source(projection.top);
         let content_anchor = projection.slots.iter().find_map(|slot| {
             let start = projection.visual(slot.start as f64);
-            (start <= projection.top && projection.top < start + slot.height as f64)
+            (start <= projection.top && projection.top < start + slot.height)
                 .then_some((slot.id, projection.top - start))
         });
         let follow = projection.slots.is_empty()
@@ -260,19 +259,20 @@ impl Views {
                         id: source.id,
                         start: *start + super::fold::KEEP as i64 - i64::from(expanded),
                         rows: if expanded { 1 } else { rows - (super::fold::KEEP * 2) as u16 },
-                        height: if expanded { 2 } else { 1 },
+                        height: if expanded { 2.0 } else { 1.0 },
                         hide_source: !expanded,
                     });
                 }
                 let height = self
                     .entities
                     .get(&source.id)
-                    .map_or(usize::from(rows), |entity| {
+                    .map_or(f64::from(rows), |entity| {
                         let result = entity.read(cx);
-                        (result.measured_height.as_f32() / result.row_height.as_f32().max(1.0))
-                            .ceil() as usize
+                        // 富文本不是整行网格；向上补齐会在结果尾部凭空留下接近一行的空白。
+                        f64::from(result.measured_height.as_f32())
+                            / f64::from(result.row_height.as_f32().max(1.0))
                     })
-                    .max(if source.has_grid_source() { 1 } else { usize::from(rows) });
+                    .max(if source.has_grid_source() { 1.0 } else { f64::from(rows) });
                 Some(Slot { id: source.id, start: *start, rows, height, hide_source: true })
             })
             .collect();
@@ -305,7 +305,7 @@ impl Views {
             && let Some(slot) = projection.slots.iter().find(|slot| slot.id == id)
         {
             // 保住内容内的实际偏移，不按整块高度比例缩放阅读位置。
-            projection.visual(slot.start as f64) + offset.min(slot.height.saturating_sub(1) as f64)
+            projection.visual(slot.start as f64) + offset.min((slot.height - 1.0).max(0.0))
         } else {
             projection.visual(anchor)
         };
@@ -350,7 +350,7 @@ mod tests {
     #[test]
     fn native_result_projection_keeps_prompt_and_middle_of_document_addressable() {
         let p = Projection {
-            slots: vec![Slot { id: 1, start: 2, rows: 1, height: 100, hide_source: true }],
+            slots: vec![Slot { id: 1, start: 2, rows: 1, height: 100.0, hide_source: true }],
             active: true,
             origin: 2,
             top: 52.0,
@@ -371,8 +371,8 @@ mod tests {
     fn native_result_projection_combines_multiple_results_without_moving_source_lines() {
         let p = Projection {
             slots: vec![
-                Slot { id: 1, start: 1, rows: 1, height: 80, hide_source: true },
-                Slot { id: 2, start: 5, rows: 2, height: 20, hide_source: true },
+                Slot { id: 1, start: 1, rows: 1, height: 80.0, hide_source: true },
+                Slot { id: 2, start: 5, rows: 2, height: 20.0, hide_source: true },
             ],
             ..Default::default()
         };
@@ -381,6 +381,28 @@ mod tests {
         {
             assert_eq!(p.visual(source), visual);
             assert_eq!(p.source(visual), source);
+        }
+    }
+
+    #[test]
+    fn native_result_height_keeps_fractional_rows_before_the_next_prompt() {
+        let line_height = 17.5;
+        let content_height = 123.25;
+        let p = Projection {
+            slots: vec![Slot {
+                id: 1,
+                start: 3,
+                rows: 12,
+                height: content_height / line_height,
+                hide_source: true,
+            }],
+            ..Default::default()
+        };
+        assert!(((p.visual(15.0) - p.visual(3.0)) * line_height - content_height).abs() < 0.001);
+        // shell 自己输出的空行仍然保留；只去除富文本占位额外补出来的整行空白。
+        assert!(((p.visual(16.0) - p.visual(15.0)) * line_height - line_height).abs() < 0.001);
+        for source in [3.0, 7.5, 15.0, 16.0] {
+            assert!((p.source(p.visual(source)) - source).abs() < 0.001);
         }
     }
 }

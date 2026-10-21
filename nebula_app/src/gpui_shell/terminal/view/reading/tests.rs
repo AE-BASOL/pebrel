@@ -591,7 +591,59 @@ fn native_result_table_expands_all_rows_and_keeps_body_font(cx: &mut TestAppCont
         let result = view.native_results.entities.values().next().unwrap().read(cx);
         assert!(result.height() >= view.line_height * 100.0);
         assert_eq!(result.body_font_size(), view.font_size);
+        let (_, _, projected_rows) = view.native_results.placements().into_iter().next().unwrap();
+        assert!(
+            (projected_rows * view.line_height.as_f32() - result.height().as_f32()).abs() < 0.01,
+            "following terminal content must use the table's measured height without row padding"
+        );
     });
+}
+
+#[gpui::test]
+fn native_result_row_hover_notifies_inside_a_cached_parent(cx: &mut TestAppContext) {
+    use nebula_terminal::inline_content::Packet;
+    use std::{cell::Cell, rc::Rc};
+
+    let (view, mut cx, _, proxy) = open_with_cache(cx, true);
+    let wire = format!(
+        "{}\r\n{}{}",
+        Packet::Begin {
+            wire_id: 203,
+            rows: 2,
+            mime: "application/json".into(),
+            title: "hover".into()
+        }
+        .encode(),
+        Packet::Append { wire_id: 203, text: r#"[{"Name":"alpha"},{"Name":"beta"}]"#.into() }
+            .encode(),
+        Packet::End { wire_id: 203, code: 0 }.encode(),
+    );
+    feed(&view, &mut cx, &proxy, wire.as_bytes());
+    let mut positions = None;
+    for _ in 0..5 {
+        draw(&mut cx);
+        if let (Some(first), Some(second)) =
+            (cx.debug_bounds("native-table-row-0"), cx.debug_bounds("native-table-row-1"))
+        {
+            positions = Some([first.center(), second.center()]);
+        }
+    }
+    let [first, second] = positions.expect("actual table row geometry");
+    let result = view
+        .read_with(&cx, |view, _| view.native_results.entities.values().next().unwrap().clone());
+    let notifications = Rc::new(Cell::new(0));
+    let observed = notifications.clone();
+    let _subscription =
+        cx.update(|_, cx| cx.observe(&result, move |_, _| observed.set(observed.get() + 1)));
+    cx.simulate_mouse_move(first, None, Modifiers::default());
+    draw(&mut cx);
+    for position in [second, first, second] {
+        notifications.set(0);
+        cx.simulate_mouse_move(position, None, Modifiers::default());
+        // 先检查鼠标事件自身产生通知；强制 draw 会让缺失的 hover 失效机制看似正常。
+        assert!(notifications.get() > 0, "crossing rows must notify before another forced draw");
+        draw(&mut cx);
+    }
 }
 
 #[gpui::test]

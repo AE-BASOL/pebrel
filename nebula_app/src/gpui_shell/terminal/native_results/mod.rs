@@ -643,7 +643,7 @@ impl Render for NativeResult {
                 div()
                     .w_full()
                     .min_w_0()
-                    // 与批准的轻量 lens 保持相同的上下呼吸边距。
+                    // 上下留白使用同一尺寸；实际内容高度交给投影，不再补齐到终端整行。
                     .when(
                         !self.raw_mode
                             && matches!(
@@ -655,7 +655,7 @@ impl Render for NativeResult {
                                     | "text/x-diff"
                                     | "text/x-git-output"
                             ),
-                        |body| body.pt(px(4.0)).pb(px(5.0)),
+                        |body| body.py(px(6.0)),
                     )
                     .child(body),
             )
