@@ -392,8 +392,12 @@ pub(crate) fn checkpoint_scheduled(session: &Session) -> io::Result<bool> {
 
 fn scheduled_windows() -> Result<Vec<Session>, String> {
     let windows = if crate::platform::elevation::is_elevated().map_err(|error| error.to_string())? {
-        read_json::<Vec<Session>>(&super::state_directory("").map_err(|error| error.to_string())?.join("scheduled-workspace.json"))
-            .ok_or("No administrator update workspace snapshot")?
+        read_json::<Vec<Session>>(
+            &super::state_directory("")
+                .map_err(|error| error.to_string())?
+                .join("scheduled-workspace.json"),
+        )
+        .ok_or("No administrator update workspace snapshot")?
     } else {
         crate::session::load_update_windows().map_err(|error| error.to_string())?
     };

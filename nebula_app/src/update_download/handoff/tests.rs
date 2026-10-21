@@ -106,34 +106,68 @@ fn update_restore_tickets_cover_success_rollback_and_acknowledgement() {
     assert!(acknowledge_restore(1));
     #[cfg(windows)]
     scheduled_snapshot_scope();
+    if plan.elevated {
+        // 私有存储在配置临时目录之外；只删除此夹具创建的已知文件，保留任何意外内容。
+        for name in
+            ["plan.json", "workspace.json", "result.json", "restore-attempts.json", "restored.json"]
+        {
+            std::fs::remove_file(directory.join(name)).unwrap();
+        }
+        for name in ["last-handoff.json", "install-next.json"] {
+            std::fs::remove_file(update_root.join(name)).unwrap();
+        }
+        std::fs::remove_dir(&directory).unwrap();
+        std::fs::remove_dir(update_root.join("handoffs")).unwrap();
+        std::fs::remove_dir(update_root).unwrap();
+    }
 }
 
 #[cfg(windows)]
 fn scheduled_snapshot_scope() {
     let elevated = crate::platform::elevation::is_elevated().unwrap();
-    let ordinary = Session::new(0, vec![crate::session::TabSession::single("ordinary-only".into(), None, None)]);
+    let ordinary = Session::new(
+        0,
+        vec![crate::session::TabSession::single("ordinary-only".into(), None, None)],
+    );
     crate::session::try_save(&ordinary).unwrap();
     let update_root = super::super::state_directory("").unwrap();
     let version = env!("CARGO_PKG_VERSION");
     let name = crate::update_check::assets::native_names(version)[0].clone();
-    let asset = UpdateAsset { version: version.into(), name: name.clone(),
-        download_url: format!("https://github.com/Kuddev/pebrel/releases/download/v{version}/{name}"),
-        size: Some(2), sha256: Some("a".repeat(64)) };
-    let _job = super::super::begin_download_session(&asset).unwrap();
-    super::super::session().as_mut().unwrap().status = super::super::DownloadStatus::Ready {
-        path: update_root.join(name), bytes: 2,
+    let asset = UpdateAsset {
+        version: version.into(),
+        name: name.clone(),
+        download_url: format!(
+            "https://github.com/Kuddev/pebrel/releases/download/v{version}/{name}"
+        ),
+        size: Some(2),
+        sha256: Some("a".repeat(64)),
     };
-    let before = Session::new(0, vec![crate::session::TabSession::single("administrator-before".into(), None, None)]);
-    let after = Session::new(0, vec![crate::session::TabSession::single("administrator-after".into(), None, None)]);
+    let _job = super::super::begin_download_session(&asset).unwrap();
+    super::super::session().as_mut().unwrap().status =
+        super::super::DownloadStatus::Ready { path: update_root.join(name), bytes: 2 };
+    let before = Session::new(
+        0,
+        vec![crate::session::TabSession::single("administrator-before".into(), None, None)],
+    );
+    let after = Session::new(
+        0,
+        vec![crate::session::TabSession::single("administrator-after".into(), None, None)],
+    );
     schedule(&asset, &[before.clone()]).unwrap();
     assert_eq!(checkpoint_scheduled(&after).unwrap(), elevated);
     let actual = scheduled_windows().unwrap();
     assert_eq!(actual[0].tabs, if elevated { after.tabs } else { ordinary.tabs.clone() });
-    assert_eq!(crate::session::load_update_windows().unwrap()[0].tabs, ordinary.tabs,
-        "administrator scheduling and subsequent saves never overwrite the ordinary workspace");
+    assert_eq!(
+        crate::session::load_update_windows().unwrap()[0].tabs,
+        ordinary.tabs,
+        "administrator scheduling and subsequent saves never overwrite the ordinary workspace"
+    );
     if elevated {
         std::fs::remove_file(update_root.join("scheduled-workspace.json")).unwrap();
-        assert!(scheduled_windows().is_err(), "a missing administrator snapshot cannot fall back to the ordinary session");
+        assert!(
+            scheduled_windows().is_err(),
+            "a missing administrator snapshot cannot fall back to the ordinary session"
+        );
     }
     SCHEDULED_IN_THIS_PROCESS.store(false, Ordering::Release);
     *super::super::session() = None;
