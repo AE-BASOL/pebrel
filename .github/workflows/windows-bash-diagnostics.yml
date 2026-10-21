@@ -20,6 +20,7 @@ jobs:
       CARGO_TERM_COLOR: never
       RUST_BACKTRACE: "1"
       CARGO_INCREMENTAL: "0"
+      NEBULA_BOOT_TRACE: "1"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -42,17 +43,21 @@ jobs:
               throw 'The ARM64 diagnostic requires a native ARM64 compiler.'
             }
           }
-      - name: Repeat the unchanged regression and retain every failure
+      - name: Compile the unchanged regression
         shell: pwsh
         run: |
-          $testName = 'tty::windows::test::bash_input::git_bash_wrapped_input_can_be_fully_erased_in_byte_and_utf8_locales'
           cargo test --config .github/ci-profile.toml --profile ci --locked -p nebula_terminal --lib --no-run
           if ($LASTEXITCODE -ne 0) { throw 'Diagnostic compilation failed.' }
-          $failures = 0
-          for ($iteration = 1; $iteration -le 12; $iteration++) {
-            Write-Output "Bash diagnostic iteration $iteration / 12"
-            cargo test --config .github/ci-profile.toml --profile ci --locked -p nebula_terminal --lib $testName -- --exact --nocapture
-            if ($LASTEXITCODE -ne 0) { $failures++ }
-          }
-          Write-Output "Bash diagnostic failures: $failures / 12"
-          if ($failures -ne 0) { throw "$failures diagnostic iterations failed." }
+      - name: Stress in-box ConPTY
+        shell: pwsh
+        run: python .github/windows-bash-stress.py in-box
+      - name: Prepare the pinned side-loaded host beside the test binary
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          $architecture = if ('${{ runner.arch }}' -eq 'ARM64') { 'arm64' } else { 'x64' }
+          ./scripts/prepare-windows-runtime.ps1 -Destination target/ci/deps/runtime -Architecture $architecture
+      - name: Stress side-loaded OpenConsole
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: python .github/windows-bash-stress.py sideloaded
