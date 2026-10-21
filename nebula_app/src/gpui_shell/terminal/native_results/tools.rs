@@ -98,7 +98,8 @@ impl NativeResult {
         } else {
             -self.viewport_top.max(0.0).min(38.0)
         };
-        let mut right: f32 = if self.viewport_top + top < 40.0 && self.available_width <= px(900.0) {
+        let mut right: f32 = if self.viewport_top + top < 40.0 && self.available_width <= px(900.0)
+        {
             36.0
         } else {
             3.0
