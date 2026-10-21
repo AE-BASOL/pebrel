@@ -240,6 +240,8 @@ impl NativeResult {
             .map(|index| {
                 let source_row = self.order[index];
                 div()
+                    // GPUI 依靠稳定元素状态发出 hover 通知；只有 selector 会让背景等到其他事件才重绘。
+                    .id(("native-table-row", source_row))
                     .debug_selector(move || format!("native-table-row-{index}"))
                     .absolute()
                     .top(row_height * index as f32)
