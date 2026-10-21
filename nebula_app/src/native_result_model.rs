@@ -3,6 +3,7 @@ use std::cmp::Ordering;
 use std::ops::Range;
 
 mod directory;
+pub(crate) mod diff;
 pub(crate) use directory::{FileKind, FileMetadata};
 
 pub(crate) const MAX_TABLE_ROWS: usize = 20_000;
