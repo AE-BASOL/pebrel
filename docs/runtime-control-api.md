@@ -311,6 +311,7 @@ SSH Pane 返回 `remote_exec_unsupported`。stdout/stderr 始终并行排水，�
 `state_source`：
 
 - `hook`：CLI hook 的生命周期边沿，是最高置信度事实。
+- `osc7501`：GPUI 产品读取程序通过 OSC 7501 显式上报的状态，优先级低于当前有效 hook、高于屏幕和进程推断；`app` 只能识别客户端种类，不能生成会话 ID。
 - `screen`：声明式屏幕规则补偿漏失 hook；`state_rule` 给出命中的规则 id。
 - `process`：只确认进程身份，不能把它提升成“已完成”或“需要批准”的强结论。
 

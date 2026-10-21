@@ -235,14 +235,18 @@ impl StreamProcessor {
                 },
                 OscEvent::Notify(text) => event_proxy.send_event(Event::Notify(text)),
                 OscEvent::Progress { state, value } => {
-                    event_proxy.send_event(Event::Progress { state, value })
+                    if !terminal.program_statuses().seen() {
+                        event_proxy.send_event(Event::Progress { state, value });
+                    }
                 },
+                OscEvent::ProgramStatus(report) => terminal.report_program_status(report),
                 OscEvent::RemoteHook { token, envelope } => {
                     if self.remote_hook_token.as_deref() == Some(token.as_str()) {
                         event_proxy.send_event(Event::AiHookEnvelope(envelope));
                     }
                 },
                 OscEvent::PromptMark => {
+                    terminal.end_program_status_activity();
                     terminal.reading_shell_marker(b'A', None, self.parser.sync_bytes_count() == 0);
                     terminal.nebula_add_prompt_mark();
                 },

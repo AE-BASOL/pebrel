@@ -1,5 +1,5 @@
 //! Sniffer for OSC sequences the vte parser drops: OSC 7 / OSC 9;9 (working
-//! directory) and OSC 133;A (semantic prompt mark).
+//! directory), OSC 133 (shell markers), and OSC 7501 (program status).
 //!
 //! The vte parser Nebula uses (crates.io `vte` 0.15) does not decode OSC 7
 //! (`file://` URI), OSC 9;9 (working directory) or OSC 133 (semantic prompt zones) —
@@ -65,6 +65,8 @@ pub enum OscEvent {
     /// 把未知码当成非法而丢掉，等于让进度条卡在最后一个状态上
     /// 永远不消失。映射交给消费端。
     Progress { state: u8, value: Option<u8> },
+    /// OSC 7501 program status, fully validated before publication.
+    ProgramStatus(crate::program_status::Report),
     /// Nebula 远端 Hook 私有 OSC：随机通道令牌 + 原始 Hook 信封。
     RemoteHook { token: String, envelope: Vec<u8> },
     /// OSC 1337 `File=...inline=1:<base64>` — an inline image.
@@ -87,7 +89,7 @@ enum Phase {
     OscEsc,
 }
 
-/// Streaming OSC 7 / 9;9 / 133;A sniffer. Feed it every PTY byte; it returns
+/// Streaming sniffer for additional terminal controls. Feed it every PTY byte; it returns
 /// the recognized events, each tagged with the offset just past its
 /// terminator (the `parser.advance` split point).
 #[derive(Default)]
@@ -124,7 +126,7 @@ impl CwdSniffer {
                 Phase::OscEsc => {
                     if b == b'\\' {
                         // ST terminator (ESC \).
-                        if let Some(event) = self.parse() {
+                        if let Some(event) = self.parse(2) {
                             events.push((i + 1, event));
                         }
                         self.reset_to_ground();
@@ -147,7 +149,7 @@ impl CwdSniffer {
         match b {
             0x07 => {
                 // BEL terminator.
-                if let Some(event) = self.parse() {
+                if let Some(event) = self.parse(1) {
                     events.push((i + 1, event));
                 }
                 self.reset_to_ground();
@@ -189,7 +191,13 @@ impl CwdSniffer {
     }
 
     /// Parse a completed payload into an event.
-    fn parse(&self) -> Option<OscEvent> {
+    fn parse(&self, terminator_len: usize) -> Option<OscEvent> {
+        if let Some(body) = self.payload.strip_prefix(b"7501;") {
+            if !self.interested || self.payload.len() + 2 + terminator_len > 4096 {
+                return None;
+            }
+            return crate::program_status::parse(body).map(OscEvent::ProgramStatus);
+        }
         if let Some(rest) = self.payload.strip_prefix(b"7;") {
             return parse_osc7_uri(rest).map(OscEvent::Cwd);
         }
@@ -263,7 +271,7 @@ fn prefix_could_match(payload: &[u8]) -> bool {
     const D: &[u8] = b"1337;";
     const E: &[u8] = b"777;";
     let matches = |target: &[u8]| target.starts_with(payload) || payload.starts_with(target);
-    matches(A) || matches(B) || matches(C) || matches(D) || matches(E)
+    matches(A) || matches(B) || matches(C) || matches(D) || matches(E) || matches(b"7501;")
 }
 
 /// Parse a `SetUserVar=<name>=<base64>` body. Names are restricted to the
