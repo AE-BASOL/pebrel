@@ -526,7 +526,9 @@ fn open_workspace_window(
             });
         }
         *workspace_out.borrow_mut() = Some(workspace.clone());
-        cx.new(|cx| Root::new(workspace, window, cx))
+        // Workspace surfaces already supply their own alpha. Root's default
+        // theme fill would composite a second copy behind every surface.
+        cx.new(|cx| Root::new(workspace, window, cx).bg(gpui::transparent_black()))
     })?;
     let workspace =
         workspace_slot.borrow_mut().take().expect("window builder must publish its workspace");
