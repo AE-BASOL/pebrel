@@ -33,6 +33,16 @@ struct BashSession {
     last_input: Vec<u8>,
     last_reply: Option<String>,
     output_tail: VecDeque<u8>,
+    diagnostic_edits: Vec<serde_json::Value>,
+}
+
+impl Drop for BashSession {
+    fn drop(&mut self) {
+        // Keep stdout/stderr I/O out of the editing burst and wait predicates.
+        for edit in &self.diagnostic_edits {
+            eprintln!("[bash-edit] {edit}");
+        }
+    }
 }
 
 impl BashSession {
@@ -49,6 +59,7 @@ impl BashSession {
             EditKey::KillLine => (0x55, 0x15, 0x08, 0x15), // Ctrl+U
             EditKey::Redraw => (0x4c, 0x0c, 0x08, 0x0c), // Ctrl+L
         };
+        let diagnostic_arm = env::var("PEBREL_BASH_DIAGNOSTIC_SCAN_CODE").ok();
         if self.term.mode().contains(TermMode::WIN32_INPUT_MODE) {
             use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
                 MAPVK_VK_TO_VSC, MapVirtualKeyW,
@@ -57,13 +68,35 @@ impl BashSession {
             // Match the product's negotiated special-key path, including key-up.
             // The GPUI and runtime encoders obtain the scan code from Windows.
             // Keep repeated presses in one write to retain burst coverage.
-            let scan_code = unsafe { MapVirtualKeyW(virtual_key, MAPVK_VK_TO_VSC) };
+            let mapped_scan = unsafe { MapVirtualKeyW(virtual_key, MAPVK_VK_TO_VSC) };
+            let scan_code = match diagnostic_arm.as_deref().unwrap_or("native") {
+                "native" => mapped_scan.to_string(),
+                "zero" => "0".to_owned(),
+                "zero-padded" => "00".to_owned(),
+                arm => panic!("unknown Bash scan-code diagnostic arm: {arm}"),
+            };
             let press = format!(
                 "\x1b[{virtual_key};{scan_code};{character};1;{modifiers};1_\x1b[{virtual_key};{scan_code};{character};0;{modifiers};1_"
             );
-            self.send(press.repeat(count).as_bytes());
+            let bytes = press.repeat(count).into_bytes();
+            if let Some(arm) = diagnostic_arm {
+                self.diagnostic_edits.push(serde_json::json!({
+                    "arm": arm, "locale": self.locale, "win32": true,
+                    "vk": virtual_key, "count": count, "mapped_scan": mapped_scan,
+                    "scan_field": scan_code, "byte_count": bytes.len(), "bytes": bytes,
+                }));
+            }
+            self.send(&bytes);
         } else {
-            self.send(&vec![legacy; count]);
+            let bytes = vec![legacy; count];
+            if let Some(arm) = diagnostic_arm {
+                self.diagnostic_edits.push(serde_json::json!({
+                    "arm": arm, "locale": self.locale, "win32": false,
+                    "vk": virtual_key, "count": count,
+                    "byte_count": bytes.len(), "bytes": bytes,
+                }));
+            }
+            self.send(&bytes);
         }
     }
 
@@ -237,6 +270,7 @@ fn git_bash_wrapped_input_can_be_fully_erased_in_byte_and_utf8_locales() {
                 last_input: Vec::new(),
                 last_reply: None,
                 output_tail: VecDeque::new(),
+                diagnostic_edits: Vec::new(),
             };
             session.wait_for(locale, |term| blank_input(term, mark));
             session.send(b"relay/package.json");

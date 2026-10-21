@@ -15,7 +15,7 @@ jobs:
       matrix:
         os: [windows-2022, windows-11-arm]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 45
     env:
       CARGO_TERM_COLOR: never
       RUST_BACKTRACE: "1"
@@ -28,36 +28,40 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.97.1"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
       - name: Record native environment
         shell: pwsh
-        run: |
-          rustc -vV
-          [Environment]::OSVersion.VersionString
-          & 'C:\Program Files\Git\bin\bash.exe' --version
-          if ('${{ matrix.os }}' -eq 'windows-11-arm') {
-            if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne 'Arm64') {
-              throw 'The ARM64 diagnostic requires a native ARM64 host.'
-            }
-            $compiler = rustc -vV
-            if ($compiler -notcontains 'host: aarch64-pc-windows-msvc') {
-              throw 'The ARM64 diagnostic requires a native ARM64 compiler.'
-            }
-          }
-      - name: Compile the unchanged regression
+        run: ./.github/windows-bash-environment.ps1 in-box
+      - name: Compile the original regression with diagnostic scan variants
+        id: compile
         shell: pwsh
         run: |
-          cargo test --config .github/ci-profile.toml --profile ci --locked -p nebula_terminal --lib --no-run
+          $arguments = @('test', '--config', '.github/ci-profile.toml', '--profile', 'ci', '--locked', '-p', 'nebula_terminal', '--lib', '--no-run', '--message-format=json-render-diagnostics')
+          (@('cargo') + $arguments) | ConvertTo-Json | Set-Content -Encoding utf8 target/bash-diagnostics/compile-command.json
+          cargo @arguments > target/bash-diagnostics/cargo-messages.jsonl
           if ($LASTEXITCODE -ne 0) { throw 'Diagnostic compilation failed.' }
-      - name: Stress in-box ConPTY
+      - name: Compare scan-code arms on in-box ConPTY
         shell: pwsh
-        run: python .github/windows-bash-stress.py in-box
+        run: python .github/windows-bash-stress.py in-box --repetitions 48 --workers 4
       - name: Prepare the pinned side-loaded host beside the test binary
-        if: ${{ !cancelled() }}
+        id: runtime
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
         shell: pwsh
         run: |
           $architecture = if ('${{ runner.arch }}' -eq 'ARM64') { 'arm64' } else { 'x64' }
           ./scripts/prepare-windows-runtime.ps1 -Destination target/ci/deps/runtime -Architecture $architecture
-      - name: Stress side-loaded OpenConsole
-        if: ${{ !cancelled() }}
+          ./.github/windows-bash-environment.ps1 sideloaded
+      - name: Compare scan-code arms on side-loaded OpenConsole
+        if: ${{ !cancelled() && steps.runtime.outcome == 'success' }}
         shell: pwsh
-        run: python .github/windows-bash-stress.py sideloaded
+        run: python .github/windows-bash-stress.py sideloaded --repetitions 48 --workers 4
+      - name: Preserve original results and environment
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-bash-${{ matrix.os }}-${{ github.sha }}
+          path: target/bash-diagnostics/
+          if-no-files-found: error
+          retention-days: 7
