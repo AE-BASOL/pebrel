@@ -47,6 +47,7 @@ impl BashSession {
             EditKey::Home => (0x41, 0x01, 0x08, 0x01), // Ctrl+A
             EditKey::End => (0x45, 0x05, 0x08, 0x05),  // Ctrl+E
             EditKey::KillLine => (0x55, 0x15, 0x08, 0x15), // Ctrl+U
+            EditKey::Redraw => (0x4c, 0x0c, 0x08, 0x0c), // Ctrl+L
         };
         if self.term.mode().contains(TermMode::WIN32_INPUT_MODE) {
             // Match the product's negotiated special-key path, including key-up.
@@ -61,21 +62,57 @@ impl BashSession {
         }
     }
 
+    fn receive(&mut self, bytes: &[u8]) {
+        self.output_tail.extend(bytes);
+        while self.output_tail.len() > 1024 {
+            self.output_tail.pop_front();
+        }
+        self.parser.advance(&mut self.term, bytes);
+        for reply in self.replies.0.lock().unwrap().drain(..) {
+            self.last_reply = Some(reply.clone());
+            write_pty(&mut self.pty, reply.as_bytes());
+        }
+    }
+
+    fn diagnostic_snapshot(&self) -> String {
+        format!(
+            "cursor {:?}, rows {:?} / {:?}; last input {:?}, last reply {:?}, output tail {:?}",
+            self.term.grid().cursor.point,
+            row(&self.term, 0),
+            row(&self.term, 1),
+            String::from_utf8_lossy(&self.last_input),
+            self.last_reply,
+            String::from_utf8_lossy(&self.output_tail.iter().copied().collect::<Vec<_>>()),
+        )
+    }
+
+    fn redraw_after_failure(&mut self) -> std::io::Result<()> {
+        self.output_tail.clear();
+        self.last_reply = None;
+        // A single redraw distinguishes stale display from retained Readline
+        // input without deleting any more characters or retrying the assertion.
+        self.edit(EditKey::Redraw, 1);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut buffer = [0; 8192];
+        while Instant::now() < deadline {
+            match self.pty.reader().read(&mut buffer) {
+                Ok(count) if count > 0 => self.receive(&buffer[..count]),
+                Ok(_) => (),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => (),
+                Err(error) => return Err(error),
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        Ok(())
+    }
+
     fn wait_for(&mut self, label: &str, expected: impl Fn(&Term<Replies>) -> bool) {
         let deadline = Instant::now() + Duration::from_secs(10);
         let mut buffer = [0; 8192];
         loop {
             match self.pty.reader().read(&mut buffer) {
                 Ok(count) if count > 0 => {
-                    self.output_tail.extend(&buffer[..count]);
-                    while self.output_tail.len() > 1024 {
-                        self.output_tail.pop_front();
-                    }
-                    self.parser.advance(&mut self.term, &buffer[..count]);
-                    for reply in self.replies.0.lock().unwrap().drain(..) {
-                        self.last_reply = Some(reply.clone());
-                        write_pty(&mut self.pty, reply.as_bytes());
-                    }
+                    self.receive(&buffer[..count]);
                     if expected(&self.term) {
                         return;
                     }
@@ -84,17 +121,26 @@ impl BashSession {
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => (),
                 Err(error) => panic!("{label}: PTY read failed: {error}"),
             }
-            assert!(
-                Instant::now() < deadline,
-                "{} / {label}: cursor {:?}, rows {:?} / {:?}; last input {:?}, last reply {:?}, output tail {:?}",
-                self.locale,
-                self.term.grid().cursor.point,
-                row(&self.term, 0),
-                row(&self.term, 1),
-                String::from_utf8_lossy(&self.last_input),
-                self.last_reply,
-                String::from_utf8_lossy(&self.output_tail.iter().copied().collect::<Vec<_>>()),
-            );
+            let before_deadline = Instant::now() < deadline;
+            if !before_deadline {
+                let original = self.diagnostic_snapshot();
+                // Even a diagnostic I/O failure must retain the original
+                // assertion and its screen/input/output evidence.
+                let redraw = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    self.redraw_after_failure()
+                }));
+                let redraw_result = match redraw {
+                    Ok(Ok(())) => "captured for 2 seconds".to_owned(),
+                    Ok(Err(error)) => format!("PTY read failed: {error}"),
+                    Err(_) => "diagnostic panicked".to_owned(),
+                };
+                assert!(
+                    before_deadline,
+                    "{} / {label}: original failure: {original}; Ctrl-L redraw ({redraw_result}): {}",
+                    self.locale,
+                    self.diagnostic_snapshot(),
+                );
+            }
             thread::sleep(Duration::from_millis(5));
         }
     }
@@ -106,6 +152,7 @@ enum EditKey {
     Home,
     End,
     KillLine,
+    Redraw,
 }
 
 fn write_pty(pty: &mut tty::Pty, mut bytes: &[u8]) {
