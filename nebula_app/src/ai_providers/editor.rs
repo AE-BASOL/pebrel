@@ -26,30 +26,7 @@ pub fn config_text(provider: &AiProvider) -> String {
 }
 
 pub fn apply_config_draft(provider: &mut AiProvider, text: &str) -> Result<(), String> {
-    let doc = text.parse::<DocumentMut>().map_err(|e| e.to_string())?;
-    for name in ["agents", "features"] {
-        if doc.get(name).is_some_and(|value| value.as_table_like().is_none()) {
-            return Err(format!("{name} must be a table"));
-        }
-    }
-    if doc.get("model_provider").is_some_and(|v| !v.is_str()) {
-        return Err("model_provider must be a string".into());
-    }
-    if let Some(providers) = doc.get("model_providers") {
-        let providers = providers.as_table_like().ok_or("model_providers must be a table")?;
-        for (_, provider) in providers.iter() {
-            if provider.as_table_like().is_none() {
-                return Err("Each model provider must be a table".into());
-            }
-        }
-    }
-    // 凭据有独立编辑区，不能随着普通供应商元数据落盘。
-    for forbidden in ["api_key", "experimental_bearer_token", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"]
-    {
-        if has_key(doc.as_table(), forbidden) {
-            return Err(format!("{forbidden}: enter credentials in auth.json"));
-        }
-    }
+    let doc = parse_config_draft(text)?;
     if let Some(model) = doc.get("model") {
         provider.models = configured_models(provider);
         provider.model = model.as_str().ok_or("model must be a string")?.to_owned();
@@ -71,6 +48,39 @@ pub fn apply_config_draft(provider: &mut AiProvider, text: &str) -> Result<(), S
     }
     provider.config_toml = text.to_owned();
     Ok(())
+}
+
+pub(super) fn parse_config_draft(text: &str) -> Result<DocumentMut, String> {
+    let doc = text.parse::<DocumentMut>().map_err(|e| e.to_string())?;
+    for name in ["agents", "features"] {
+        if doc.get(name).is_some_and(|value| value.as_table_like().is_none()) {
+            return Err(format!("{name} must be a table"));
+        }
+    }
+    if doc.get("model_provider").is_some_and(|v| !v.is_str()) {
+        return Err("model_provider must be a string".into());
+    }
+    if let Some(providers) = doc.get("model_providers") {
+        let providers = providers.as_table_like().ok_or("model_providers must be a table")?;
+        for (_, provider) in providers.iter() {
+            let provider = provider.as_table_like().ok_or("Each model provider must be a table")?;
+            // 任意供应商都可以使用自定义鉴权头，不能靠枚举 token 名称判断安全。
+            // 环境变量引用不包含密钥本身，仍通过 env_http_headers 保留。
+            if provider.contains_key("http_headers") {
+                return Err(
+                    "Literal model provider http_headers cannot be stored in provider metadata; use env_http_headers to reference environment variables".into(),
+                );
+            }
+        }
+    }
+    // 凭据有独立编辑区，不能随着普通供应商元数据落盘。
+    for forbidden in ["api_key", "experimental_bearer_token", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"]
+    {
+        if has_key(doc.as_table(), forbidden) {
+            return Err(format!("{forbidden}: enter credentials in auth.json"));
+        }
+    }
+    Ok(doc)
 }
 
 fn has_key(table: &dyn toml_edit::TableLike, key: &str) -> bool {
@@ -250,6 +260,43 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn editable_config_rejects_literal_headers_before_changing_metadata() {
+        for text in [
+            "[model_providers.custom.http_headers]\nAuthorization = 'Bearer test-secret'\n",
+            "[model_providers.custom]\nhttp_headers = { x-api-key = 'test-secret' }\n",
+            "model_providers = { custom = { http_headers = { X-Tenant-Credential = 'test-secret' } } }\n",
+            "model_providers.custom.http_headers.X-Tenant-Credential = 'test-secret'\n",
+            "model_provider = 'main'\n[model_providers.other.http_headers]\nX-Tenant-Credential = 'test-secret'\n",
+        ] {
+            let mut provider = AiProvider::preset(ProviderKind::Custom, "custom");
+            let original = provider.clone();
+            let error = apply_config_draft(&mut provider, text).unwrap_err();
+            assert!(error.contains("env_http_headers"), "{error}");
+            assert!(!error.contains("test-secret"));
+            assert_eq!(provider, original);
+        }
+    }
+
+    #[test]
+    fn editable_config_preserves_environment_header_references() {
+        for headers in [
+            "[model_providers.custom.env_http_headers]\nAuthorization = 'ACCESS_TOKEN'\nx-api-key = 'OPENAI_API_KEY'\n",
+            "[model_providers.custom]\nenv_http_headers = { Authorization = 'ACCESS_TOKEN', X-Tenant-Credential = 'TENANT_TOKEN' }\n",
+        ] {
+            let text = format!("model_provider = 'custom'\ncustom_flag = true\n{headers}");
+            let mut provider = AiProvider::preset(ProviderKind::Custom, "custom");
+            apply_config_draft(&mut provider, &text).unwrap();
+            assert_eq!(provider.config_toml, text);
+            let rendered = config_text(&provider).parse::<DocumentMut>().unwrap();
+            assert_eq!(rendered["custom_flag"].as_bool(), Some(true));
+            assert_eq!(
+                rendered["model_providers"]["custom"]["env_http_headers"]["Authorization"].as_str(),
+                Some("ACCESS_TOKEN")
+            );
+        }
     }
     #[test]
     fn auth_draft_keeps_stored_keys_and_accepts_direct_input() {

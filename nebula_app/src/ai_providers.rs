@@ -5,7 +5,7 @@
 //! a stable identity and must never be serialized beside ordinary settings.
 
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -318,13 +318,25 @@ pub fn active_enabled(store: &ProviderStore) -> Option<&AiProvider> {
 }
 
 pub fn save(store: &ProviderStore) -> io::Result<()> {
-    let path = store_path();
+    save_to_path(store, &store_path())
+}
+
+fn save_to_path(store: &ProviderStore, path: &Path) -> io::Result<()> {
+    // 旧目录也可能含未经编辑器校验的 TOML；所有写入入口共用同一凭据边界。
+    for provider in &store.providers {
+        editor::parse_config_draft(&provider.config_toml).map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Provider {:?} config.toml: {error}", provider.id),
+            )
+        })?;
+    }
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     let text = serde_json::to_string_pretty(store)
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-    crate::atomic_file::write(&path, text.as_bytes())
+    crate::atomic_file::write(path, text.as_bytes())
 }
 
 pub fn credential_target(id: &str) -> String {
@@ -605,6 +617,36 @@ mod tests {
         store.providers.remove(0);
         normalize(&mut store);
         assert_eq!(store.providers.len(), 1);
+    }
+
+    #[test]
+    fn saving_reloaded_literal_headers_preserves_the_existing_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join(STORE_FILE);
+        let mut provider = AiProvider::preset(ProviderKind::Custom, "legacy-provider");
+        provider.config_toml =
+            "[model_providers.custom.http_headers]\nX-Tenant-Credential = 'test-secret'\n".into();
+        let store = ProviderStore { providers: vec![provider], ..Default::default() };
+        let original = serde_json::to_vec(&store).unwrap();
+        std::fs::write(&path, &original).unwrap();
+        let mut reloaded: ProviderStore = serde_json::from_slice(&original).unwrap();
+        normalize(&mut reloaded);
+        reloaded.providers[0].name = "Renamed".into();
+        let error = save_to_path(&reloaded, &path).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("legacy-provider"));
+        assert!(error.to_string().contains("env_http_headers"));
+        assert!(!error.to_string().contains("test-secret"));
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        assert_eq!(reloaded.providers[0].config_toml, store.providers[0].config_toml);
+
+        reloaded.providers[0].config_toml =
+            "[model_providers.custom.env_http_headers]\nX-Tenant-Credential = 'TENANT_TOKEN'\n"
+                .into();
+        save_to_path(&reloaded, &path).unwrap();
+        let persisted: ProviderStore =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(persisted, reloaded);
     }
 
     #[test]
