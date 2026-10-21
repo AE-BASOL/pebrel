@@ -58,6 +58,13 @@ Ignore reflected replies. Suppress OSC 9;4 progress events after the first valid
 7501 report until RIS, including after `clear`, so legacy progress cannot erase a
 program's explicit blocked state.
 
+Only a view that has observed a valid report may resynchronize taskbar progress on
+Hook, exit or transport edges. Native CI caught an unconditional projection that
+cleared legacy progress at exit before 7501 was used. Record refresh/reset still
+publishes unconditionally after a change, so RIS can clear the old projection while
+releasing ownership. Hook command cleanup preserves protocol-owned progress, and
+SSH failure clears it once even when the core retains an error result.
+
 The GPUI product projects the highest-priority record as blocked, error, working,
 done, then idle; latest update breaks ties. This is presentation policy, not a
 semantic relationship between parent and child work. Pane/transport failure takes
@@ -119,6 +126,11 @@ The real GPUI product check (including tests), architecture check against main,
 format check, 55 governance tests, 99 settings tests, 24 i18n contract tests (one
 ignored), and both file-budget tests passed. Windows/macOS native operation and
 visual acceptance were not run on this host.
+
+After integrating the current main and correcting progress ownership, the whole
+GPUI terminal-view test group passed 145 tests with four existing ignored cases.
+It includes the unchanged hidden-output regression and legacy/protocol progress
+events across Hook cleanup, RIS, explicit clear, PTY failure and SSH failure.
 
 The local ARM64 `rustc -O` sniffer probe used five runs per input: 32,112,640 bytes
 of plain output took 43.23–43.65 ms before and 3.00–3.14 ms after a ground-state

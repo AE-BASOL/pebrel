@@ -83,7 +83,8 @@ impl TerminalView {
         }
         self.program_status_seen = seen;
         self.program_status = status;
-        self.sync_program_progress(cx);
+        // A reset must clear the old projection even after releasing ownership.
+        self.apply_program_progress(cx);
         // State badges and Runtime API read the same projection. Free text is
         // retained in the core only; it is never interpreted or used as markup.
         // Do not add desktop notifications: hooks already own those edges.
@@ -92,6 +93,12 @@ impl TerminalView {
     }
 
     pub(super) fn sync_program_progress(&mut self, cx: &mut Context<Self>) {
+        if self.program_status_seen {
+            self.apply_program_progress(cx);
+        }
+    }
+
+    fn apply_program_progress(&mut self, cx: &mut Context<Self>) {
         let progress =
             self.effective_program_status().map_or(TaskProgress::None, ProgramStatus::progress);
         if self.progress != progress {

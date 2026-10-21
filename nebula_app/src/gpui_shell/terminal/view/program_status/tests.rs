@@ -324,3 +324,94 @@ fn command_start_cannot_acknowledge_a_later_report_in_the_same_read(cx: &mut Tes
         assert_eq!(view.runtime_agent().unwrap().state_source, RuntimeAgentStateSource::Osc7501);
     });
 }
+
+#[gpui::test]
+fn legacy_progress_survives_hooks_and_exit_without_protocol_ownership(cx: &mut TestAppContext) {
+    for after_reset in [false, true] {
+        let (view, window, _) = open(cx);
+        let received = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let progress = received.clone();
+        let _subscription = window.update(|_, cx| {
+            cx.subscribe(&view, move |_, event, _| {
+                if let TerminalViewEvent::ProgressChanged(value) = event {
+                    progress.borrow_mut().push(*value);
+                }
+            })
+        });
+        view.update(window, |view, cx| {
+            let mut wire = Wire::install(view);
+            if after_reset {
+                wire.feed(view, cx, b"\x1b]7501;state=working\x07");
+                wire.feed(view, cx, b"\x1bc");
+            }
+            wire.feed(view, cx, b"\x1b]7501;?\x07\x1b]7501;state=invalid\x07");
+            assert!(!view.program_status_seen);
+            wire.feed(view, cx, b"\x1b]9;4;1;25\x07");
+            let session = format!("legacy-progress-{after_reset}");
+            assert!(view.handle_ai_hook(&hook(&session, "UserPromptSubmit", 1), cx));
+            view.apply_ssh_stage(crate::ssh_session::SshStage::Failed("disconnected".into()), cx);
+            view.process_event(TermEvent::Exit, cx);
+            assert_eq!(view.progress, TaskProgress::Value(25));
+        });
+        let expected = if after_reset {
+            vec![TaskProgress::Indeterminate, TaskProgress::None, TaskProgress::Value(25)]
+        } else {
+            vec![TaskProgress::Value(25)]
+        };
+        assert_eq!(*received.borrow(), expected);
+    }
+}
+
+#[gpui::test]
+fn protocol_progress_changes_once_at_reset_or_transport_failure(cx: &mut TestAppContext) {
+    for report in ["working", "blocked", "error"] {
+        for boundary in ["ris", "clear", "pty", "ssh"] {
+            let (view, window, _) = open(cx);
+            let received = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+            let progress = received.clone();
+            let _subscription = window.update(|_, cx| {
+                cx.subscribe(&view, move |_, event, _| {
+                    if let TerminalViewEvent::ProgressChanged(value) = event {
+                        progress.borrow_mut().push(*value);
+                    }
+                })
+            });
+            let expected = view.update(window, |view, cx| {
+                let mut wire = Wire::install(view);
+                let bytes = format!("\x1b]7501;state={report}:app=claude-code\x07");
+                wire.feed(view, cx, bytes.as_bytes());
+                let initial = view.progress;
+                let session = format!("protocol-progress-{report}-{boundary}");
+                assert!(view.handle_ai_hook(&hook(&session, "SessionEnd", 1), cx));
+                assert_eq!(view.progress, initial);
+                for _ in 0..2 {
+                    match boundary {
+                        "ris" => wire.feed(view, cx, b"\x1bc"),
+                        "clear" => wire.feed(view, cx, b"\x1b]7501;state=clear\x07"),
+                        "pty" => {
+                            view.process_event(TermEvent::PtyFailure("broken pipe".into()), cx)
+                        },
+                        "ssh" => view.apply_ssh_stage(
+                            crate::ssh_session::SshStage::Failed("disconnected".into()),
+                            cx,
+                        ),
+                        _ => unreachable!(),
+                    }
+                    assert_eq!(view.progress, TaskProgress::None);
+                    if matches!(boundary, "pty" | "ssh") {
+                        assert_eq!(view.runtime_task_state(), RuntimeTaskState::Failed);
+                        assert_eq!(view.sidebar_activity(), SidebarActivity::Failed);
+                    }
+                }
+                wire.feed(view, cx, b"\x1b]9;4;1;25\x07");
+                let mut expected = vec![initial, TaskProgress::None];
+                if boundary == "ris" {
+                    expected.push(TaskProgress::Value(25));
+                }
+                assert_eq!(view.progress, *expected.last().unwrap());
+                expected
+            });
+            assert_eq!(*received.borrow(), expected, "{report}, {boundary}");
+        }
+    }
+}

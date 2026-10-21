@@ -119,6 +119,7 @@ impl TerminalView {
             self.command_started = None;
             self.confirmation.invalidate();
             self.answer_reader = None;
+            self.sync_program_progress(cx);
         }
         cx.emit(TerminalViewEvent::TitleChanged);
         cx.notify();
@@ -142,7 +143,7 @@ impl TerminalView {
         }
         self.ai_session_from_probe = false;
         self.agent_activity.command_finished();
-        if self.progress != crate::taskbar::TaskProgress::None {
+        if !self.program_status_seen && self.progress != crate::taskbar::TaskProgress::None {
             self.progress = crate::taskbar::TaskProgress::None;
             cx.emit(TerminalViewEvent::ProgressChanged(self.progress));
         }
