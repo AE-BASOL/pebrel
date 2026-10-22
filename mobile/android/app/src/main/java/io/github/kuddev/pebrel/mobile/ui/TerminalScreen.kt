@@ -122,7 +122,7 @@ fun DesktopTerminalScreen(desktop: DesktopWorkspace, pane: DesktopPane, reposito
     var showPermission by remember(identity) { mutableStateOf(false) }
     var showDetails by remember(identity) { mutableStateOf(false) }
     // TUI 边框和光标属于桌面网格；手机重排只作为用户主动选择的阅读模式。
-    var wrapLines by rememberSaveable(identity) { mutableStateOf(false) }
+    val wrapLines = prefs.desktopWrapLines
     val enabled = desktop.allowInput && desktop.status == "ready"
     LaunchedEffect(enabled) { if (enabled) showPermission = false }
     val input = remember(identity, enabled, desktop.connectionGeneration) { repository.desktopInput(desktop.id, pane) }
@@ -137,7 +137,7 @@ fun DesktopTerminalScreen(desktop: DesktopWorkspace, pane: DesktopPane, reposito
     if (!focused) TerminalHeader(pane.displayTitle, desktop.host.name, desktop.status, onBack, onSessions,
         onGit = onGit.takeIf { pane.sshDestination == null }, gitEnabled = desktop.status == "ready",
         onDetails = { showDetails = true }, onConversation = onConversation.takeIf { pane.agent != null },
-        wrapLines = wrapLines, onToggleWrap = { wrapLines = !wrapLines })
+        wrapLines = wrapLines, onToggleWrap = { repository.display.update { it.copy(desktopWrapLines = !it.desktopWrapLines) } })
     Column(Modifier.fillMaxSize()) {
         if (desktop.status != "ready") Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically) {
@@ -158,6 +158,7 @@ fun DesktopTerminalScreen(desktop: DesktopWorkspace, pane: DesktopPane, reposito
             Modifier.weight(1f).fillMaxWidth(), frame = if (output.target == identity) output.frame else null,
             inputTarget = input.takeIf { enabled && direct }, keyboardRequest = keyboardRequest,
             loading = output.loading, connected = desktop.status == "ready", wrapLines = wrapLines,
+            zoomScale = prefs.desktopZoom, onZoomScale = { scale -> repository.display.update { it.copy(desktopZoom = scale) } },
             pasteTarget = input.takeIf { enabled }, scrollTarget = input.takeIf { enabled },
             onHistoryPage = { start -> repository.requestDesktopHistory(desktop.id, pane, start) })
         if (output.loading && output.text.isBlank()) LinearProgressIndicator(Modifier.fillMaxWidth())
