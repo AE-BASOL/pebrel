@@ -1,6 +1,5 @@
 package io.github.kuddev.pebrel.mobile.ui
 
-import android.view.KeyEvent
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -22,6 +21,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
+import io.github.kuddev.pebrel.terminal.TerminalShortcut
 import io.github.kuddev.pebrel.mobile.R
 import io.github.kuddev.pebrel.mobile.connection.DesktopPane
 import io.github.kuddev.pebrel.mobile.connection.DesktopTab
@@ -71,21 +71,9 @@ fun LocalTerminalScreen(session: LocalSession, repository: SessionRepository, on
             direct = it
             if (it) keyboardRequest++
         }, { label ->
-            val key = when (label) {
-                "Ctrl+B" -> KeyEvent.KEYCODE_B
-                "Ctrl+C" -> KeyEvent.KEYCODE_C
-                "Esc" -> KeyEvent.KEYCODE_ESCAPE
-                "Tab", "Shift+Tab" -> KeyEvent.KEYCODE_TAB
-                "←" -> KeyEvent.KEYCODE_DPAD_LEFT
-                "→" -> KeyEvent.KEYCODE_DPAD_RIGHT
-                "↑" -> KeyEvent.KEYCODE_DPAD_UP
-                else -> KeyEvent.KEYCODE_DPAD_DOWN
-            }
-            val control = label in setOf("Ctrl+C", "Ctrl+B")
-            val letter = if (control) label.last().lowercase() else ""
-            val modifiers = if (control) 2 else if (label == "Shift+Tab") 1 else 0
-            if (!session.terminal.key(key, modifiers,
-                    text = letter, unshifted = letter.firstOrNull()?.code ?: 0)) repository.error.value = "input_rejected"
+            val key = TerminalShortcut.parse(label)
+            if (key == null || !session.terminal.key(key.code, key.modifiers, text = key.text, unshifted = key.unshifted))
+                repository.error.value = "input_rejected"
         }, onKeyboard = { keyboardRequest++ }, focused = focused, onToggleFocus = { focused = !focused },
             onAttach = attachments.pick, attachmentBusy = attachments.busy,
             extraShortcuts = if (session.attachment != null || session.host?.sessionMode in setOf(SshSessionMode.TMUX, SshSessionMode.HERDR)) listOf("Ctrl+B") else emptyList()) { command ->
@@ -166,17 +154,7 @@ fun DesktopTerminalScreen(desktop: DesktopWorkspace, pane: DesktopPane, reposito
             direct = it
             if (it) keyboardRequest++
         }, { label ->
-            val code = when (label) {
-                "Ctrl+C" -> KeyEvent.KEYCODE_C
-                "Esc" -> KeyEvent.KEYCODE_ESCAPE
-                "Tab", "Shift+Tab" -> KeyEvent.KEYCODE_TAB
-                "←" -> KeyEvent.KEYCODE_DPAD_LEFT
-                "→" -> KeyEvent.KEYCODE_DPAD_RIGHT
-                "↑" -> KeyEvent.KEYCODE_DPAD_UP
-                else -> KeyEvent.KEYCODE_DPAD_DOWN
-            }
-            val modifiers = if (label == "Ctrl+C") 2 else if (label == "Shift+Tab") 1 else 0
-            input.key(code, modifiers)
+            if (TerminalShortcut.parse(label)?.send(input) != true) repository.error.value = "input_rejected"
         }, onKeyboard = { keyboardRequest++ }, focused = focused, onToggleFocus = { focused = !focused },
             send = input::submit)
     }
