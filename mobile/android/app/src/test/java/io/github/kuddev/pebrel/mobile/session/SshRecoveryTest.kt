@@ -117,6 +117,21 @@ class SshRecoveryTest {
         } finally { activity.pause().stop().destroy(); repository.closeAll() }
     }
 
+    @Test fun returningToForegroundProbesAStaleSocketWithoutChangingTheSelectedTab() {
+        Terminal.started.clear()
+        val repository = SessionRepository(ApplicationProvider.getApplicationContext())
+        try {
+            val id = repository.ssh(HostProfile("fixture", "Fixture", "localhost", 22, "user"), charArrayOf())
+            val old = Terminal.started.last()
+            old.callbacks.onTransportReady(old.real)
+            // The shadow terminal has no native SSH handle: the resume query reports CLOSED.
+            repository.foregroundChanged(true)
+            await { Terminal.started.size == 2 }
+            assertEquals(id, repository.sessions.value.single().id)
+            assertTrue(old.closed)
+        } finally { repository.foregroundChanged(false); repository.closeAll() }
+    }
+
     @Test fun routeRecoveryRunsInTheBackgroundAndClosingATabCancelsItsRetry() {
         Terminal.started.clear()
         val repository = SessionRepository(ApplicationProvider.getApplicationContext())
