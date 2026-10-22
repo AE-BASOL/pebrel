@@ -118,6 +118,7 @@ class SessionRepository(private val context: Context,
         }
         live.value.filter { it.status == "reconnecting" }.forEach { sshReconnect.schedule(it.id, immediate = true) }
         network.start()
+        live.value.filter { it.host != null && it.hasConnected && it.status == "ready" }.forEach(::probeSshOnResume)
         for (desktop in computers.value.filter { it.hasConnected && it.relayProfile != null }) {
             val client = desktopClients[desktop.id]
             if (client == null && DesktopReconnect.retryable(desktop.failure)) reconnect.schedule(desktop.id, immediate = true)
@@ -133,6 +134,25 @@ class SessionRepository(private val context: Context,
                     }
                 }
             }
+        }
+    }
+
+    private fun probeSshOnResume(session: LocalSession) {
+        val connection = sshConnections[session.id] ?: return
+        resumeChecks[session.id] = scope.launch(Dispatchers.Main.immediate) {
+            // The JNI query is blocking. Await it separately so the deadline can close a dead socket.
+            val probe = scope.async { connection.query("exit") }
+            try { withTimeout(5000) { probe.await() } }
+            catch (failure: Exception) {
+                if (failure is CancellationException && failure !is TimeoutCancellationException) throw failure
+                val transient = failure is TimeoutCancellationException || SshReconnect.retryable(classifySshFailure(failure))
+                if (foreground && transient && sshConnections[session.id] === connection &&
+                    live.value.any { it.id == session.id && it.terminal === session.terminal && it.status == "ready" }) {
+                    session.terminal.finishIfRunning()
+                    update(session.id) { it.copy(status = "reconnecting", failure = SshFailureKind.NETWORK) }
+                    sshReconnect.schedule(session.id, immediate = true)
+                }
+            } finally { probe.cancel() }
         }
     }
 
@@ -601,6 +621,7 @@ class SessionRepository(private val context: Context,
     }
     private fun update(id: String, change: (LocalSession) -> LocalSession) { live.value = live.value.map { if (it.id == id) change(it) else it } }
     fun closeTerminal(id: String) {
+        resumeChecks.remove(id)?.cancel()
         sshReconnect.forget(id)
         sshRetryJobs.remove(id)?.cancel()
         liveCredentials.forget(id)

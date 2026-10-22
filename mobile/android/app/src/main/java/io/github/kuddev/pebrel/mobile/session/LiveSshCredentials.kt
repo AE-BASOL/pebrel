@@ -27,7 +27,7 @@ internal class LiveSshCredentials(
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { /* A saved credential or an inline prompt remains available. */ }
             finally { secret.fill('\u0000') }
-        }
+        }.also { job -> job.invokeOnCompletion { secret.fill('\u0000') } }
     }
 
     suspend fun load(id: String, hostKey: String): CharArray? {
