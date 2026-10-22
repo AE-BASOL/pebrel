@@ -44,6 +44,7 @@ data class DesktopOutput(val target: String = "", val text: String = "", val loa
 class SessionRepository(private val context: Context,
                         private val relayTransport: (RelayProfile) -> DesktopTransport = { RelayTransport(it) }) {
     val display = DisplayPreferences(context)
+    val shortcuts = ShortcutPreferences(context)
     private val main = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val preferences = context.getSharedPreferences("pebrel_mobile", Context.MODE_PRIVATE)
