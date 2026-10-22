@@ -18,6 +18,7 @@ data class RemoteAttachment(val session: RemoteSession, val window: RemoteWindow
 object RemoteSessions {
     private const val path = "PATH=\"${'$'}PATH:/opt/homebrew/bin:/usr/local/bin:${'$'}HOME/.local/bin:${'$'}HOME/.cargo/bin\"; export PATH; "
     private fun posix(script: String) = "sh -c '${script.replace("'", "'\"'\"'")}'"
+    internal fun posixWithPath(script: String) = posix(path + script)
     internal val discoveryCommand = posix(path + """
         printf '\036os\n'; uname -s 2>/dev/null
         printf '\036distro\n'; cat /etc/os-release 2>/dev/null
