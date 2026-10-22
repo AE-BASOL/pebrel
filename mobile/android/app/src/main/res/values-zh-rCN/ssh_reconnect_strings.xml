@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ssh_retry_credentials_hint">认证失败，请重新输入密码或密钥口令。凭据仅加密保留在当前会话内，关闭标签后清除。</string>
+</resources>
