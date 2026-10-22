@@ -80,6 +80,8 @@ class SessionRepository(private val context: Context,
     private val sshOperations = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private val sshConnections = java.util.concurrent.ConcurrentHashMap<String, SshConnection>()
     private val discoveryJobs = mutableMapOf<String, Job>()
+    private val tmuxControls = mutableMapOf<String, TmuxSessionControl>()
+    private val tmuxCheckpoints = mutableMapOf<String, Job>()
     private val pendingTrust = java.util.concurrent.ConcurrentHashMap<String, CompletableFuture<Boolean>>()
     private var readJob: Job? = null
     private var readGeneration = 0L
@@ -90,7 +92,7 @@ class SessionRepository(private val context: Context,
     private val desktopTransitions = mutableMapOf<String, DesktopTransitions>()
     private val conversationCache = ConversationCache()
     private var activeGit: DesktopGit? = null
-    private var foreground = false
+    @Volatile private var foreground = false
     private var lanDiscovery: PairingDiscovery? = null
     private var lanDiscoveryJob: Job? = null
     private val resumeChecks = mutableMapOf<String, Job>()
@@ -110,7 +112,10 @@ class SessionRepository(private val context: Context,
         resumeChecks.clear()
         refreshLanDiscovery()
         refreshSshNetworkMonitor()
-        if (!value) return
+        if (!value) {
+            tmuxControls.values.toList().forEach { control -> scope.launch { runCatching { control.checkpoint() } } }
+            return
+        }
         live.value.filter { it.status == "reconnecting" }.forEach { sshReconnect.schedule(it.id, immediate = true) }
         network.start()
         for (desktop in computers.value.filter { it.hasConnected && it.relayProfile != null }) {
@@ -452,7 +457,7 @@ class SessionRepository(private val context: Context,
         liveCredentials.remember(id, credentialKey(host), password)
         val previous = live.value.find { it.id == id }
         val command = attachment?.let(RemoteSessions::attachCommand) ?: if (previous?.hasConnected == true)
-            host.reconnectCommand() else null
+            host.reconnectCommand() else host.attachCommand()
         lateinit var connection: SshConnection
         connection = SshConnection(host, password, { h, fingerprint -> verify(id, h, fingerprint) }, progress = { stage ->
             main.post { if (sshConnections[id] === connection) update(id) {
@@ -463,9 +468,16 @@ class SessionRepository(private val context: Context,
             live.value.any { it.id == id && it.status == "ready" } && sshConnections[id] === connection
         }
         discoveryJobs.remove(id)?.cancel()
+        tmuxCheckpoints.remove(id)?.cancel()
+        tmuxControls.remove(id)
+        val control = if (attachment?.session?.kind == "tmux" || (attachment == null && host.sessionMode == SshSessionMode.TMUX))
+            TmuxSessionControl(connection::query) { target -> main.post {
+                if (sshConnections[id] === connection) update(id) { it.copy(attachment = target) }
+            } } else null
+        if (control != null) tmuxControls[id] = control
         cancelTrust(id)
         sshConnections[id] = connection
-        val result = addTerminal(attachment?.title ?: host.name, "SSH", SshTerminalTransport(connection, command), id, host, files, attachment)
+        val result = addTerminal(attachment?.title ?: host.name, "SSH", SshTerminalTransport(connection, command, control), id, host, files, attachment)
         refreshSshNetworkMonitor()
         return result
     }
@@ -548,10 +560,21 @@ class SessionRepository(private val context: Context,
                 sshReconnect.forget(id)
                 update(id) { it.copy(status = "ready", hasConnected = true, failure = null) }
                 refreshRemoteSessions(id)
+                tmuxControls[id]?.let { control ->
+                    tmuxCheckpoints.remove(id)?.cancel()
+                    tmuxCheckpoints[id] = scope.launch {
+                        while (isActive) {
+                            runCatching { control.checkpoint() }
+                            delay(if (foreground) 2000 else 10_000)
+                        }
+                    }
+                }
             }
             override fun onSessionFinished(session: TerminalSession) {
                 if (!current(session)) return
                 sshConnections.remove(id)
+                tmuxCheckpoints.remove(id)?.cancel()
+                tmuxControls.remove(id)
                 discoveryJobs.remove(id)?.cancel()
                 cancelTrust(id)
                 val failure = session.failureCause?.let(::classifySshFailure)
@@ -581,6 +604,8 @@ class SessionRepository(private val context: Context,
         sshReconnect.forget(id)
         sshRetryJobs.remove(id)?.cancel()
         liveCredentials.forget(id)
+        tmuxCheckpoints.remove(id)?.cancel()
+        tmuxControls.remove(id)
         discoveryJobs.remove(id)?.cancel()
         sshConnections.remove(id)
         remoteFiles.value = remoteFiles.value.filterNot { it.session == id }
@@ -904,6 +929,8 @@ class SessionRepository(private val context: Context,
         sshReconnect.clear()
         sshRetryJobs.values.forEach(Job::cancel); sshRetryJobs.clear()
         liveCredentials.clear()
+        tmuxCheckpoints.values.forEach(Job::cancel); tmuxCheckpoints.clear()
+        tmuxControls.clear()
         discoveryJobs.values.forEach(Job::cancel); discoveryJobs.clear()
         sshConnections.clear()
         activeGit = null
