@@ -26,6 +26,7 @@ import io.github.kuddev.pebrel.mobile.R
 import io.github.kuddev.pebrel.mobile.connection.DesktopPane
 import io.github.kuddev.pebrel.mobile.connection.DesktopTab
 import io.github.kuddev.pebrel.mobile.connection.DesktopReconnect
+import io.github.kuddev.pebrel.mobile.connection.SshFailureKind
 import io.github.kuddev.pebrel.mobile.connection.SshSessionMode
 import io.github.kuddev.pebrel.mobile.connection.RemoteAttachment
 import io.github.kuddev.pebrel.mobile.session.DesktopWorkspace
@@ -41,6 +42,10 @@ fun LocalTerminalScreen(session: LocalSession, repository: SessionRepository, on
     var direct by rememberSaveable(session.id, prefs.directInput) { mutableStateOf(prefs.directInput) }
     val attachments = rememberTerminalAttachmentAction(session, repository) { direct = false }
     var closing by remember { mutableStateOf(false) }
+    var retryCredentials by remember(session.id) { mutableStateOf(false) }
+    val retry = {
+        if (session.failure in setOf(SshFailureKind.AUTH, SshFailureKind.KEY)) retryCredentials = true else onRetry()
+    }
     var remoteSessions by remember(session.id) { mutableStateOf(false) }
     var focused by rememberSaveable(session.id) { mutableStateOf(false) }
     var keyboardRequest by remember(session.id) { mutableIntStateOf(0) }
@@ -50,14 +55,15 @@ fun LocalTerminalScreen(session: LocalSession, repository: SessionRepository, on
         session.status, onBack, onSessions, { closing = true }, onFiles = onFiles,
         onRemoteSessions = if (onAttachRemote != null && session.host != null && session.status == "ready") ({ remoteSessions = true }) else null)
     Column(Modifier.fillMaxSize()) {
-        if (session.status == "ended" || (session.status == "failed" && session.hasConnected)) TerminalDisconnected(session, if (session.host != null) onRetry else null)
+        if (session.status == "ended" || (session.hasConnected && session.status != "ready"))
+            TerminalDisconnected(session, if (session.host != null) retry else null)
         Box(Modifier.weight(1f).fillMaxWidth()) {
             key(session.id) {
                 // 退出动画仍保留旧视图，但它已失去输入所有权；延迟单击不得在文件页弹回键盘。
                 TerminalSurface(session, repository, Modifier.fillMaxSize(), direct && active, prefs.fontSize, keyboardRequest)
             }
-            if (session.host != null && (session.status == "connecting" || (session.status == "failed" && !session.hasConnected))) {
-                SshConnectionStatus(session, onClose, onRetry, onEdit,
+            if (session.host != null && !session.hasConnected && session.status in setOf("connecting", "failed")) {
+                SshConnectionStatus(session, onClose, retry, onEdit,
                     trust = trust?.takeIf { it.ownerId == session.id }, onTrust = repository::answerTrust)
             }
         }
@@ -75,6 +81,12 @@ fun LocalTerminalScreen(session: LocalSession, repository: SessionRepository, on
             session.terminal.tryWrite(bytes, 0, bytes.size)
         }
     }
+    if (retryCredentials) SshRetryCredentials(session.host?.keyUri?.isNotEmpty() == true,
+        onDismiss = { retryCredentials = false }, onRetry = { secret ->
+            retryCredentials = false
+            repository.retrySsh(session.id, secret)
+        })
+    if (session.hasConnected) trust?.takeIf { it.ownerId == session.id }?.let { HostTrustForm(it, repository::answerTrust) }
     if (remoteSessions) RemoteSessionSheet(session, repository, { remoteSessions = false }) {
         remoteSessions = false
         onAttachRemote?.invoke(it)
