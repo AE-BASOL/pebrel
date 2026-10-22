@@ -491,10 +491,11 @@ class SessionRepository(private val context: Context,
         discoveryJobs.remove(id)?.cancel()
         tmuxCheckpoints.remove(id)?.cancel()
         tmuxControls.remove(id)
-        val control = if (attachment?.session?.kind == "tmux" || (attachment == null && host.sessionMode == SshSessionMode.TMUX))
-            TmuxSessionControl(connection::query) { target -> main.post {
+        val detectShell = attachment == null && host.sessionMode == SshSessionMode.SHELL
+        val control = if (detectShell || attachment?.session?.kind == "tmux" || (attachment == null && host.sessionMode == SshSessionMode.TMUX))
+            TmuxSessionControl(connection::query, { target -> main.post {
                 if (sshConnections[id] === connection) update(id) { it.copy(attachment = target) }
-            } } else null
+            } }, detectShell = detectShell) else null
         if (control != null) tmuxControls[id] = control
         cancelTrust(id)
         sshConnections[id] = connection
@@ -539,9 +540,18 @@ class SessionRepository(private val context: Context,
     fun refreshRemoteSessions(id: String) {
         val connection = sshConnections[id] ?: return
         if (discoveryJobs[id]?.isActive == true || live.value.none { it.id == id && it.status == "ready" }) return
+        val control = tmuxControls[id]
         update(id) { it.copy(discovering = true, discoveryFailed = false) }
         discoveryJobs[id] = scope.launch {
-            val result = try { Result.success(RemoteSessions.discover(connection)) }
+            val result = try {
+                val inventory = RemoteSessions.discover(connection)
+                if (inventory.os != "windows") {
+                    try { control?.identifyShellTerminal() }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) { /* Unsupported process discovery leaves normal shell input intact. */ }
+                }
+                Result.success(inventory)
+            }
                 catch (cancelled: CancellationException) { throw cancelled }
                 catch (failure: Exception) { Result.failure(failure) }
             withContext(Dispatchers.Main) {

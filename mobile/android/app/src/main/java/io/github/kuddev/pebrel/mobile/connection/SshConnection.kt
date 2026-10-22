@@ -96,11 +96,7 @@ internal class SshTerminalTransport(private val connection: SshConnection, priva
         else connection.openPtyExec(tmux?.command(command) ?: command, columns, rows, cellWidth, cellHeight)
     }
     override fun input(): InputStream = stream ?: (tmux?.input(connection.input()) ?: connection.input()).also { stream = it }
-    override fun scrollHistory(lines: Int): Boolean {
-        val control = tmux ?: return false
-        control.scroll(lines)
-        return true
-    }
+    override fun scrollHistory(lines: Int): Boolean = tmux?.scroll(lines) ?: false
     override fun returnToLiveInput() { tmux?.returnToInput() }
     override fun output(): OutputStream = connection.output()
     override fun resize(columns: Int, rows: Int, cellWidth: Int, cellHeight: Int) = connection.resize(columns, rows, cellWidth, cellHeight)

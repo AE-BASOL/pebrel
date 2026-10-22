@@ -24,9 +24,9 @@ object RemoteSessions {
         printf '\036distro\n'; cat /etc/os-release 2>/dev/null
         printf '\036tmux\n'
         if command -v tmux >/dev/null 2>&1; then
-          tmux list-sessions -F '#{session_id}\t#{session_name}\t#{session_attached}\t#{session_created}:#{pid}' 2>/dev/null
+          tmux -u list-sessions -F '#{session_id}\t#{session_name}\t#{session_attached}\t#{session_created}:#{pid}' 2>/dev/null
           printf '\036windows\n'
-          tmux list-windows -a -F '#{session_id}\t#{window_id}\t#{window_index}\t#{window_name}\t#{window_active}\t#{pane_id}' 2>/dev/null
+          tmux -u list-windows -a -F '#{session_id}\t#{window_id}\t#{window_index}\t#{window_name}\t#{window_active}\t#{pane_id}' 2>/dev/null
         fi
         printf '\036herdr\n'
         if command -v herdr >/dev/null 2>&1; then herdr session list --json 2>/dev/null; fi
