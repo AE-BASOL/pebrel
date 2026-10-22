@@ -48,6 +48,9 @@ class SessionRepository(private val context: Context,
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val preferences = context.getSharedPreferences("pebrel_mobile", Context.MODE_PRIVATE)
     private val credentialStore = HostCredentialStore(context)
+    private val liveCredentials = LiveSshCredentials(scope, credentialStore::seal, credentialStore::unseal)
+    private val sshRetryJobs = mutableMapOf<String, Job>()
+    private val sshReconnect = SshReconnect(scope) { id -> retrySsh(id) }
     private val live = MutableStateFlow<List<LocalSession>>(emptyList())
     val sessions = live.asStateFlow()
     private val remoteFiles = MutableStateFlow<List<SftpTab>>(emptyList())
@@ -75,7 +78,7 @@ class SessionRepository(private val context: Context,
     private val hostWrites = Mutex()
     private val credentialWrites = Mutex()
     private val sshOperations = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
-    private val sshConnections = mutableMapOf<String, SshConnection>()
+    private val sshConnections = java.util.concurrent.ConcurrentHashMap<String, SshConnection>()
     private val discoveryJobs = mutableMapOf<String, Job>()
     private val pendingTrust = java.util.concurrent.ConcurrentHashMap<String, CompletableFuture<Boolean>>()
     private var readJob: Job? = null
@@ -106,7 +109,9 @@ class SessionRepository(private val context: Context,
         resumeChecks.values.forEach(Job::cancel)
         resumeChecks.clear()
         refreshLanDiscovery()
-        if (!value) { network.stop(); return }
+        refreshSshNetworkMonitor()
+        if (!value) return
+        live.value.filter { it.status == "reconnecting" }.forEach { sshReconnect.schedule(it.id, immediate = true) }
         network.start()
         for (desktop in computers.value.filter { it.hasConnected && it.relayProfile != null }) {
             val client = desktopClients[desktop.id]
@@ -126,7 +131,21 @@ class SessionRepository(private val context: Context,
         }
     }
 
+    private fun refreshSshNetworkMonitor() {
+        if (foreground || live.value.any { it.host != null && it.status in setOf("ready", "connecting", "reconnecting") }) network.start()
+        else network.stop()
+    }
+
     internal fun networkChanged() {
+        // Route changes invalidate the old TCP connection, including background SSH tabs.
+        for (session in live.value.filter { it.host != null && it.hasConnected &&
+            it.status in setOf("ready", "reconnecting") }) {
+            if (session.status == "ready") {
+                session.terminal.finishIfRunning()
+                update(session.id) { it.copy(status = "reconnecting", failure = SshFailureKind.NETWORK) }
+            }
+            sshReconnect.schedule(session.id, immediate = true)
+        }
         if (!foreground) return
         resumeChecks.values.forEach(Job::cancel)
         resumeChecks.clear()
@@ -380,6 +399,9 @@ class SessionRepository(private val context: Context,
         main.post {
             if (trust.value?.answer === answer) trust.value = null
             if (accepted) {
+                update(ownerId) { current -> current.copy(host = current.host?.let {
+                    if (sameSshServer(it, host)) it.copy(fingerprint = fingerprint) else it
+                }) }
                 savedHosts.value = savedHosts.value.map { if (it.id == host.id && it.address == host.address && it.port == host.port) it.copy(fingerprint = fingerprint) else it }
                 persistHosts()
             }
@@ -404,15 +426,62 @@ class SessionRepository(private val context: Context,
     }
     fun local(): String = addTerminal("Term", "Local", LocalPtyTransport(
         LocalTerminalStorage.homePath(context), context.filesDir.resolve("terminal").absolutePath))
-    fun ssh(host: HostProfile, password: CharArray, attachment: RemoteAttachment? = null): String {
-        val id = UUID.randomUUID().toString()
-        val command = attachment?.let(RemoteSessions::attachCommand)
-        val connection = SshConnection(host, password, { h, fingerprint -> verify(id, h, fingerprint) }, progress = { stage ->
-            main.post { update(id) { if (it.status == "connecting") it.copy(stage = stage) else it } }
+    fun ssh(host: HostProfile, password: CharArray, attachment: RemoteAttachment? = null): String =
+        openSsh(UUID.randomUUID().toString(), host, password, attachment)
+
+    private fun openSsh(id: String, host: HostProfile, password: CharArray, attachment: RemoteAttachment?): String {
+        liveCredentials.remember(id, credentialKey(host), password)
+        val previous = live.value.find { it.id == id }
+        val command = attachment?.let(RemoteSessions::attachCommand) ?: if (previous?.hasConnected == true)
+            host.reconnectCommand() else null
+        lateinit var connection: SshConnection
+        connection = SshConnection(host, password, { h, fingerprint -> verify(id, h, fingerprint) }, progress = { stage ->
+            main.post { if (sshConnections[id] === connection) update(id) {
+                if (it.status == "connecting") it.copy(stage = stage) else it
+            } }
         }, keySource = sshKeySource(context, host))
-        val files = SftpClient(connection::sftp) { live.value.any { it.id == id && it.status == "ready" } }
+        val files = SftpClient(connection::sftp) {
+            live.value.any { it.id == id && it.status == "ready" } && sshConnections[id] === connection
+        }
+        discoveryJobs.remove(id)?.cancel()
+        cancelTrust(id)
         sshConnections[id] = connection
-        return addTerminal(attachment?.title ?: host.name, "SSH", SshTerminalTransport(connection, command), id, host, files, attachment)
+        val result = addTerminal(attachment?.title ?: host.name, "SSH", SshTerminalTransport(connection, command), id, host, files, attachment)
+        refreshSshNetworkMonitor()
+        return result
+    }
+
+    /** Replace the transport inside the existing tab. Navigation, drafts and remote identity survive. */
+    fun retrySsh(id: String, password: CharArray? = null) {
+        val previous = live.value.find { it.id == id && it.host != null }
+        if (previous == null || previous.status in setOf("ready", "connecting") || sshRetryJobs[id]?.isActive == true) {
+            password?.fill('\u0000'); return
+        }
+        sshReconnect.cancel(id)
+        update(id) { it.copy(status = "connecting", stage = SshStage.NETWORK) }
+        sshRetryJobs[id] = scope.launch(Dispatchers.Main.immediate) {
+            var secret: CharArray? = password
+            try {
+                val original = checkNotNull(previous.host)
+                // Editing a saved host must not silently reconnect an existing tab to another server.
+                val host = savedHosts.value.find { sameSshLogin(it, original) }?.let {
+                    original.copy(fingerprint = it.fingerprint)
+                } ?: original
+                if (secret == null) secret = liveCredentials.load(id, credentialKey(host))
+                    ?: passwordForConnection(host, null)
+                if (live.value.none { it.id == id && it.terminal === previous.terminal }) return@launch
+                if (secret == null) {
+                    update(id) { it.copy(status = "failed", failure = SshFailureKind.AUTH) }
+                } else {
+                    previous.terminal.finishIfRunning()
+                    openSsh(id, host, checkNotNull(secret), previous.attachment)
+                    secret = null
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                update(id) { if (it.terminal === previous.terminal) it.copy(status = "failed", failure = SshFailureKind.AUTH) else it }
+            } finally { secret?.fill('\u0000'); sshRetryJobs.remove(id) }
+        }
     }
 
     fun refreshRemoteSessions(id: String) {
@@ -428,7 +497,9 @@ class SessionRepository(private val context: Context,
                 val inventory = result.getOrNull()
                 val host = live.value.find { it.id == id }?.host
                 update(id) { it.copy(remote = inventory ?: it.remote, discovering = false, discoveryFailed = result.isFailure,
-                    host = if (inventory == null || inventory.os == "term") it.host else it.host?.copy(icon = inventory.os)) }
+                    host = if (inventory == null || inventory.os == "term") it.host else it.host?.copy(icon = inventory.os),
+                    attachment = it.attachment ?: if (inventory != null && it.host != null)
+                        RemoteSessions.configuredAttachment(it.host, inventory) else null) }
                 if (host != null && inventory != null && inventory.os != "term") {
                     val next = savedHosts.value.map { if (sameSshLogin(it, host) && it.icon == host.icon) it.copy(icon = inventory.os) else it }
                     if (next != savedHosts.value) { savedHosts.value = next; persistHosts() }
@@ -448,32 +519,49 @@ class SessionRepository(private val context: Context,
                             id: String = UUID.randomUUID().toString(), host: HostProfile? = null, files: SftpClient? = null,
                             attachment: RemoteAttachment? = null): String {
         val callbacks = object : TerminalCallbacks() {
-            override fun onTextChanged(session: TerminalSession) { if (renderOwner == id) redraw?.invoke() }
-            override fun onTitleChanged(session: TerminalSession) { update(id) { it.copy(title = session.title?.take(80) ?: it.title) } }
+            private fun current(session: TerminalSession) = live.value.any { it.id == id && it.terminal === session }
+            override fun onTextChanged(session: TerminalSession) { if (current(session) && renderOwner == id) redraw?.invoke() }
+            override fun onTitleChanged(session: TerminalSession) {
+                if (current(session)) update(id) { it.copy(title = session.title?.take(80) ?: it.title) }
+            }
             override fun onTransportReady(session: TerminalSession) {
-                update(id) { it.copy(status = "ready", hasConnected = true) }
+                if (!current(session)) return
+                sshReconnect.forget(id)
+                update(id) { it.copy(status = "ready", hasConnected = true, failure = null) }
                 refreshRemoteSessions(id)
             }
             override fun onSessionFinished(session: TerminalSession) {
+                if (!current(session)) return
                 sshConnections.remove(id)
                 discoveryJobs.remove(id)?.cancel()
                 cancelTrust(id)
-                update(id) { it.copy(status = if (session.failure == null) "ended" else "failed",
-                    failure = session.failureCause?.let(::classifySshFailure), discovering = false) }
+                val failure = session.failureCause?.let(::classifySshFailure)
+                val retry = live.value.any { it.id == id && it.host != null && it.hasConnected } && SshReconnect.retryable(failure)
+                update(id) { it.copy(status = if (retry) "reconnecting" else if (session.failure == null) "ended" else "failed",
+                    failure = failure, discovering = false) }
+                if (failure in setOf(SshFailureKind.AUTH, SshFailureKind.KEY)) liveCredentials.forget(id)
+                if (retry) sshReconnect.schedule(id)
+                refreshSshNetworkMonitor()
                 stopIdleService()
             }
-            override fun onInputRejected(session: TerminalSession) { error.value = "input_rejected" }
+            override fun onInputRejected(session: TerminalSession) { if (current(session)) error.value = "input_rejected" }
 
         }
         val terminal = TerminalSession(transport, callbacks, display.state.value.scrollbackLines)
-        live.value = live.value + LocalSession(id, title, source, terminal, host = host, files = files, attachment = attachment)
-        SessionService.ensureStarted(context)
+        val previous = live.value.find { it.id == id }
+        val entry = LocalSession(id, previous?.title ?: title, source, terminal, host = host, files = files,
+            attachment = attachment, hasConnected = previous?.hasConnected == true, remote = previous?.remote)
+        live.value = if (previous == null) live.value + entry else live.value.map { if (it.id == id) entry else it }
+        if (!backgroundActive.value) SessionService.ensureStarted(context)
         terminal.start()
         terminalColors?.let { terminal.colors(it) }
         return id
     }
     private fun update(id: String, change: (LocalSession) -> LocalSession) { live.value = live.value.map { if (it.id == id) change(it) else it } }
     fun closeTerminal(id: String) {
+        sshReconnect.forget(id)
+        sshRetryJobs.remove(id)?.cancel()
+        liveCredentials.forget(id)
         discoveryJobs.remove(id)?.cancel()
         sshConnections.remove(id)
         remoteFiles.value = remoteFiles.value.filterNot { it.session == id }
@@ -482,6 +570,7 @@ class SessionRepository(private val context: Context,
         live.value = live.value.filterNot { it.id == id }
         drafts.value = drafts.value - id
         recentCommands.value = recentCommands.value - id
+        refreshSshNetworkMonitor()
         stopIdleService()
     }
 
@@ -793,6 +882,9 @@ class SessionRepository(private val context: Context,
     }
     private fun target(pane: DesktopPane) = JSONObject().put("window_id", pane.window).put("pane_id", pane.id)
     fun closeAll() {
+        sshReconnect.clear()
+        sshRetryJobs.values.forEach(Job::cancel); sshRetryJobs.clear()
+        liveCredentials.clear()
         discoveryJobs.values.forEach(Job::cancel); discoveryJobs.clear()
         sshConnections.clear()
         activeGit = null
@@ -803,6 +895,7 @@ class SessionRepository(private val context: Context,
         pendingTrust.values.forEach { it.complete(false) }; pendingTrust.clear()
         trust.value?.answer?.complete(false); trust.value = null
         live.value.forEach { it.terminal.finishIfRunning() }; live.value = emptyList()
+        refreshSshNetworkMonitor()
         val clients = desktopClients.values.toList(); desktopClients.clear(); computers.value = emptyList()
         desktopTransitions.clear()
         refreshLanDiscovery()
@@ -827,7 +920,7 @@ class SessionRepository(private val context: Context,
         stopIdleService()
     }
     private fun stopIdleService() {
-        if (live.value.none { it.status in setOf("ready", "connecting") } &&
+        if (live.value.none { it.status in setOf("ready", "connecting", "reconnecting") } &&
             computers.value.none { it.status in setOf("ready", "connecting", "approval") }) {
             context.stopService(android.content.Intent(context, SessionService::class.java))
         }

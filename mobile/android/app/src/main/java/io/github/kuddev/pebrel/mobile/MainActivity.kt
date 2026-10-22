@@ -87,7 +87,6 @@ class MainActivity : ComponentActivity() {
         var addRelay by remember { mutableStateOf(false) }
         var deployRelay by remember { mutableStateOf(false) }
         var login by remember { mutableStateOf<HostProfile?>(null) }
-        var retrySession by remember { mutableStateOf<String?>(null) }
         var pendingAttachment by remember { mutableStateOf<RemoteAttachment?>(null) }
         var switcher by remember { mutableStateOf(false) }
         val desktop = desktops.find { it.id == desktopId }
@@ -139,10 +138,9 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(desktopId, relays) {
             if (page in setOf("pane", "desktop", "git", "file", "conversation")) repository.restoreDesktop(desktopId)?.let { desktopId = it }
         }
-        fun connectHost(host: HostProfile, previous: String? = null, attachment: RemoteAttachment? = null) {
+        fun connectHost(host: HostProfile, attachment: RemoteAttachment? = null) {
             if (credentialBusy) return
-            if (!repository.hasSavedPassword(host)) {
-                retrySession = previous
+            if (!repository.hasSavedPassword(host) && host.keyUri.isEmpty()) {
                 pendingAttachment = attachment
                 login = host
                 return
@@ -151,13 +149,11 @@ class MainActivity : ComponentActivity() {
             credentialScope.launch {
                 var secret: CharArray? = null
                 try {
-                    secret = repository.loadSavedPassword(host)
+                    secret = repository.passwordForConnection(host, null)
                     if (secret == null) {
-                        retrySession = previous
                         pendingAttachment = attachment
                         login = host
                     } else {
-                        previous?.let(repository::closeTerminal)
                         openSession(repository.ssh(host, checkNotNull(secret), attachment))
                         secret = null
                     }
@@ -248,9 +244,7 @@ class MainActivity : ComponentActivity() {
                     "terminal" -> {
                         val session = sessions.find { it.id == selected }
                         if (session != null) LocalTerminalScreen(session, repository, ::back, { switcher = true },
-                            onRetry = { session.host?.let { host ->
-                                connectHost(hosts.find { it.id == host.id } ?: host, session.id, session.attachment)
-                            } },
+                            onRetry = { repository.retrySsh(session.id) },
                             onEdit = { session.host?.let { host ->
                                 editHost = hosts.find { it.id == host.id } ?: host; hostForm = true
                                 repository.closeTerminal(session.id); back()
@@ -409,7 +403,7 @@ class MainActivity : ComponentActivity() {
         if (deployRelay) RelayDeploymentFlow(repository, onCancel = { deployRelay = false })
         login?.let { host -> LoginForm(
             host = host,
-            onCancel = { login = null; retrySession = null; pendingAttachment = null },
+            onCancel = { login = null; pendingAttachment = null },
             attachmentLabel = pendingAttachment?.title,
             passwordSaved = savedCredentials.isNotEmpty() && repository.hasSavedPassword(host),
             busy = credentialBusy,
@@ -428,8 +422,6 @@ class MainActivity : ComponentActivity() {
                         if (connectionPassword == null) repository.error.value = "credential_missing"
                         else if (repository.saveHostWithCredentials(host, password, rememberPassword)) {
                             val secret = checkNotNull(connectionPassword)
-                            retrySession?.let(repository::closeTerminal)
-                            retrySession = null
                             if (computer) openDesktop(repository.connectDesktop(host, secret, input))
                             else openSession(repository.ssh(host, secret, pendingAttachment))
                             pendingAttachment = null
