@@ -12,6 +12,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.*
 import java.time.Duration
+import kotlinx.coroutines.*
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], application = Application::class, shadows = [SshRecoveryTest.Terminal::class],
@@ -70,6 +71,30 @@ class SshRecoveryTest {
             assertEquals("ready", repository.sessions.value.first().status)
             assertSame(other.real, repository.sessions.value.last().terminal)
         } finally { repository.closeAll() }
+    }
+
+    @Test fun newTmuxTabKeepsThePreviousPtyAliveAndUsesADifferentRemoteSession() {
+        Terminal.started.clear()
+        val repository = SessionRepository(ApplicationProvider.getApplicationContext())
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        try {
+            val firstId = repository.ssh(HostProfile("fixture", "Fixture", "localhost", 22, "user",
+                sessionMode = SshSessionMode.TMUX, sessionName = "work"), charArrayOf())
+            val first = Terminal.started.last()
+            first.callbacks.onTransportReady(first.real)
+            var newId: String? = null
+            scope.launch { newId = repository.newSshTab(firstId) }
+            await { newId != null }
+            assertFalse(first.closed)
+            val tabs = repository.sessions.value
+            assertEquals(2, tabs.size)
+            assertEquals("work", tabs.first().host?.sessionName)
+            assertNotEquals("work", tabs.last().host?.sessionName)
+            assertNotEquals(firstId, newId)
+            repository.closeTerminal(checkNotNull(newId))
+            assertFalse(first.closed)
+            assertSame(first.real, repository.sessions.value.single().terminal)
+        } finally { scope.cancel(); repository.closeAll() }
     }
 
     @Test fun routeRecoveryRunsInTheBackgroundAndClosingATabCancelsItsRetry() {

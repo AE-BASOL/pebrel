@@ -429,6 +429,25 @@ class SessionRepository(private val context: Context,
     fun ssh(host: HostProfile, password: CharArray, attachment: RemoteAttachment? = null): String =
         openSsh(UUID.randomUUID().toString(), host, password, attachment)
 
+    /** New tabs get their own PTY; selecting a tab never changes another transport's lifetime. */
+    suspend fun newSshTab(sourceId: String, attachment: RemoteAttachment? = null): String? {
+        val source = live.value.find { it.id == sourceId } ?: return null
+        val host = source.host ?: return null
+        var secret: CharArray? = null
+        try {
+            secret = liveCredentials.load(sourceId, credentialKey(host)) ?: passwordForConnection(host, null)
+            if (secret == null) { error.value = "credential_missing"; return null }
+            if (live.value.none { it.id == sourceId && it.terminal === source.terminal }) return null
+            val id = UUID.randomUUID().toString()
+            // A new multiplexer tab must not attach a second client to the previous tab's session.
+            val target = if (attachment == null && host.sessionMode != SshSessionMode.SHELL)
+                host.copy(sessionName = "pebrel-${id.take(8)}") else host
+            return openSsh(id, target, checkNotNull(secret), attachment).also { secret = null }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { error.value = "credential_load_failed"; return null }
+        finally { secret?.fill('\u0000') }
+    }
+
     private fun openSsh(id: String, host: HostProfile, password: CharArray, attachment: RemoteAttachment?): String {
         liveCredentials.remember(id, credentialKey(host), password)
         val previous = live.value.find { it.id == id }

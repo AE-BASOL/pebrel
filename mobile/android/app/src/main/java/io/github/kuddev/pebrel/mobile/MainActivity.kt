@@ -168,6 +168,14 @@ class MainActivity : ComponentActivity() {
             finishOnboarding()
             openSession(id)
         }
+        fun newSshTab(source: String, attachment: RemoteAttachment? = null) {
+            if (credentialBusy) return
+            credentialBusy = true
+            credentialScope.launch {
+                try { repository.newSshTab(source, attachment)?.let(::openSession) }
+                finally { credentialBusy = false }
+            }
+        }
         var notificationRequested by rememberSaveable { mutableStateOf(false) }
         val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
         val hasLiveSessions = sessions.any { it.status == "ready" || it.status == "connecting" } ||
@@ -252,7 +260,7 @@ class MainActivity : ComponentActivity() {
                             onClose = { repository.closeTerminal(session.id); back() },
                             onFiles = session.files?.let { { showPage("sftp") } },
                             active = page == route,
-                            onAttachRemote = { entry -> session.host?.let { connectHost(it, attachment = entry) } })
+                            onAttachRemote = { entry -> newSshTab(session.id, entry) })
                         else LaunchedEffect(selected) { showPage("home") }
                     }
                     "sftp" -> {
@@ -331,6 +339,14 @@ class MainActivity : ComponentActivity() {
         }
         if (switcher) AlertDialog(onDismissRequest = { switcher = false }, title = { Text(stringResource(R.string.all_sessions)) }, text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
+                val current = sessions.find { it.id == selected }
+                if (current?.host != null) NavigationRow(R.drawable.ic_plus,
+                    stringResource(R.string.tab_new_terminal), current.host.name) { newSshTab(current.id) }
+                NavigationRow(R.drawable.ic_server, stringResource(R.string.ssh_hosts),
+                    stringResource(R.string.ssh_new_tab_host_hint)) { switcher = false; showPage("hosts") }
+                NavigationRow(R.drawable.ic_terminal, stringResource(R.string.local_terminal),
+                    stringResource(R.string.local_device)) { switcher = false; openLocal() }
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 val cards = sessionCards(sessions, desktops)
                 if (cards.isEmpty()) HelperText(stringResource(R.string.no_sessions))
                 cards.forEach { card ->
