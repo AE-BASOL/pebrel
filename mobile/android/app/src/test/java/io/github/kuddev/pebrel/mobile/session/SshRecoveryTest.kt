@@ -24,12 +24,16 @@ class SshRecoveryTest {
         @RealObject lateinit var real: TerminalSession
         lateinit var callbacks: TerminalCallbacks
         var closed = false
+        var inputRestorations = 0
         @Implementation fun __constructor__(transport: SessionTransport, callbacks: TerminalCallbacks, scrollbackLines: Int) {
             this.callbacks = callbacks
         }
         @Implementation fun start() { started += this }
         @Implementation fun finishIfRunning() { closed = true }
         @Implementation fun colors(value: IntArray) = Unit
+        @Implementation fun setVisible(value: Boolean) = Unit
+        @Implementation fun updateSize(columns: Int, rows: Int, width: Int, height: Int) = Unit
+        @Implementation fun prepareForInput() { inputRestorations++ }
         companion object { val started = mutableListOf<Terminal>() }
     }
 
@@ -95,6 +99,22 @@ class SshRecoveryTest {
             assertFalse(first.closed)
             assertSame(first.real, repository.sessions.value.single().terminal)
         } finally { scope.cancel(); repository.closeAll() }
+    }
+
+    @Test fun openingTheKeyboardRestoresLiveInputBeforeAnyTextIsCommitted() {
+        Terminal.started.clear()
+        val repository = SessionRepository(ApplicationProvider.getApplicationContext())
+        val activity = org.robolectric.Robolectric.buildActivity(android.app.Activity::class.java).setup()
+        try {
+            repository.ssh(HostProfile("fixture", "Fixture", "localhost", 22, "user"), charArrayOf())
+            val terminal = Terminal.started.last()
+            val view = GhosttyView(activity.get()).apply { session = terminal.real; directInput = true }
+            activity.get().setContentView(view)
+            view.layout(0, 0, 600, 800)
+            view.showKeyboard()
+            assertTrue(terminal.inputRestorations > 0)
+            assertTrue(view.hasFocus())
+        } finally { activity.pause().stop().destroy(); repository.closeAll() }
     }
 
     @Test fun routeRecoveryRunsInTheBackgroundAndClosingATabCancelsItsRetry() {
