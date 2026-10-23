@@ -458,7 +458,7 @@ impl NebulaWorkspace {
                             .text_size(px(label_px))
                             .font_weight(FontWeight::NORMAL)
                             .text_color(if active { active_fg } else { muted })
-                            .child(glyph),
+                            .child(crate::gpui_shell::widgets::terminal_glyph(glyph, TAB_LABEL_ICON_SIZE)),
                     )
                 })
                 .when(
@@ -1006,7 +1006,7 @@ impl NebulaWorkspace {
                             .font_family(symbol_family)
                             .text_size(px(label_px))
                             .text_color(dim)
-                            .child(glyph),
+                            .child(crate::gpui_shell::widgets::terminal_glyph(glyph, TAB_LABEL_ICON_SIZE)),
                     )
                 })
                 .child(
