@@ -777,6 +777,122 @@ fn native_result_markdown_keeps_compact_blocks_and_copies_only_code(cx: &mut Tes
 }
 
 #[gpui::test]
+fn native_result_diff_keeps_file_boundaries_copy_and_collapse(cx: &mut TestAppContext) {
+    use nebula_terminal::inline_content::Packet;
+    let (view, mut cx, receiver, proxy) = open(cx);
+    let source = "diff --git a/src/config.ts b/src/config.ts\n--- a/src/config.ts\n+++ b/src/config.ts\n@@ -12,3 +12,4 @@\n export const output = {\n-  format: 'text',\n+  format: 'auto',\n+  preserveSource: true,\n };\ndiff --git a/old b/new\nsimilarity index 100%\nrename from old\nrename to new\n";
+    let wire = format!(
+        "{}\r\n{}{}",
+        Packet::Begin {
+            wire_id: 204,
+            rows: 2,
+            mime: "text/x-diff".into(),
+            title: "git diff".into()
+        }
+        .encode(),
+        Packet::Append { wire_id: 204, text: source.into() }.encode(),
+        Packet::End { wire_id: 204, code: 0 }.encode()
+    );
+    feed(&view, &mut cx, &proxy, wire.as_bytes());
+    for _ in 0..10 {
+        draw(&mut cx);
+    }
+    let expanded = cx.debug_bounds("native-diff-file-0").unwrap();
+    assert!(cx.debug_bounds("native-diff-body-0").is_some());
+    assert!(cx.debug_bounds("native-diff-file-1").unwrap().top() >= expanded.bottom());
+    assert!(
+        cx.debug_bounds("native-code-copy").is_none(),
+        "diff uses the original patch copy action"
+    );
+    let collapse = cx.debug_bounds("native-diff-collapse-0").unwrap();
+    assert!(collapse.size.width >= px(28.0) && collapse.size.height >= px(28.0));
+    cx.simulate_mouse_move(collapse.center(), None, Modifiers::default());
+    draw(&mut cx);
+    assert!(
+        !cx.debug_bounds("native-result-tools").unwrap().intersects(&collapse),
+        "floating tools must leave the file collapse target reachable"
+    );
+    cx.simulate_click(collapse.origin + point(px(3.0), px(3.0)), Modifiers::default());
+    for _ in 0..4 {
+        draw(&mut cx);
+    }
+    assert!(cx.debug_bounds("native-diff-body-0").is_none());
+    assert!(cx.debug_bounds("native-diff-file-0").unwrap().size.height < expanded.size.height);
+    // 容器焦点不是 Tab 停靠点；第一个 Tab 就进入第一个文件的折叠按钮。
+    cx.simulate_keystrokes("tab");
+    draw(&mut cx);
+    cx.simulate_keystrokes("enter");
+    cx.simulate_event(gpui::KeyUpEvent { keystroke: gpui::Keystroke::parse("enter").unwrap() });
+    for _ in 0..4 {
+        draw(&mut cx);
+    }
+    assert!(
+        input(&receiver).is_empty(),
+        "file control navigation must not send Tab or Enter to PTY"
+    );
+    assert!(
+        cx.debug_bounds("native-diff-body-0").is_some(),
+        "keyboard activation expands the file"
+    );
+    cx.simulate_keystrokes("enter");
+    cx.simulate_event(gpui::KeyUpEvent { keystroke: gpui::Keystroke::parse("enter").unwrap() });
+    for _ in 0..4 {
+        draw(&mut cx);
+    }
+    assert!(
+        cx.debug_bounds("native-diff-body-0").is_none(),
+        "keyboard focus survives the first activation"
+    );
+    let bounds = cx.debug_bounds("native-result").unwrap();
+    cx.simulate_mouse_move(bounds.origin + point(px(10.0), px(10.0)), None, Modifiers::default());
+    draw(&mut cx);
+    let copy = cx.debug_bounds("native-result-copy").unwrap().center();
+    cx.simulate_click(copy, Modifiers::default());
+    draw(&mut cx);
+    assert_eq!(
+        clipboard(&mut cx).as_deref(),
+        Some(source),
+        "copy retains headers, hunk markers, and original signs"
+    );
+    cx.simulate_keystrokes("escape");
+    draw(&mut cx);
+    assert!(input(&receiver).is_empty());
+}
+
+#[gpui::test]
+fn native_result_unsupported_diff_preserves_raw_output(cx: &mut TestAppContext) {
+    use nebula_terminal::inline_content::Packet;
+    let (view, mut cx, receiver, proxy) = open(cx);
+    let source = "diff --cc file\n@@@ -1,1 -1,1 +1,1 @@@\n++new\n";
+    let wire = format!(
+        "{}\r\n{}{}",
+        Packet::Begin {
+            wire_id: 205,
+            rows: 2,
+            mime: "text/x-diff".into(),
+            title: "git diff".into()
+        }
+        .encode(),
+        Packet::Append { wire_id: 205, text: source.into() }.encode(),
+        Packet::End { wire_id: 205, code: 0 }.encode()
+    );
+    feed(&view, &mut cx, &proxy, wire.as_bytes());
+    for _ in 0..6 {
+        draw(&mut cx);
+    }
+    assert!(cx.debug_bounds("native-diff-file-0").is_none());
+    assert!(cx.debug_bounds("native-result-raw-content").is_some());
+    let bounds = cx.debug_bounds("native-result").unwrap();
+    cx.simulate_mouse_move(bounds.origin + point(px(10.0), px(10.0)), None, Modifiers::default());
+    draw(&mut cx);
+    let copy = cx.debug_bounds("native-result-copy").unwrap().center();
+    cx.simulate_click(copy, Modifiers::default());
+    draw(&mut cx);
+    assert_eq!(clipboard(&mut cx).as_deref(), Some(source));
+    assert!(input(&receiver).is_empty());
+}
+
+#[gpui::test]
 fn native_result_eviction_releases_offscreen_parsed_state(cx: &mut TestAppContext) {
     use nebula_terminal::inline_content::Packet;
     let (view, mut cx, _, proxy) = open(cx);
