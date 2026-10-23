@@ -54,6 +54,8 @@ class GhosttyCore(columns: Int = 80, rows: Int = 24, scrollbackLines: Int = 1000
     }
     @Synchronized fun scroll(lines: Int) = NativeBridge.scroll(pointer(), lines)
     @Synchronized fun scrollTo(offset: Int) = NativeBridge.scrollTo(pointer(), offset.coerceAtLeast(0))
+    /** Read at dispatch time: 0 = primary screen, 1 = alternate keys, 2 = mouse reporting. */
+    @Synchronized fun applicationScrollMode(): Int = NativeBridge.applicationScrollMode(pointer())
     @Synchronized fun wheel(lines: Int, column: Int, row: Int, applicationOnly: Boolean = false): ByteArray {
         require(lines != 0 && lines in -32..32 && column >= 0 && row >= 0)
         return NativeBridge.wheel(pointer(), lines, column, row, applicationOnly)
@@ -84,6 +86,7 @@ internal object NativeBridge {
     external fun render(handle: Long, rows: Array<TerminalRow?>, metadata: IntArray)
     external fun scroll(handle: Long, lines: Int)
     external fun scrollTo(handle: Long, offset: Int)
+    external fun applicationScrollMode(handle: Long): Int
     external fun wheel(handle: Long, lines: Int, column: Int, row: Int, applicationOnly: Boolean): ByteArray
     external fun colors(handle: Long, colors: IntArray)
     external fun key(handle: Long, keyCode: Int, mods: Int, action: Int, text: ByteArray, unshifted: Int): ByteArray

@@ -145,6 +145,7 @@ class GhosttyEngineTest {
     }
 
     @Test fun wheelKeepsPrimaryHistoryLocalAndRoutesAlternateScreenInput() = GhosttyCore(20, 4).use { core ->
+        assertEquals(0, core.applicationScrollMode())
         core.resize(20, 4, 10, 20)
         core.feed((0..30).joinToString("\r\n") { "line-$it" }.toByteArray())
         core.feed("\u001b[?1000h\u001b[?1006h".toByteArray())
@@ -154,15 +155,18 @@ class GhosttyEngineTest {
         core.scroll(Int.MAX_VALUE)
         core.feed("\u001b[?1049h".toByteArray())
         assertTrue(core.snapshot().alternateScreen)
+        assertEquals(2, core.applicationScrollMode())
         assertEquals("\u001b[<64;4;3M\u001b[<64;4;3M", core.wheel(-2, 3, 2).toString(Charsets.UTF_8))
         assertEquals("\u001b[<65;4;3M", core.wheel(1, 3, 2).toString(Charsets.UTF_8))
         core.feed("\u001b[?1000l\u001b[?1007h\u001b[?1h".toByteArray())
+        assertEquals(1, core.applicationScrollMode())
         assertEquals("\u001bOA", core.wheel(-1, 3, 2).toString(Charsets.UTF_8))
         core.feed("\u001b[?1l".toByteArray())
         assertEquals("\u001b[B", core.wheel(1, 3, 2).toString(Charsets.UTF_8))
         core.feed("\u001b[?1007l".toByteArray())
         assertTrue(core.wheel(1, 3, 2).isEmpty())
         core.feed("\u001b[?1049l".toByteArray())
+        assertEquals(0, core.applicationScrollMode())
         assertFalse(core.snapshot().alternateScreen)
         assertTrue(core.snapshot().text().contains("line-30"))
         val offset = core.snapshot().scrollOffset
