@@ -20,6 +20,11 @@ The native adapter aggregates up to 2 MiB per JNI call and issues at most 64
 concurrent 32 KiB requests. It reassembles reads by offset, fills short reads,
 and drains write acknowledgements before advancing a batch's contiguous offset.
 FSTAT checks move to batch boundaries. The SSH receive window is 4 MiB.
+If a batch times out, the transfer halves its window down to one protocol chunk,
+so a slow link can confirm progress within the request timeout. The upload keeps
+the original source buffer while acknowledging smaller contiguous slices.
+Full batches confirmed within five seconds grow the window again, so a transient
+outage does not permanently reduce throughput after the connection recovers.
 
 The app keeps the SFTP client across SSH replacement. A transfer waits for the
 existing session owner's recovery and acquires new native handles. Downloads

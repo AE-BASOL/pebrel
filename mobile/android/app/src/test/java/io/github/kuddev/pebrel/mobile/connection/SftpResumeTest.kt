@@ -75,13 +75,14 @@ class SftpResumeTest {
     }
 
     @Test fun uploadReplaysOnlyTheUnconfirmedBatchAndReconcilesALostCommitReply() = runBlocking {
-        val data = ByteArray(SftpClient.BATCH * 2 + 37) { (it % 239).toByte() }
+        val data = ByteArray(SftpClient.BATCH * 3 + 37) { (it % 239).toByte() }
         var remote = ByteArray(0)
         val starts = mutableListOf<Long>()
         val tokens = mutableSetOf<String>()
         var lostWrite = false
         var committed = false
         var recovered = 0
+        val writes = mutableListOf<Int>()
         val client = SftpClient({ request ->
             when (request.getString("op")) {
                 "begin_upload" -> {
@@ -94,6 +95,7 @@ class SftpResumeTest {
                 "write_batch" -> {
                     val offset = request.getInt("offset")
                     val bytes = Base64.decode(request.getString("data"), Base64.NO_WRAP)
+                    writes += bytes.size
                     remote = remote.copyOf(offset + bytes.size)
                     bytes.copyInto(remote, offset)
                     if (offset > 0 && !lostWrite) { lostWrite = true; throw NativeSshException("TIMEOUT") }
@@ -114,6 +116,8 @@ class SftpResumeTest {
         assertEquals(listOf(0L, SftpClient.BATCH.toLong()), starts)
         assertEquals(1, tokens.size)
         assertEquals(2, recovered)
+        assertEquals("a timed-out batch shrinks so slow links can confirm progress", SftpClient.BATCH / 2, writes[2])
+        assertEquals("fast recovery restores the full window", SftpClient.BATCH, writes[4])
         assertArrayEquals(data, remote)
     }
 

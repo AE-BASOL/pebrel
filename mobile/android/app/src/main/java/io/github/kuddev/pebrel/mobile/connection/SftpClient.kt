@@ -76,6 +76,7 @@ class SftpClient(private val execute: (JSONObject) -> JSONObject,
         var transfer: Long? = null
         var file: SftpEntry? = null
         var offset = 0L
+        var batch = BATCH
         try {
             do {
                 ensureActive()
@@ -90,7 +91,8 @@ class SftpClient(private val execute: (JSONObject) -> JSONObject,
                     }
                     val size = file?.size ?: throw NativeSshException("SFTP_FILE_TYPE")
                     if (size > maximum) throw NativeSshException("SFTP_TOO_LARGE")
-                    val chunk = request("read", JSONObject().put("transfer", transfer).put("offset", offset).put("length", BATCH))
+                    val started = System.nanoTime()
+                    val chunk = request("read", JSONObject().put("transfer", transfer).put("offset", offset).put("length", batch))
                     val bytes = Base64.decode(chunk.getString("data"), Base64.NO_WRAP)
                     check(bytes.size <= BATCH && chunk.getLong("offset") == offset)
                     check(offset + bytes.size <= size && chunk.getLong("next_offset") == offset + bytes.size)
@@ -98,9 +100,11 @@ class SftpClient(private val execute: (JSONObject) -> JSONObject,
                     offset += bytes.size
                     waiting(false)
                     progress(offset, size)
+                    if (bytes.size == batch && System.nanoTime() - started < 5_000_000_000L) batch = (batch * 2).coerceAtMost(BATCH)
                     if (chunk.getBoolean("eof")) { check(offset == size); break }
                     check(bytes.isNotEmpty())
                 } catch (error: NativeSshException) {
+                    if (error.code in setOf("TIMEOUT", "SFTP_TIMEOUT")) batch = (batch / 2).coerceAtLeast(CHUNK)
                     awaitRecovery(error, waiting)
                     transfer = null // Native handles belong to the old subsystem, never the replacement.
                 }
@@ -117,6 +121,7 @@ class SftpClient(private val execute: (JSONObject) -> JSONObject,
         var offset = 0L
         var attempted = false
         var completed = false
+        var batch = BATCH
         val digest = MessageDigest.getInstance("SHA-256")
         suspend fun open() {
             while (transfer == null) {
@@ -138,23 +143,28 @@ class SftpClient(private val execute: (JSONObject) -> JSONObject,
                 val count = source.read(buffer)
                 if (count < 0) break
                 if (count == 0) { yield(); continue }
-                val data = Base64.encodeToString(buffer, 0, count, Base64.NO_WRAP)
-                while (true) {
+                var position = 0
+                while (position < count) {
+                    val length = minOf(batch, count - position)
                     try {
                         open()
+                        val started = System.nanoTime()
+                        val data = Base64.encodeToString(buffer, position, length, Base64.NO_WRAP)
                         val written = request("write_batch", JSONObject().put("transfer", transfer).put("offset", offset).put("data", data))
-                        check(written.getLong("next_offset") == offset + count)
-                        break
+                        check(written.getLong("next_offset") == offset + length)
+                        digest.update(buffer, position, length)
+                        position += length
+                        offset += length
+                        waiting(false)
+                        progress(offset, size)
+                        if (length == batch && System.nanoTime() - started < 5_000_000_000L) batch = (batch * 2).coerceAtMost(BATCH)
                     } catch (error: NativeSshException) {
+                        if (error.code in setOf("TIMEOUT", "SFTP_TIMEOUT")) batch = (batch / 2).coerceAtLeast(CHUNK)
                         awaitRecovery(error, waiting)
                         transfer = null
                     }
                 }
-                // Source bytes remain in memory until the entire batch is acknowledged.
-                digest.update(buffer, 0, count)
-                offset += count
-                waiting(false)
-                progress(offset, size)
+                // Keep source bytes until acknowledged, including after shrinking a slow link's window.
             }
             if (size != null && size != offset) throw NativeSshException("SFTP_CHANGED")
             val hash = digest.digest().joinToString("") { "%02x".format(it.toInt() and 255) }
