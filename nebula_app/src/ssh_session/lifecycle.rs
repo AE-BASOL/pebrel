@@ -441,6 +441,23 @@ async fn pump<H: SshEventHost>(
     let mut stream = StreamProcessor::default();
     stream.resize(initial_size);
     stream.set_remote_hook_token(hook_token);
+    let result = pump_stream(channel, &mut stream, terminal, event_proxy, input).await;
+    // An exit or network error can arrive before the synchronized frame ends.
+    // Publish bytes already received before the pane reports its final state.
+    if stream.next_sync_timeout().is_some() {
+        stream.stop_sync(&mut *terminal.lock());
+        event_proxy.send_event(TerminalEvent::Wakeup);
+    }
+    result
+}
+
+async fn pump_stream<H: SshEventHost>(
+    channel: &mut ShellChannel,
+    stream: &mut StreamProcessor,
+    terminal: &FairMutex<Term<H>>,
+    event_proxy: &H,
+    input: &mut mpsc::UnboundedReceiver<Msg>,
+) -> Result<(), SessionError> {
     while let Some(message) = channel.pending.pop_front() {
         if let ChannelMsg::Data { data } | ChannelMsg::ExtendedData { data, .. } = message {
             stream.feed(&mut *terminal.lock(), event_proxy, data.as_ref());

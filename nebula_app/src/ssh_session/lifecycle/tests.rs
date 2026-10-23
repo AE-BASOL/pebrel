@@ -17,10 +17,16 @@ struct Events {
     stages: Arc<Mutex<Vec<SshStage>>>,
     replies: Option<mpsc::UnboundedSender<Msg>>,
     hooks: Arc<Mutex<Vec<Vec<u8>>>>,
+    wakeups: Option<mpsc::UnboundedSender<()>>,
 }
 
 impl EventListener for Events {
     fn send_event(&self, event: TerminalEvent) {
+        if matches!(event, TerminalEvent::Wakeup)
+            && let Some(sender) = &self.wakeups
+        {
+            let _ = sender.send(());
+        }
         if let TerminalEvent::AiHookEnvelope(envelope) = &event {
             self.hooks.lock().unwrap().push(envelope.clone());
         }
@@ -60,6 +66,7 @@ fn check(future: impl Future<Output = ()>) {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
     Open,
+    EchoOutput,
     TerminalQuery,
     RejectPty,
     RejectShell,
@@ -252,13 +259,23 @@ impl server::Handler for Loopback {
         &mut self,
         channel: ChannelId,
         data: &[u8],
-        _session: &mut Session,
+        session: &mut Session,
     ) -> Result<(), Self::Error> {
         if let Some(script) = self.scripts.get_mut(&channel) {
             script.extend_from_slice(data);
             return Ok(());
         }
         let _ = self.data.send(data.to_vec());
+        if self.mode == Mode::EchoOutput {
+            match data {
+                b"\x04" => {
+                    session.eof(channel)?;
+                    session.exit_status_request(channel, 0)?;
+                },
+                b"\x03" => session.close(channel)?,
+                _ => session.data(channel, data.to_vec())?,
+            }
+        }
         Ok(())
     }
 
@@ -752,6 +769,105 @@ fn ssh_resize_updates_grid_and_remote_pty() {
         input_tx.send(Msg::Shutdown).unwrap();
         assert!(running.await.unwrap().is_ok());
         fixture.forget(&acquired.session).await;
+    });
+}
+
+#[test]
+fn ssh_delayed_synchronized_redraw_keeps_the_complete_screen_visible() {
+    check(async {
+        let mut fixture = Fixture::new(Mode::EchoOutput).await;
+        let acquired = fixture.connect().await;
+        let (wake_tx, mut wakes) = mpsc::unbounded_channel();
+        let events = Events { wakeups: Some(wake_tx), ..Default::default() };
+        let terminal = terminal(&events);
+        let (mut channel, token) = open_shell(&acquired, size(), None, &events).await.unwrap();
+        let (input_tx, mut input) = mpsc::unbounded_channel();
+        let pump_terminal = Arc::clone(&terminal);
+        let pump_events = events.clone();
+        let running = tokio::spawn(async move {
+            pump(&mut channel, token, size(), &pump_terminal, &pump_events, &mut input).await
+        });
+        wakes.recv().await.unwrap(); // Initial shell output.
+
+        for bytes in [b"\x1b[2J\x1b[HCOMPLETE".as_slice(), b"\x1b[?2026h\x1b[HEARLY HISTORY"] {
+            input_tx.send(Msg::Input(bytes.to_vec().into())).unwrap();
+            assert_eq!(fixture.data.recv().await.unwrap(), bytes);
+            wakes.recv().await.unwrap();
+        }
+        // Longer than the parser's local-PTY default, but a realistic network gap.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let first_row = || {
+            use nebula_terminal::index::{Column, Line};
+            let terminal = terminal.lock();
+            (0..terminal.columns())
+                .map(|column| terminal.grid()[Line(0)][Column(column)].c)
+                .collect::<String>()
+                .trim_end()
+                .to_owned()
+        };
+        assert_eq!(first_row(), "COMPLETE", "an incomplete remote redraw became visible");
+
+        // Holding a display frame must not hold keyboard input behind it.
+        input_tx.send(Msg::Input(b"key".to_vec().into())).unwrap();
+        assert_eq!(fixture.data.recv().await.unwrap(), b"key");
+        wakes.recv().await.unwrap();
+        assert_eq!(first_row(), "COMPLETE");
+
+        let final_frame = b"\x1b[2J\x1b[HLATEST\x1b[?2026l";
+        input_tx.send(Msg::Input(final_frame.to_vec().into())).unwrap();
+        assert_eq!(fixture.data.recv().await.unwrap(), final_frame);
+        wakes.recv().await.unwrap();
+        assert_eq!(first_row(), "LATEST");
+
+        input_tx.send(Msg::Input(b"\x1b[?2026h\x1b[2J\x1b[HRECOVERED".to_vec().into())).unwrap();
+        fixture.data.recv().await.unwrap();
+        wakes.recv().await.unwrap();
+        assert_eq!(first_row(), "LATEST");
+        // A silent peer that omits the end marker cannot freeze the pane.
+        tokio::time::timeout(Duration::from_secs(2), wakes.recv()).await.unwrap().unwrap();
+        assert_eq!(first_row(), "RECOVERED");
+        input_tx.send(Msg::Shutdown).unwrap();
+        assert!(running.await.unwrap().is_ok());
+        fixture.forget(&acquired.session).await;
+    });
+}
+
+#[test]
+fn ssh_unfinished_synchronized_output_is_preserved_on_exit_disconnect_and_shutdown() {
+    check(async {
+        for ending in [Some(b'\x04'), Some(b'\x03'), None] {
+            let mut fixture = Fixture::new(Mode::EchoOutput).await;
+            let acquired = fixture.connect().await;
+            let (wake_tx, mut wakes) = mpsc::unbounded_channel();
+            let events = Events { wakeups: Some(wake_tx), ..Default::default() };
+            let terminal = terminal(&events);
+            let (mut channel, token) = open_shell(&acquired, size(), None, &events).await.unwrap();
+            let (input_tx, mut input) = mpsc::unbounded_channel();
+            let pump_terminal = Arc::clone(&terminal);
+            let pump_events = events.clone();
+            let running = tokio::spawn(async move {
+                pump(&mut channel, token, size(), &pump_terminal, &pump_events, &mut input).await
+            });
+            wakes.recv().await.unwrap();
+            input_tx
+                .send(Msg::Input(b"\x1b[?2026h\x1b[2J\x1b[HFINAL OUTPUT".to_vec().into()))
+                .unwrap();
+            fixture.data.recv().await.unwrap();
+            wakes.recv().await.unwrap();
+            input_tx
+                .send(ending.map_or(Msg::Shutdown, |byte| Msg::Input(vec![byte].into())))
+                .unwrap();
+            let result = running.await.unwrap();
+            assert_eq!(result.is_ok(), ending != Some(b'\x03'));
+            let terminal = terminal.lock();
+            use nebula_terminal::index::{Column, Line};
+            let row: String = (0..terminal.columns())
+                .map(|column| terminal.grid()[Line(0)][Column(column)].c)
+                .collect();
+            assert_eq!(row.trim_end(), "FINAL OUTPUT");
+            drop(terminal);
+            fixture.forget(&acquired.session).await;
+        }
     });
 }
 
