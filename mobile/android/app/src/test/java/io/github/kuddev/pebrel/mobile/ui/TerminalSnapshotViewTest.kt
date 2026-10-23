@@ -795,9 +795,9 @@ class TerminalSnapshotViewTest {
         preferences.update { it.copy(desktopZoom = 3.125f) }
         fun restored() = view(row("████"), height = 300).apply {
             setFont(Typeface.MONOSPACE, preferences.state.value.fontSize)
-            restoreZoom(DisplayPreferences(context).state.value.desktopZoom)
-            onZoomCommitted = { value -> preferences.update { it.copy(desktopZoom = value) } }
-            onZoomChanged = { _, _ -> restoreZoom(preferences.state.value.desktopZoom) }
+            setZoomScale(DisplayPreferences(context).state.value.desktopZoom)
+            onZoomScaleChanged = { value -> preferences.update { it.copy(desktopZoom = value) } }
+            onZoomChanged = { _, _ -> setZoomScale(preferences.state.value.desktopZoom) }
         }
         val first = restored()
         val initial = colorBounds(render(first), red).height()

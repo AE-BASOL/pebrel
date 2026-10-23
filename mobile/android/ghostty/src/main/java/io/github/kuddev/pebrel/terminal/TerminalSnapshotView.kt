@@ -81,6 +81,9 @@ class TerminalSnapshotView(context: Context) : View(context) {
     }
     private var fontPixels = 14f * resources.displayMetrics.scaledDensity
     private var zoom = 1f
+    private var pinchInProgress = false
+    val zoomScale: Float get() = zoom
+    var onZoomScaleChanged: ((Float) -> Unit)? = null
     private var offsetX = 0f
     private var offsetY = 0f
     private var cellWidth = 1f
@@ -89,7 +92,6 @@ class TerminalSnapshotView(context: Context) : View(context) {
     private var multiTouch = false
     var pinchZoom = true
     var onZoomChanged: ((Int, Boolean) -> Unit)? = null
-    var onZoomCommitted: ((Float) -> Unit)? = null
     var pasteTarget: TerminalInputTarget? = null
     private var scrollRemainder = 0f
     var scrollTarget: TerminalInputTarget? = null
@@ -167,14 +169,12 @@ class TerminalSnapshotView(context: Context) : View(context) {
         invalidate()
     }
 
-    fun restoreZoom(value: Float) {
-        // 指示器会在手势中触发重组；旧偏好不得覆盖尚未提交的缩放比例。
-        if (scaling.isInProgress) return
-        val restored = normalizedSnapshotZoom(value)
-        if (zoom == restored) return
-        stopScrolling()
+    fun setZoomScale(value: Float) {
+        val bounded = normalizedSnapshotZoom(value)
+        if (pinchInProgress || zoom == bounded) return
         selection.clear()
-        zoom = restored
+        zoom = bounded
+        stopScrolling()
         metrics()
         reproject()
         constrainOffsets()
@@ -296,6 +296,7 @@ class TerminalSnapshotView(context: Context) : View(context) {
     private val scaling = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
             if (!pinchZoom) return false
+            pinchInProgress = true
             stopScrolling()
             reportZoom(true)
             return true
@@ -314,12 +315,14 @@ class TerminalSnapshotView(context: Context) : View(context) {
             reportZoom(true)
             return true
         }
-        override fun onScaleEnd(detector: ScaleGestureDetector) { reportZoom(false) }
+        override fun onScaleEnd(detector: ScaleGestureDetector) {
+            pinchInProgress = false
+            onZoomScaleChanged?.invoke(zoom)
+            reportZoom(false)
+        }
     })
 
     private fun reportZoom(gesturing: Boolean) {
-        // 保存精确比例而非取整后的有效字号，避免基础字号与比例在重组时重复相乘。
-        if (!gesturing) onZoomCommitted?.invoke(zoom)
         onZoomChanged?.invoke((fontPixels * zoom / resources.displayMetrics.scaledDensity).roundToInt(), gesturing)
     }
 
@@ -530,6 +533,7 @@ class TerminalSnapshotView(context: Context) : View(context) {
     private fun resetZoom() {
         stopScrolling()
         zoom = 1f
+        onZoomScaleChanged?.invoke(zoom)
         metrics(); reproject()
         offsetX = 0f; offsetY = 0f
         followOutput = true

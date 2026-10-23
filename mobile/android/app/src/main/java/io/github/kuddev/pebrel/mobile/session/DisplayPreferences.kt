@@ -26,8 +26,8 @@ data class TerminalPreferences(
     val suggestions: Boolean = true,
     val directInput: Boolean = true,
     val scrollbackLines: Int = 1000,
-    val desktopWrapLines: Boolean = false,
     val desktopZoom: Float = 1f,
+    val desktopWrapLines: Boolean = false,
 ) {
     /** Preserve the persisted contract when callers pass a stale or unknown value. */
     fun normalized(): TerminalPreferences = copy(
@@ -77,8 +77,8 @@ class DisplayPreferences(context: Context) {
             suggestions = stored.getBoolean("suggestions", true),
             directInput = stored.getBoolean("direct_input", true),
             scrollbackLines = stored.getInt("scrollback_lines", 1000),
-            desktopWrapLines = stored.getBoolean("desktop_wrap_lines", false),
             desktopZoom = stored.getFloat("desktop_zoom", 1f),
+            desktopWrapLines = stored.getBoolean("desktop_wrap_lines", false),
         ).normalized().let { it.copy(scrollbackLines = it.scrollbackLines.coerceAtMost(maxScrollbackLines)) },
     )
     val state = current.asStateFlow()
@@ -100,9 +100,9 @@ class DisplayPreferences(context: Context) {
             .putBoolean("pinch_zoom", current.value.pinchZoom)
             .putBoolean("suggestions", current.value.suggestions)
             .putBoolean("direct_input", current.value.directInput)
-            .putBoolean("desktop_wrap_lines", current.value.desktopWrapLines)
+            .putInt("scrollback_lines", current.value.scrollbackLines)
             .putFloat("desktop_zoom", current.value.desktopZoom)
-            .putInt("scrollback_lines", current.value.scrollbackLines).apply()
+            .putBoolean("desktop_wrap_lines", current.value.desktopWrapLines).apply()
     }
 
     fun update(transform: (TerminalPreferences) -> TerminalPreferences) {

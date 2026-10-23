@@ -2,7 +2,7 @@
 
 ## Status
 
-Implemented for review; the affected Robolectric suites pass. Physical Android
+Implemented for review with Robolectric regression coverage. Physical Android
 device acceptance remains separate.
 
 ## Context
@@ -52,7 +52,10 @@ the desktop PTY. Existing pixel feedback and single-finger interaction are retai
 repository recreation and second pinch. `TerminalSnapshotViewTest` covers exact
 scale restoration, stale reapplication during a gesture, rendered glyph size,
 double-tap reset, range normalization and preservation of the base font size.
-These suites plus `CommandComposerTest` pass: 54 tests, no failures or skips.
+Run these suites together with `CommandComposerTest` on a host supported by
+Robolectric's native graphics runtime. The reconciliation with current main retains
+its `zoomScale` callbacks and active-pinch protection; CI results for that revision
+are recorded in the pull request.
 
 ## Supersedes
 

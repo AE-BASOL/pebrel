@@ -54,8 +54,8 @@ internal fun DesktopOutputSurface(
     pasteTarget: TerminalInputTarget? = inputTarget,
     scrollTarget: TerminalInputTarget? = inputTarget,
     onHistoryPage: ((Long?) -> Unit)? = null,
-    zoom: Float? = null,
-    onZoom: (Float) -> Unit = {},
+    zoomScale: Float = 1f,
+    onZoomScale: (Float) -> Unit = {},
 ) {
     val legacyText = frame == null && text.isNotEmpty()
     var lastKeyboardRequest by remember(identity) { mutableIntStateOf(keyboardRequest) }
@@ -70,18 +70,18 @@ internal fun DesktopOutputSurface(
                     view.pasteTarget = null
                     view.scrollTarget = null
                     view.onZoomChanged = null
-                    view.onZoomCommitted = null
+                    view.onZoomScaleChanged = null
                     view.onHistoryPage = null
                     if (inputView === view) inputView = null
                 }, update = { view ->
                 inputView = view
                 val app = view.context.applicationContext as PebrelApplication
                 view.setFont(app.terminalTypeface(app.sessions.display.state.value.fontFamily), fontSize)
-                zoom?.let(view::restoreZoom)
                 view.pinchZoom = pinchZoom
+                view.setZoomScale(zoomScale)
+                view.onZoomScaleChanged = onZoomScale
                 view.wrapLines = wrapLines
                 view.onZoomChanged = zoomFeedback::update
-                view.onZoomCommitted = onZoom
                 view.frame = frame
                 view.contentDescription = frame?.text().orEmpty()
                 view.importantForAccessibility = if (legacyText) View.IMPORTANT_FOR_ACCESSIBILITY_NO
