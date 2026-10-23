@@ -401,6 +401,7 @@ impl NativeResult {
                 .and_then(|_| phase.detail.split_once('%'))
                 .map_or(phase.detail.as_str(), |(_, detail)| detail.trim());
             let item = div()
+                .id(("native-git-phase", index))
                 .debug_selector(|| "native-git-phase".into())
                 .flex()
                 .items_center()
