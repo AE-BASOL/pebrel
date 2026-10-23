@@ -854,8 +854,7 @@ impl TerminalView {
         true
     }
 
-    /// Manual selection uses the context menu. Copy-on-select keeps quick
-    /// copy/paste, while Ctrl+right-click always requests the menu.
+    /// 选中复制只控制左键松手；右键始终按选区复制或粘贴，Ctrl 保留显式菜单入口。
     pub(super) fn on_right_down(
         &mut self,
         event: &MouseDownEvent,
@@ -886,7 +885,7 @@ impl TerminalView {
             .as_ref()
             .and_then(|session| session.term.lock().selection_to_string())
             .filter(|text| !text.is_empty());
-        if event.modifiers.control || !self.copy_on_select {
+        if event.modifiers.control {
             cx.emit(TerminalViewEvent::SelectionContextMenuRequested {
                 position: event.position,
                 text: selected_text.unwrap_or_default(),

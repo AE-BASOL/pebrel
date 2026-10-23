@@ -273,6 +273,7 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_JobObjects",
     "Win32_System_LibraryLoader",
     "Win32_System_SystemInformation",
+    "Win32_System_SystemServices",
     # A single process snapshot includes creation times even for protected
     # processes, so reused parent PIDs cannot attach unrelated processes to a pane.
     "Wdk_System_SystemInformation",
