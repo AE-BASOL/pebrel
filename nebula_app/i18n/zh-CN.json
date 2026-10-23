@@ -1575,5 +1575,7 @@
     "save_failed": "效果列表保存失败，请检查设置目录的写入权限后重试。",
     "advanced": "高级效果",
     "advanced_active": "高级效果 · 终端效果已启用"
-  }
+  },
+  "terminal.ssh_disconnected": "连接已断开，按 R 重新连接。",
+  "terminal.ssh_reconnect": "重新连接 (R)"
 }
