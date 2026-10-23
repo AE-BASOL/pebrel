@@ -6,7 +6,7 @@ use nebula_settings::AgentHook;
 
 use crate::ai_agents::AgentKind;
 
-pub(crate) const AGENTS: [AgentKind; 14] = [
+pub(crate) const AGENTS: [AgentKind; 15] = [
     AgentKind::Claude,
     AgentKind::Codex,
     AgentKind::OpenCode,
@@ -21,6 +21,7 @@ pub(crate) const AGENTS: [AgentKind; 14] = [
     AgentKind::Qwen,
     AgentKind::Droid,
     AgentKind::Antigravity,
+    AgentKind::Hermes,
 ];
 
 #[derive(Clone, Debug, Default)]
@@ -221,5 +222,20 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir(dir.path().join("claude")).unwrap();
         assert_eq!(find_executable(AgentKind::Claude, &[dir.path().to_path_buf()]), None);
+    }
+
+    #[test]
+    fn hermes_entry_discovers_the_cli_without_claiming_hook_support() {
+        assert!(AGENTS.contains(&AgentKind::Hermes));
+        assert_eq!(hook_for(AgentKind::Hermes), None);
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("hermes/bin");
+        let path = executable(&bin, "hermes");
+        assert_eq!(find_executable(AgentKind::Hermes, &[bin.clone()]), Some(path.clone()));
+        std::fs::remove_file(path).unwrap();
+        std::fs::create_dir(bin.join("hermes")).unwrap();
+        assert_eq!(find_executable(AgentKind::Hermes, &[bin]), None);
+        assert_eq!(AgentKind::parse_command("hermes"), Some(AgentKind::Hermes));
+        assert_eq!(AgentKind::parse("HERMES.EXE"), Some(AgentKind::Hermes));
     }
 }
