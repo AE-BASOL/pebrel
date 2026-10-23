@@ -264,6 +264,7 @@ impl TerminalView {
         ];
 
         let mut view = Self {
+            native_results: Default::default(),
             pane_id,
             session,
             focus_handle,
