@@ -371,6 +371,7 @@
       "not_detected": "Not installed",
       "config_detected": "Agent configuration detected",
       "unsupported": "Hook integration not available yet",
+      "process_detection": "Process detection",
       "unavailable": "Unavailable",
       "needs_attention": "Needs attention",
       "restart": "Changes apply when you restart the agent. These controls manage agents installed on this computer.",

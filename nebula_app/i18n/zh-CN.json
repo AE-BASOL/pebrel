@@ -371,6 +371,7 @@
       "not_detected": "未安装",
       "config_detected": "已检测到工具配置",
       "unsupported": "尚未提供 hook 接入",
+      "process_detection": "进程识别",
       "unavailable": "不可用",
       "needs_attention": "需要检查",
       "restart": "更改将在重启 Agent 后生效。这里管理安装在本机的 Agent。",
