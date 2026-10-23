@@ -2,7 +2,7 @@
 
 use std::sync::{
     Arc, Mutex, OnceLock,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 
 use crate::directory_history::DirectoryHistory;
@@ -333,7 +333,24 @@ impl Request {
 pub(crate) fn cache_key(cwd: &str, env: &SuggestEnv, line: &str, style: CompletionStyle) -> String {
     let commands = crate::display::nebula_commands_handle();
     let generation = commands.lock().map(|commands| commands.len()).unwrap_or(0);
-    suggest_engine::suggestion_key(&Input { cwd, env, line }, style, generation)
+    let key = suggest_engine::suggestion_key(&Input { cwd, env, line }, style, generation);
+    format!("{key}\0history={}", history_revision())
+}
+
+static HISTORY_REVISION: AtomicU64 = AtomicU64::new(0);
+
+/// Reading the revision never initializes history or performs filesystem I/O.
+pub(crate) fn history_revision() -> u64 {
+    HISTORY_REVISION.load(Ordering::Acquire)
+}
+
+/// Run on a worker. The shared lock orders file removal with concurrent records.
+pub(crate) fn clear_command_history() -> Result<(), String> {
+    let mut history = shared().history.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let result = history.clear_at(&crate::platform::dirs::data_dir());
+    // Even a partial clear invalidates every pending query and cached result.
+    HISTORY_REVISION.fetch_add(1, Ordering::Release);
+    result
 }
 
 pub(crate) fn record_command(scope: &HistoryScope, line: &str, cwd: &str) {

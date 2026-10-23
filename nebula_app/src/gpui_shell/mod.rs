@@ -24,6 +24,7 @@ macro_rules! eprintln {
 
 mod assets;
 pub mod code_tab;
+pub(crate) mod completion_history;
 pub mod config;
 pub(crate) mod copy_feedback;
 pub mod doc_tabs;
