@@ -872,6 +872,83 @@ fn ssh_unfinished_synchronized_output_is_preserved_on_exit_disconnect_and_shutdo
 }
 
 #[test]
+fn ssh_queued_unmarked_redraw_publishes_once_and_preserves_split_text() {
+    check(async {
+        let fixture = Fixture::new(Mode::Open).await;
+        let acquired = fixture.connect().await;
+        let (wake_tx, mut wakes) = mpsc::unbounded_channel();
+        let events = Events { wakeups: Some(wake_tx), ..Default::default() };
+        let terminal = terminal(&events);
+        let (mut channel, token) = open_shell(&acquired, size(), None, &events).await.unwrap();
+        channel.pending.clear();
+        // An already received redraw has no frame markers. Packet boundaries
+        // must not each trigger a separate display update or alter UTF-8/VT order.
+        for row in 0..100 {
+            channel.pending.push_back(ChannelMsg::Data {
+                data: format!("\r\nEARLY HISTORY {row:03}").into_bytes().into(),
+            });
+        }
+        let final_frame = "\x1b[2J\x1b[HLATEST 中文".as_bytes();
+        for bytes in final_frame.chunks(3) {
+            channel.pending.push_back(ChannelMsg::ExtendedData { data: bytes.into(), ext: 1 });
+        }
+        let (input_tx, mut input) = mpsc::unbounded_channel();
+        input_tx.send(Msg::Shutdown).unwrap();
+        pump(&mut channel, token, size(), &terminal, &events, &mut input).await.unwrap();
+        let mut wakeups = 0;
+        while wakes.try_recv().is_ok() {
+            wakeups += 1;
+        }
+        assert_eq!(wakeups, 1, "one queued redraw produced {wakeups} display updates");
+        use nebula_terminal::index::{Column, Line};
+        let terminal = terminal.lock();
+        let row: String = (0..terminal.columns())
+            .map(|column| terminal.grid()[Line(0)][Column(column)].c)
+            .collect();
+        assert!(row.starts_with("LATEST 中 文"), "{row:?}");
+        drop(terminal);
+        fixture.forget(&acquired.session).await;
+    });
+}
+
+#[test]
+fn ssh_output_batches_yield_at_control_messages_and_work_limits() {
+    check(async {
+        let fixture = Fixture::new(Mode::Open).await;
+        let acquired = fixture.connect().await;
+        let events = Events::default();
+        let terminal = terminal(&events);
+        let (mut channel, _) = open_shell(&acquired, size(), None, &events).await.unwrap();
+        let mut stream = StreamProcessor::default();
+
+        for count in [1usize, 127, 128, 256] {
+            channel.pending =
+                (0..count).map(|_| ChannelMsg::Data { data: b"x".as_slice().into() }).collect();
+            channel.pending.push_back(ChannelMsg::Eof);
+            channel.pending.push_back(ChannelMsg::ExitStatus { exit_status: 0 });
+            let first = channel.pending.pop_front().unwrap();
+            feed_ready_output(&mut channel, first, &mut stream, &terminal, &events);
+            let remaining_data = count.saturating_sub(128);
+            assert_eq!(channel.pending.len(), remaining_data + 2);
+            if remaining_data == 0 {
+                assert!(matches!(channel.next_message().await, Some(ChannelMsg::Eof)));
+                assert!(matches!(
+                    channel.next_message().await,
+                    Some(ChannelMsg::ExitStatus { .. })
+                ));
+            }
+        }
+
+        channel.pending =
+            (0..8).map(|_| ChannelMsg::Data { data: vec![b'\r'; 32 * 1024].into() }).collect();
+        let first = channel.pending.pop_front().unwrap();
+        feed_ready_output(&mut channel, first, &mut stream, &terminal, &events);
+        assert_eq!(channel.pending.len(), 6, "large packets must yield at the byte budget");
+        fixture.forget(&acquired.session).await;
+    });
+}
+
+#[test]
 fn unexpected_disconnect_preserves_pane_but_explicit_exit_closes_it() {
     check(async {
         for mode in [Mode::DropWithoutStatus, Mode::ExitAfterEof] {
