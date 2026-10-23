@@ -15,7 +15,7 @@ mod editor;
 mod image_paste;
 mod layout;
 mod native_clipboard;
-#[cfg(all(test, windows, feature = "gpui-test-support"))]
+#[cfg(all(test, feature = "gpui-test-support"))]
 mod native_clipboard_tests;
 #[cfg(all(test, windows, feature = "gpui-test-support"))]
 mod native_cmd_tests;

@@ -155,6 +155,10 @@ async fn run_cases(
     // PSReadLine Paste strips CR and expands tabs to four spaces. Assert its
     // native semantics, including here-string contents, rather than raw bytes.
     buffer(cx, window, view, "Write-Output @'\nclipboard    中文😀\nline two\n'@\n").await?;
+    wait_for(cx, window, view, |view| {
+        view.runtime_screen_state().is_some_and(|(text, _)| text.contains("中文😀"))
+    })
+    .await?;
     key(cx, window, view, "ctrl-c").await?;
     wait_for(cx, window, view, |view| view.native_clipboard_ready()).await?;
     buffer(cx, window, view, "").await?;
@@ -198,6 +202,7 @@ async fn run_cases(
         "one_undo_and_redo": true,
         "explicit_enter_executed_once": true,
         "native_tab_normalization_unicode_and_newlines": true,
+        "visible_unicode": true,
         "cancel": true,
         "middle_insertion": true,
         "middle_buffer": expected,
@@ -207,6 +212,10 @@ async fn run_cases(
 #[test]
 #[ignore = "requires Windows desktop and fresh PEBREL_NATIVE_CLIPBOARD_QA_DIR/config"]
 fn native_clipboard_shell_end_to_end() {
+    assert!(
+        crate::platform::CAPABILITIES.native_shell_clipboard,
+        "requires a supported native shell editor"
+    );
     let output = PathBuf::from(std::env::var_os("PEBREL_NATIVE_CLIPBOARD_QA_DIR").unwrap());
     assert!(output.is_absolute());
     assert_eq!(
@@ -217,26 +226,7 @@ fn native_clipboard_shell_end_to_end() {
     std::fs::create_dir_all(output.join("config")).unwrap();
     let program =
         std::env::var("PEBREL_TEST_POWERSHELL").unwrap_or_else(|_| "powershell.exe".into());
-    let shell = nebula_terminal::tty::powershell_with_nebula_integration(
-        program.clone(),
-        vec!["-NoLogo".into(), "-NoProfile".into()],
-    );
-    let mut args = shell.args().to_vec();
-    let result_file = output.join("execution.txt").to_string_lossy().replace('\'', "''");
-    args.last_mut().unwrap().push_str(&format!(r#";
-Set-PSReadLineOption -HistorySaveStyle SaveNothing
-if ((Get-Command Set-PSReadLineOption).Parameters.ContainsKey('PredictionSource')) {{ Set-PSReadLineOption -PredictionSource None }}
-function global:PasteFixture {{ param($value); [IO.File]::AppendAllText('{result_file}', "$value`n") }}
-@{{ powershell=$PSVersionTable.PSVersion.ToString(); psreadline=(Get-Module PSReadLine).Version.ToString(); editor=$global:PebrelCompletionInputReady; clipboard=(Get-PebrelClipboardCapability) }} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $env:PEBREL_NATIVE_CLIPBOARD_QA_DIR 'shell.json')
-"#));
-    // Explicit launch arguments are command-line text. A BOM-marked file keeps
-    // quoting/newlines intact on both Windows PowerShell and PowerShell 7.
-    let startup = args.pop().unwrap();
-    let startup_path = output.join("clipboard-startup.ps1");
-    std::fs::write(&startup_path, format!("\u{feff}{startup}\n")).unwrap();
-    *args.last_mut().unwrap() = "-File".into();
-    args.push(format!("\"{}\"", startup_path.display()));
-    let shell = nebula_terminal::tty::Shell::new(shell.program().into(), args);
+    let shell = crate::platform::shell::native_clipboard_qa_shell(program.clone(), &output);
     let result = Arc::new(Mutex::new(None));
     let after = result.clone();
     gpui_platform::application().with_assets(crate::gpui_shell::assets::NebulaAssets).run(

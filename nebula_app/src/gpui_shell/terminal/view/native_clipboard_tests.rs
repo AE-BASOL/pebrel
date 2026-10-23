@@ -37,23 +37,40 @@ fn input(receiver: &std::sync::mpsc::Receiver<Msg>) -> Vec<u8> {
 
 #[gpui::test]
 fn native_clipboard_broadcast_keeps_multiline_input_unsubmitted(cx: &mut TestAppContext) {
+    let supported = crate::platform::CAPABILITIES.native_shell_clipboard;
     for native_input in [true, false] {
         let (view, window, receiver) = open(cx);
         view.update(window, |view, cx| {
             ready(view, cx);
-            if !native_input { feed(view, b"\x1b[?9001l"); }
+            if !native_input {
+                feed(view, b"\x1b[?9001l");
+            }
             for _ in 0..2 {
-                assert!(view.native_clipboard_ready(), "consecutive pastes retain the prompt");
-                assert_eq!(cx.read_from_clipboard().and_then(|clip| clip.text()).as_deref(), Some(TEXT));
-                view.apply_broadcast_text(TEXT, true, cx);
-                assert!(!view.command_running, "a native clipboard paste has not accepted the input");
-                assert!(view.suggest.last_committed.is_empty());
                 assert_eq!(
-                    input(&receiver),
-                    keymap::encode(&gpui::Keystroke::parse("ctrl-shift-f11").unwrap(), &view.term_mode())
-                        .unwrap(),
-                    "delegate one paste to the verified editor instead of sending Enter for every line"
+                    view.native_clipboard_ready(),
+                    supported,
+                    "consecutive pastes retain editor admission"
                 );
+                assert_eq!(
+                    cx.read_from_clipboard().and_then(|clip| clip.text()).as_deref(),
+                    Some(TEXT)
+                );
+                view.apply_broadcast_text(TEXT, true, cx);
+                let expected = if supported {
+                    assert!(
+                        !view.command_running,
+                        "a native clipboard paste has not accepted the input"
+                    );
+                    assert!(view.suggest.last_committed.is_empty());
+                    keymap::encode(
+                        &gpui::Keystroke::parse("ctrl-shift-f11").unwrap(),
+                        &view.term_mode(),
+                    )
+                    .unwrap()
+                } else {
+                    TEXT.replace("\r\n", "\r").into_bytes()
+                };
+                assert_eq!(input(&receiver), expected);
             }
         });
     }
@@ -78,22 +95,28 @@ fn native_clipboard_does_not_retarget_stale_owner_or_remote_input(cx: &mut TestA
 }
 
 #[gpui::test]
-fn native_clipboard_action_reaches_the_editor_without_a_confirmation_dialog(
-    cx: &mut TestAppContext,
-) {
+fn native_clipboard_action_is_admitted_only_on_supported_hosts(cx: &mut TestAppContext) {
     let (view, window, receiver) = open(cx);
     window.update(|window, cx| {
         view.update(cx, |view, cx| {
             ready(view, cx);
-            view.paste(window, cx);
-            assert_eq!(
-                input(&receiver),
-                keymap::encode(
-                    &gpui::Keystroke::parse("ctrl-shift-f11").unwrap(),
-                    &view.term_mode()
-                )
-                .unwrap()
-            );
+            if crate::platform::CAPABILITIES.native_shell_clipboard {
+                view.paste(window, cx);
+                assert_eq!(
+                    input(&receiver),
+                    keymap::encode(
+                        &gpui::Keystroke::parse("ctrl-shift-f11").unwrap(),
+                        &view.term_mode()
+                    )
+                    .unwrap()
+                );
+            } else {
+                assert!(!view.try_native_clipboard_paste(TEXT, true, cx));
+                assert!(
+                    input(&receiver).is_empty(),
+                    "unsupported hosts never dispatch the native chord"
+                );
+            }
             assert!(!view.command_running);
         });
     });

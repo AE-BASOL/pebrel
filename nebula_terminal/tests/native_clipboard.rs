@@ -11,17 +11,26 @@ Import-Module PSReadLine
 $global:PebrelShellToken = 'fixture-owner'
 Set-PSReadLineOption -EditMode Windows
 {script}
-if ((Get-PebrelClipboardBinding).Function -ne 'Paste') {{ throw 'native handler not installed' }}
+if ((Get-PebrelClipboardBinding).Function -ne $global:PebrelClipboardHandlerName) {{ throw 'native handler not installed' }}
 if ((Get-PebrelClipboardCapability) -ne 'fixture-owner') {{ throw 'missing owner capability' }}
 {script}
-if ((Get-PebrelClipboardBinding).Function -ne 'Paste') {{ throw 'reload changed native binding' }}
+if ((Get-PebrelClipboardBinding).Function -ne $global:PebrelClipboardHandlerName) {{ throw 'reload changed native binding' }}
+Set-PSReadLineKeyHandler -Chord Ctrl+Shift+F11 -BriefDescription Paste -ScriptBlock {{ }}
+if ((Get-PebrelClipboardCapability) -ne '') {{ throw 'user script named Paste was mistaken for native Paste' }}
+{script}
+if ((Get-PebrelClipboardBinding).Function -ne 'Paste') {{ throw 'same-name user handler was replaced' }}
+if ((Get-PebrelClipboardCapability) -ne '') {{ throw 'reload claimed the user script named Paste' }}
+Set-PSReadLineKeyHandler -Chord Ctrl+Shift+F11 -Function Paste
+{script}
+if ((Get-PebrelClipboardBinding).Function -ne 'Paste') {{ throw 'user-owned native binding was replaced' }}
+if ((Get-PebrelClipboardCapability) -ne '') {{ throw 'user-owned native binding was claimed' }}
 Set-PSReadLineKeyHandler -Chord Ctrl+Shift+F11 -Function SelfInsert
 if ((Get-PebrelClipboardCapability) -ne '') {{ throw 'capability survived a changed binding' }}
 {script}
 if ((Get-PebrelClipboardBinding).Function -ne 'SelfInsert') {{ throw 'user binding was replaced' }}
 Set-PSReadLineOption -EditMode Vi
 {script}
-if ((Get-PebrelClipboardBinding).Function -eq 'Paste') {{ throw 'Vi keymap was changed despite being unsupported' }}
+if ((Get-PebrelClipboardBinding).Function -eq $global:PebrelClipboardHandlerName) {{ throw 'Vi keymap was changed despite being unsupported' }}
 if ((Get-PebrelClipboardCapability) -ne '') {{ throw 'Vi map advertised a stable native binding' }}
 Set-PSReadLineOption -EditMode Emacs
 {script}

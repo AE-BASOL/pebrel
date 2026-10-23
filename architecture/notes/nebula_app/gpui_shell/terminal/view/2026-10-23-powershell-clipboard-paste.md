@@ -30,8 +30,13 @@ explains why a terminal must not infer protocol support from the shell name.
 ## Decision
 
 [`clipboard.ps1`](../../../../../../nebula_terminal/src/tty/clipboard.ps1) installs
-PSReadLine's built-in Paste on Ctrl+Shift+F11 only when that chord is unbound.
-Every prompt rechecks the active binding and reports `pebrel_clipboard_ready`
+a delegate to PSReadLine's built-in Paste on Ctrl+Shift+F11 only when that chord
+is unbound. The handler's name carries the shell instance token: PSReadLine lets
+user scripts use the name `Paste`, so that display name alone cannot establish
+ownership. The public `SetKeyHandler` API receives a native `Action` delegate to
+`PSConsoleReadLine.Paste`, without a PowerShell pipeline, another clipboard
+reader or a second insertion algorithm.
+Every prompt rechecks the owned binding and reports `pebrel_clipboard_ready`
 with the current `pebrel_shell` token, or an empty value to revoke capability.
 Vi mode is excluded because its active keymap can change without another prompt.
 Existing user bindings retain ownership.
@@ -39,8 +44,9 @@ Existing user bindings retain ownership.
 [`native_clipboard.rs`](../../../../../../nebula_app/src/gpui_shell/terminal/view/native_clipboard.rs)
 owns the UI admission state. A new shell report, including the same token at the
 next prompt, clears the previous capability. Command start also clears it.
-Admission requires the current shell owner, a local Windows environment and an
-active prompt without a foreground Agent, executing command, alternate screen,
+The platform capability table owns host support, leaving platform compilation
+branches out of the view. Admission requires the current shell owner, a local
+Windows environment and an active prompt without a foreground Agent, executing command, alternate screen,
 terminal Vi mode, bracketed paste or Kitty keyboard protocol.
 
 The view delegates only when the current OS clipboard text still matches the
@@ -68,6 +74,9 @@ satisfy the Runtime API's bracketed-paste requirement.
   invokes other bindings for tabs/control characters and splits native Undo.
 - Replace PSReadLine Paste with another clipboard reader/insertion handler:
   duplicates the editor's selection, normalization and Undo semantics.
+- Invoke Paste through a PowerShell ScriptBlock: the tested sessions retained
+  Unicode in the editor buffer but rendered emoji and the continuation prompt
+  as question marks. Direct native delegate registration preserves rendering.
 
 ## Consequences
 
@@ -86,24 +95,29 @@ Other shells, remote sessions and foreground applications keep their contracts.
 The [GPUI regressions](../../../../../../nebula_app/src/gpui_shell/terminal/view/native_clipboard_tests.rs)
 exercise the clipboard action, consecutive native/VT broadcast delivery, current owner, capability
 revocation, command start, changed clipboard, remote context and negotiated modes.
+They also verify rejection and original-text fallback on unsupported hosts.
 The [binding test](../../../../../../nebula_terminal/tests/native_clipboard.rs) runs
 real PSReadLine keymaps and checks installation, reload, preserved user handlers,
-revocation, Vi exclusion and Emacs support.
+revocation, Vi exclusion and Emacs support. A same-name user script regression
+fails with the original `Function == Paste` check and remains unclaimed after
+reload with the owned handler marker, as does a user-assigned built-in Paste.
 
 The opt-in [Windows acceptance fixture](../../../../../../nebula_app/src/gpui_shell/terminal/view/native_clipboard_tests/acceptance.rs)
-uses a fresh configuration, the real clipboard, GPUI and ConPTY. It checks the
+uses a fresh configuration, the real clipboard, GPUI and ConPTY. Its Windows
+shell bootstrap belongs to the existing platform shell adapter. It checks the
 native buffer, no execution before Enter, one Undo/Redo, explicit execution,
-here-strings, Unicode, tab normalization, cancellation and insertion at the caret.
+here-strings, Unicode in both the editor buffer and visible grid, tab normalization,
+cancellation and insertion at the caret.
 It drives the product input callbacks and can capture its native window; this
 does not claim physical keyboard hardware or every custom editor was tested.
 Clipboard cleanup restores the previous contents only while the fixture still
 owns the current text.
 
 Native acceptance was run on Windows x64 with Windows PowerShell 5.1 / PSReadLine
-2.0.0 and PowerShell 7.6.8 / PSReadLine 2.4.5. PowerShell 7 was checked with both
-in-box ConPTY and the repository-pinned ConPTY runtime, and with translated VT
-key delivery. Owned native windows were inspected at 96 DPI for in-box ConPTY
-and at 192 DPI for PowerShell 7 with bundled ConPTY. Other operating systems,
+2.0.0 and PowerShell 7.6.8 / PSReadLine 2.4.5. Both versions were checked with
+in-box ConPTY and the repository-pinned ConPTY runtime; PowerShell 7 also used
+translated VT key delivery. Owned native windows were inspected at 192 DPI.
+Other operating systems,
 display scales and physical keyboard hardware are outside this evidence.
 
 ## Supersedes

@@ -27,7 +27,7 @@ impl NativeClipboard {
 
 impl TerminalView {
     pub(super) fn native_clipboard_ready(&self) -> bool {
-        if !cfg!(windows)
+        if !crate::platform::CAPABILITIES.native_shell_clipboard
             || self.exited.is_some()
             || self.ssh_destination.is_some()
             || !self.suggest.suggest_env.is_this_machine()
