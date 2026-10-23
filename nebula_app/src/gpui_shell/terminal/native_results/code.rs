@@ -286,6 +286,7 @@ impl Render for Code {
                             _ => None,
                         };
                         div()
+                            .id(("native-diff-row", index))
                             .absolute()
                             .left_0()
                             .right_0()
