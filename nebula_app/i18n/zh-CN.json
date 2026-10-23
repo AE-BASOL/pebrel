@@ -1,5 +1,9 @@
 {
   "native_result": {
+    "diff_expand": "展开文件差异",
+    "diff_collapse": "折叠文件差异",
+    "diff_invalid": "此差异无法按双列行号显示，已保留原文。",
+    "diff_limit": "此差异超过显示限额，可查看完整保留的原文。",
     "fold_expand": "已省略 {count} 行 · 展开",
     "fold_collapse": "收起中间 {count} 行",
     "view": "视图",
@@ -371,6 +375,7 @@
       "not_detected": "未安装",
       "config_detected": "已检测到工具配置",
       "unsupported": "尚未提供 hook 接入",
+      "process_detection": "进程识别",
       "unavailable": "不可用",
       "needs_attention": "需要检查",
       "restart": "更改将在重启 Agent 后生效。这里管理安装在本机的 Agent。",

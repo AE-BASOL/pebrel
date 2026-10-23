@@ -1,5 +1,9 @@
 {
   "native_result": {
+    "diff_expand": "Expand file diff",
+    "diff_collapse": "Collapse file diff",
+    "diff_invalid": "This diff cannot be displayed with paired line numbers. Showing the original source.",
+    "diff_limit": "This diff exceeds the display limit. Full retained source remains available.",
     "fold_expand": "{count} lines omitted · Expand",
     "fold_collapse": "Collapse the middle {count} lines",
     "view": "View",
@@ -371,6 +375,7 @@
       "not_detected": "Not installed",
       "config_detected": "Agent configuration detected",
       "unsupported": "Hook integration not available yet",
+      "process_detection": "Process detection",
       "unavailable": "Unavailable",
       "needs_attention": "Needs attention",
       "restart": "Changes apply when you restart the agent. These controls manage agents installed on this computer.",
