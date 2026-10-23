@@ -2,6 +2,7 @@ use serde_json::Value;
 use std::cmp::Ordering;
 use std::ops::Range;
 
+pub(crate) mod diff;
 mod directory;
 pub(crate) use directory::{FileKind, FileMetadata};
 

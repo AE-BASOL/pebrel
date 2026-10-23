@@ -152,7 +152,8 @@ impl Session {
         } else {
             None
         };
-        let connections = local.then(|| self.connections.clone());
+        let connections = connections::Scope::capture(&env, execution)
+            .map(|scope| (self.connections.clone(), scope));
         Request { cwd, env, line, cursor, style, git, semantic, scripts, connections, syntax }
     }
 }
@@ -167,7 +168,7 @@ pub(crate) struct Request {
     git: Option<(Arc<crate::git_completion::Cache>, metadata::Execution)>,
     semantic: Option<SemanticContext>,
     scripts: Option<(Arc<project_scripts::Cache>, metadata::Execution)>,
-    connections: Option<Arc<connections::Cache>>,
+    connections: Option<(Arc<connections::Cache>, connections::Scope)>,
     syntax: ShellSyntax,
 }
 
@@ -209,9 +210,12 @@ impl Request {
                 })
             },
             Source::SshHosts { .. } | Source::WslDistributions => {
-                Some(self.connections.as_ref().map_or_else(Vec::new, |cache| {
-                    cache.complete(&self.cwd, context, &|| cancellation.is_cancelled())
-                }))
+                self.connections.as_ref().map_or_else(
+                    || Some(Vec::new()),
+                    |(cache, scope)| {
+                        cache.complete(&self.cwd, context, scope, &|| cancellation.is_cancelled())
+                    },
+                )
             },
             Source::None | Source::Paths { .. } => Some(Vec::new()),
         });
@@ -359,6 +363,63 @@ pub(crate) fn history_hint_for_test(scope: &HistoryScope, prefix: &str) -> Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires an owned WSL distribution and an isolated SSH config fixture"]
+    fn wsl_ssh_completion_reads_the_captured_guest_config() {
+        assert_eq!(crate::platform::Platform::current(), crate::platform::Platform::Windows);
+        let distro = std::env::var("PEBREL_WSL_SSH_QA_DISTRO").unwrap();
+        let user = std::env::var("PEBREL_WSL_SSH_QA_USER").unwrap();
+        let config = std::env::var("PEBREL_WSL_SSH_QA_CONFIG").unwrap();
+        assert!(config.starts_with('/') && !config.contains('\''));
+        let execution = PaneExecContext::from_pty_options(&nebula_terminal::tty::Options {
+            shell: Some(nebula_terminal::tty::Shell::new(
+                "wsl.exe".into(),
+                vec!["-d".into(), distro.clone(), "-u".into(), user],
+            )),
+            ..Default::default()
+        });
+        let session = Session::default();
+        let env = SuggestEnv::Wsl { distro };
+        let query = |line: &str, style, cancellation: &Cancellation| {
+            session
+                .request_with_syntax(
+                    "/".into(),
+                    env.clone(),
+                    line.into(),
+                    line.len(),
+                    style,
+                    Some(&execution),
+                    Some(ShellSyntax::Posix),
+                )
+                .calculate(cancellation)
+        };
+        let line = format!("ssh -F '{config}' me@pebrel-qa-pr");
+        for style in [CompletionStyle::Inline, CompletionStyle::Popup, CompletionStyle::Hybrid] {
+            let result = query(&line, style, &Cancellation::default());
+            if style == CompletionStyle::Popup {
+                assert_eq!(result.completion_items.len(), 1);
+                assert_eq!(result.completion_items[0].insert, "oduction");
+            } else {
+                assert_eq!(result.suggestion, "oduction");
+            }
+        }
+        let jump = format!("ssh -F '{config}' -J me@pebrel-qa-pr");
+        assert_eq!(
+            query(&jump, CompletionStyle::Popup, &Cancellation::default()).completion_items[0]
+                .insert,
+            "oduction"
+        );
+        assert!(
+            query("ssh -F none pebrel-qa-", CompletionStyle::Popup, &Cancellation::default())
+                .completion_items
+                .is_empty()
+        );
+        session.invalidate();
+        let cancelled = Cancellation::default();
+        cancelled.cancel();
+        assert!(query(&line, CompletionStyle::Popup, &cancelled).completion_items.is_empty());
+    }
 
     #[test]
     fn unavailable_foreign_metadata_keeps_scoped_history_without_host_fallback() {

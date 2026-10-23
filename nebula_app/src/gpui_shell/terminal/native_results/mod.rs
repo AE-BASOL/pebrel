@@ -20,10 +20,11 @@ use nebula_terminal::grid::{Dimensions as _, GridCell as _};
 use nebula_terminal::index::{Column, Point};
 use nebula_terminal::inline_content::{Status, Surface};
 use nebula_terminal::term::TermMode;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Weak};
 
 mod code;
+mod diff;
 mod fold;
 mod markdown;
 mod table;
@@ -120,6 +121,8 @@ pub(super) struct NativeResult {
     markdown: Entity<TextViewState>,
     extensions: MarkdownExtensions,
     code_blocks: HashMap<usize, Entity<code::Code>>,
+    diff: Option<Arc<model::diff::Patch>>,
+    collapsed_files: HashSet<usize>,
     table: Option<Arc<model::Table>>,
     table_layout: table::Layout,
     table_scroll: gpui::ScrollHandle,
@@ -206,6 +209,8 @@ impl NativeResult {
             markdown: cx.new(|cx| TextViewState::markdown("", cx)),
             extensions,
             code_blocks: HashMap::new(),
+            diff: None,
+            collapsed_files: HashSet::new(),
             table: None,
             table_layout: table::Layout::default(),
             table_scroll: gpui::ScrollHandle::new(),
@@ -240,6 +245,8 @@ impl NativeResult {
             self.table = None;
             self.table_layout = table::Layout::default();
             self.code_blocks.clear();
+            self.diff = None;
+            self.collapsed_files.clear();
             self.order.clear();
             self.task = None;
             self.query_epoch += 1;
@@ -263,13 +270,12 @@ impl NativeResult {
                 self.git.feed(&chunk.text, chunk.stderr);
             }
         }
-        if matches!(self.mime.as_ref(), "text/x-diff" | "text/x-git-output") {
+        if self.mime.as_ref() == "text/x-git-output" {
             // 使用长于正文反引号序列的围栏，文件名/日志内容不会改变文档结构。
             let fence = "`".repeat(
                 self.raw.text.split(|c| c != '`').map(str::len).max().unwrap_or(0).max(2) + 1,
             );
-            let language = if self.mime.as_ref() == "text/x-diff" { "diff" } else { "text" };
-            let source = format!("{fence}{language}\n{}\n{fence}\n", self.raw.text);
+            let source = format!("{fence}text\n{}\n{fence}\n", self.raw.text);
             self.markdown = cx.new(|cx| TextViewState::markdown(&source, cx));
         }
         if self.status != Status::Receiving {
@@ -277,6 +283,9 @@ impl NativeResult {
         }
         if self.status == Status::Limited {
             self.notice = Some(Message::NativeResultLimit);
+        }
+        if self.mime.as_ref() == "text/x-diff" && self.status != Status::Receiving {
+            self.parse_diff(source.has_grid_source(), cx);
         }
         if matches!(
             self.mime.as_ref(),
@@ -522,7 +531,8 @@ impl Render for NativeResult {
             self.raw_element(cx)
         } else {
             match self.mime.as_ref() {
-                "text/markdown" | "text/x-diff" | "text/x-git-output" => {
+                "text/x-diff" => self.diff_element(window, cx),
+                "text/markdown" | "text/x-git-output" => {
                     // 输出中的远程图片/HTML不能因预览而悄悄发起请求或读取本地文件。
                     div()
                         .w_full()

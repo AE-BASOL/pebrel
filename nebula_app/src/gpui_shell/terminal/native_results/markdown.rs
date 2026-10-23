@@ -115,6 +115,7 @@ pub(super) fn extensions(owner: gpui::WeakEntity<NativeResult>) -> MarkdownExten
                             language: code.lang.clone().unwrap_or_default().into(),
                             offset,
                             lines: code.value.lines().count().max(1),
+                            diff_rows: None,
                         },
                     )
                 },
