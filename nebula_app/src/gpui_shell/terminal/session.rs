@@ -32,6 +32,14 @@ impl EventListener for EventProxy {
     fn send_event(&self, event: Event) {
         self.events.send(event);
     }
+
+    fn command_view(
+        &self,
+        shell: &str,
+        command: &str,
+    ) -> Option<nebula_terminal::inline_content::CommandView> {
+        crate::command_lenses::classify(shell, command)
+    }
 }
 
 impl crate::ssh_session::SshEventHost for EventProxy {

@@ -51,6 +51,7 @@ mod chemistry;
 mod cli;
 mod clipboard;
 mod codex_config;
+mod command_lenses;
 mod completion;
 mod completion_context;
 mod config;
