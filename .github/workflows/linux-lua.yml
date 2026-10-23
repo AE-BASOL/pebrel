@@ -171,6 +171,8 @@ jobs:
           ./scripts/prepare-windows-runtime.ps1 -Destination assets/windows/conhost -Architecture $architecture
           ./scripts/tests/windows-runtime.tests.ps1 -Architecture $architecture
       - name: Test complete workspace and native harness
+        env:
+          NEXTEST_SUCCESS_OUTPUT: immediate
         run: python scripts/ci_native_tests.py --runner nextest
       - name: Test native Linux silent startup and window residency
         if: ${{ runner.os == 'Linux' }}
