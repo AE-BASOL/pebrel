@@ -55,6 +55,8 @@ class TerminalSession(private val transport: SessionTransport, private val callb
     private val sizes = Channel<Geometry>(Channel.CONFLATED)
     private val frames = Channel<Unit>(Channel.CONFLATED)
     private var core: GhosttyCore? = null
+    private var synchronizedFrameTimeout: Job? = null
+    private var synchronizedFrameExpired = false
     @Volatile private var geometry = Geometry()
     @Volatile private var palette: IntArray? = null
     @Volatile private var ready = false
@@ -73,14 +75,17 @@ class TerminalSession(private val transport: SessionTransport, private val callb
         if (!started.compareAndSet(false, true) || closed.get()) return
         scope.launch {
             try {
+                // The view is measured after the session is created. Give it a bounded
+                // chance to supply its size before starting a full-screen application.
+                val measured = withTimeoutOrNull(120) { sizes.receive() }
+                val first = measured?.let { settledSize(it) } ?: geometry
+                if (closed.get()) return@launch
                 withContext(stateDispatcher) {
-                    val size = geometry
-                    core = GhosttyCore(size.columns, size.rows, scrollbackLines).also { engine ->
-                        engine.resize(size.columns, size.rows, size.width, size.height)
+                    core = GhosttyCore(first.columns, first.rows, scrollbackLines).also { engine ->
+                        engine.resize(first.columns, first.rows, first.width, first.height)
                         palette?.let(engine::colors)
                     }
                 }
-                val first = geometry
                 transport.open(first.columns, first.rows, first.width, first.height)
                 if (closed.get()) return@launch
                 ready = true
@@ -88,7 +93,7 @@ class TerminalSession(private val transport: SessionTransport, private val callb
                 sizes.trySend(geometry)
                 requestFrame() // The first visible frame may have run before core initialization.
                 launch { writeTransport() }
-                launch { resizeTransport() }
+                launch { resizeTransport(first) }
                 readTransport()
             } catch (error: Exception) {
                 if (!closed.get() && error !is CancellationException) fail(error)
@@ -99,6 +104,11 @@ class TerminalSession(private val transport: SessionTransport, private val callb
                 outgoing.close()
                 sizes.close()
                 withContext(NonCancellable) {
+                    withContext(stateDispatcher) {
+                        cancelFrameTimeout()
+                        core?.let { if (it.synchronizedOutput()) it.endSynchronizedOutput() }
+                        requestFrame()
+                    }
                     transport.close()
                     if (transport is LocalPtyTransport) runCatching { transport.awaitExit() }
                 }
@@ -110,7 +120,22 @@ class TerminalSession(private val transport: SessionTransport, private val callb
                 delay(16) // Coalesce bursts. No timer runs when output is unchanged or the view is detached.
                 if (!visible || closed.get()) continue
                 try {
-                    val next = core?.snapshot() ?: continue
+                    val engine = core ?: continue
+                    // The parser applies synchronized output immediately; publication owns
+                    // the last complete frame while a remote redraw replays its history.
+                    if (engine.synchronizedOutput()) {
+                        if (!synchronizedFrameExpired) {
+                            if (synchronizedFrameTimeout == null) synchronizedFrameTimeout = scope.launch(stateDispatcher) {
+                                delay(1000)
+                                synchronizedFrameExpired = true
+                                requestFrame() // A silent peer must not freeze the screen forever.
+                            }
+                            continue
+                        }
+                        engine.endSynchronizedOutput()
+                    }
+                    cancelFrameTimeout()
+                    val next = engine.snapshot()
                     notify { frame = next; callbacks.onTextChanged(this@TerminalSession) }
                 } catch (error: Exception) {
                     if (error is CancellationException) throw error
@@ -118,6 +143,12 @@ class TerminalSession(private val transport: SessionTransport, private val callb
                 }
             }
         }
+    }
+
+    private fun cancelFrameTimeout() {
+        synchronizedFrameTimeout?.cancel()
+        synchronizedFrameTimeout = null
+        synchronizedFrameExpired = false
     }
 
     private suspend fun readTransport() {
@@ -183,9 +214,30 @@ class TerminalSession(private val transport: SessionTransport, private val callb
         } catch (error: Exception) { if (!closed.get() && error !is CancellationException) fail(error) }
     }
 
-    private suspend fun resizeTransport() {
+    private suspend fun settledSize(first: Geometry): Geometry {
+        var latest = first
+        while (true) {
+            latest = withTimeoutOrNull(120) { sizes.receiveCatching().getOrNull() } ?: return latest
+        }
+    }
+
+    private suspend fun resizeTransport(initial: Geometry) {
+        var applied = initial
         try {
-            for (size in sizes) if (!closed.get()) transport.resize(size.columns, size.rows, size.width, size.height)
+            for (pending in sizes) {
+                val size = settledSize(pending)
+                if (closed.get()) break
+                if (size == applied) continue
+                // Commit one settled grid before notifying the peer. Intermediate IME
+                // heights must not reset synchronized output or replay remote history.
+                withContext(stateDispatcher) {
+                    core?.resize(size.columns, size.rows, size.width, size.height)
+                    requestFrame()
+                }
+                if (closed.get()) break
+                transport.resize(size.columns, size.rows, size.width, size.height)
+                applied = size
+            }
         } catch (error: Exception) { if (!closed.get() && error !is CancellationException) fail(error) }
     }
 
@@ -244,11 +296,7 @@ class TerminalSession(private val transport: SessionTransport, private val callb
         val next = Geometry(columns.coerceIn(2, 400), rows.coerceIn(2, 200), width.coerceIn(1, 256), height.coerceIn(1, 256))
         if (next == geometry || closed.get()) return
         geometry = next
-        scope.launch(stateDispatcher) {
-            core?.resize(next.columns, next.rows, next.width, next.height)
-            requestFrame()
-        }
-        if (ready) sizes.trySend(next)
+        sizes.trySend(next)
     }
     fun colors(value: IntArray) {
         palette = value.copyOf()

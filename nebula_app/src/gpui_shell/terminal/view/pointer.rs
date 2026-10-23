@@ -1046,6 +1046,7 @@ mod scrolling_tests {
     use super::wheel_scroll_lines;
     use gpui::{ScrollDelta, point, px};
 
+    #[cfg(feature = "gpui-test-support")]
     #[gpui::test]
     fn application_mouse_wheel_batches_reports_and_preserves_direction(
         cx: &mut gpui::TestAppContext,
