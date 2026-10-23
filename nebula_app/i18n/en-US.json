@@ -1,5 +1,9 @@
 {
   "native_result": {
+    "diff_expand": "Expand file diff",
+    "diff_collapse": "Collapse file diff",
+    "diff_invalid": "This diff cannot be displayed with paired line numbers. Showing the original source.",
+    "diff_limit": "This diff exceeds the display limit. Full retained source remains available.",
     "fold_expand": "{count} lines omitted · Expand",
     "fold_collapse": "Collapse the middle {count} lines",
     "view": "View",
