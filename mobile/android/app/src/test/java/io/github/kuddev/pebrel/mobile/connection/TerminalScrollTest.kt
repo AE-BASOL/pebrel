@@ -28,6 +28,7 @@ class TerminalScrollTest {
         @Implementation fun resize(columns: Int, rows: Int, cellWidth: Int, cellHeight: Int) = Unit
         @Implementation fun colors(value: IntArray) = Unit
         @Implementation fun close() = Unit
+        @Implementation fun synchronizedOutput() = false
         @Implementation fun scroll(lines: Int) = Unit
         @Implementation fun applicationScrollMode(): Int { modeReads.incrementAndGet(); return mode.get() }
         @Implementation fun snapshot() = TerminalFrame(arrayOf(TerminalRow("", intArrayOf())),

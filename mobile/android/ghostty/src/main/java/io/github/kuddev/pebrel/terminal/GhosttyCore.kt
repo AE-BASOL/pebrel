@@ -41,6 +41,8 @@ class GhosttyCore(columns: Int = 80, rows: Int = 24, scrollbackLines: Int = 1000
         return NativeBridge.feed(pointer(), bytes, count)
     }
     @Synchronized fun takeTitle(): String? = NativeBridge.title(pointer())?.toString(Charsets.UTF_8)
+    @Synchronized fun synchronizedOutput(): Boolean = NativeBridge.synchronizedOutput(pointer())
+    @Synchronized fun endSynchronizedOutput() = NativeBridge.endSynchronizedOutput(pointer())
     @Synchronized fun resize(columns: Int, rows: Int, cellWidth: Int, cellHeight: Int) {
         require(columns in 2..400 && rows in 2..200 && cellWidth in 1..256 && cellHeight in 1..256)
         NativeBridge.resize(pointer(), columns, rows, cellWidth, cellHeight)
@@ -82,6 +84,8 @@ internal object NativeBridge {
     external fun destroy(handle: Long)
     external fun feed(handle: Long, input: ByteArray, count: Int): ByteArray
     external fun title(handle: Long): ByteArray?
+    external fun synchronizedOutput(handle: Long): Boolean
+    external fun endSynchronizedOutput(handle: Long)
     external fun resize(handle: Long, columns: Int, rows: Int, cellWidth: Int, cellHeight: Int)
     external fun render(handle: Long, rows: Array<TerminalRow?>, metadata: IntArray)
     external fun scroll(handle: Long, lines: Int)

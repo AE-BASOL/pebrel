@@ -20,6 +20,23 @@ import java.util.concurrent.atomic.AtomicInteger
 /** Exercises the actual JNI library in the optimized APK, not a mocked parser. */
 @RunWith(AndroidJUnit4::class)
 class GhosttyEngineTest {
+    @Test fun synchronizedOutputFollowsSplitMarkersAndReleasesOnTimeoutOrResize() = GhosttyCore(80, 24, 1000).use { core ->
+        assertFalse(core.synchronizedOutput())
+        for (part in listOf("\u001b[?20", "26h\u001b[2J\u001b[H", "old history")) core.feed(part.toByteArray())
+        assertTrue(core.synchronizedOutput())
+        core.feed("\u001b[24;1Hlatest\u001b[?2026".toByteArray())
+        assertTrue(core.synchronizedOutput())
+        core.feed("l".toByteArray())
+        assertFalse(core.synchronizedOutput())
+        assertEquals(23, core.snapshot().cursorY)
+        core.feed("\u001b[?2026hpartial".toByteArray())
+        core.endSynchronizedOutput()
+        assertFalse(core.synchronizedOutput())
+        core.feed("\u001b[?2026h".toByteArray())
+        core.resize(80, 30, 8, 16)
+        assertFalse(core.synchronizedOutput())
+    }
+
     @Test fun scrollbackLimitAndAbsolutePositionUseNativeHistory() = GhosttyCore(40, 6, 1000).use { core ->
         repeat(1200) { core.feed("HISTORY-${it.toString().padStart(4, '0')}\r\n".toByteArray()) }
         val bottom = core.snapshot()

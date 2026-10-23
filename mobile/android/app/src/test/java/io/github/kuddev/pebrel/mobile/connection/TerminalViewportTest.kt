@@ -25,6 +25,7 @@ class TerminalViewportTest {
         @Implementation fun __constructor__(columns: Int, rows: Int, scrollbackLines: Int) = Unit
         @Implementation fun resize(columns: Int, rows: Int, cellWidth: Int, cellHeight: Int) { height = rows }
         @Implementation fun close() = Unit
+        @Implementation fun synchronizedOutput() = false
         @Implementation fun snapshot() = TerminalFrame(Array(height) { TerminalRow("live", intArrayOf()) },
             intArrayOf(80, height, 0, height - 1, 1, 0, 0, 0, height, 0, 1))
         companion object { @Volatile var height = 24 }
@@ -76,6 +77,19 @@ class TerminalViewportTest {
             assertEquals(listOf(30), transport.sizes.toList())
             assertTrue(transport.gridBeforePty)
             await { terminal.frame?.rows?.size == 30 }
+        } finally { terminal.finishIfRunning() }
+    }
+
+    @Test fun firstMeasurementIsUsedEvenWhenItArrivesAfterStart() {
+        val transport = Transport()
+        val terminal = TerminalSession(transport, TerminalCallbacks())
+        try {
+            terminal.start()
+            terminal.updateSize(80, 35, 8, 16)
+            await { terminal.isReady }
+            assertEquals(35, transport.initialRows)
+            assertEquals(35, Engine.height)
+            assertTrue(transport.sizes.isEmpty())
         } finally { terminal.finishIfRunning() }
     }
 
