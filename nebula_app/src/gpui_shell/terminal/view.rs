@@ -269,6 +269,7 @@ pub enum SidebarActivity {
 }
 
 pub struct TerminalView {
+    pub(super) native_results: super::native_results::Views,
     pub(super) answers: crate::assistant_answer::AnswerInbox,
     confirmation: super::confirmation::ConfirmationState,
     pub(super) answer_reader: Option<gpui::Entity<super::answer_reader::AnswerReader>>,
@@ -383,7 +384,7 @@ pub struct TerminalView {
     scrollbar_visibility: nebula_settings::ScrollbarVisibility,
     origin: Point<Pixels>,
     cell_width: Pixels,
-    line_height: Pixels,
+    pub(super) line_height: Pixels,
     cols: usize,
     rows: usize,
     /// 子进程已被告知的几何。`cols`/`rows`
@@ -1255,9 +1256,17 @@ impl TerminalView {
                 _ => None,
             };
             if let Some(scroll) = scroll {
-                if let Some(session) = &self.session {
-                    session.term.lock().scroll_display(scroll);
-                }
+                let (offset, history) = self.scroll_state();
+                let target = match scroll {
+                    Scroll::PageUp => offset.saturating_add(self.rows).min(history),
+                    Scroll::PageDown => offset.saturating_sub(self.rows),
+                    Scroll::Top => history,
+                    Scroll::Bottom => 0,
+                    Scroll::Delta(delta) => {
+                        (offset as i64 + i64::from(delta)).clamp(0, history as i64) as usize
+                    },
+                };
+                self.scroll_to_offset(target, offset);
                 cx.notify();
                 cx.stop_propagation();
                 return;
@@ -1529,6 +1538,7 @@ impl Render for TerminalView {
             root = root.child(div().p_4().text_color(gpui::red()).child(error.clone()));
         } else {
             root = root.child(TerminalElement::new(cx.entity()));
+            root = root.children(self.native_result_elements(window, cx));
             if self.ssh_disconnected() {
                 root = root.child(self.ssh_disconnect_banner(cx));
             }
