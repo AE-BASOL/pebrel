@@ -98,11 +98,16 @@ impl NativeResult {
         } else {
             -self.viewport_top.max(0.0).min(38.0)
         };
-        let right = if self.viewport_top + top < 40.0 && self.available_width <= px(900.0) {
+        let mut right: f32 = if self.viewport_top + top < 40.0 && self.available_width <= px(900.0)
+        {
             36.0
         } else {
             3.0
         };
+        if self.mime.as_ref() == "text/x-diff" && top > -36.0 {
+            // 贴近视口顶端时浮层不能移到结果上方，须让出文件头右侧折叠按钮的完整命中区。
+            right = right.max(68.0);
+        }
         let table = matches!(
             self.mime.as_ref(),
             "application/json" | "text/x-directory-listing" | "text/x-powershell-directory"

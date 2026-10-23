@@ -14,12 +14,12 @@ use std::borrow::Cow;
 
 use gpui::{AssetSource, Result, SharedString};
 
-/// 小型 SVG 编译期嵌入，不引入额外资源加载依赖。
+/// SVG 编译期无损压缩嵌入，仍通过原有逻辑路径加载。
 macro_rules! icons {
     ($($name:literal),* $(,)?) => {
         &[$((
             concat!("icons/nebula-", $name, ".svg"),
-            include_bytes!(concat!("../../assets/icons/nebula-", $name, ".svg")).as_slice(),
+            include_bytes!(concat!("../../assets/icons/nebula-", $name, ".svgz")).as_slice(),
         )),*]
     };
 }
@@ -59,14 +59,7 @@ const NEBULA_ICONS: &[(&str, &[u8])] = icons![
     "download",
 ];
 
-macro_rules! compressed_icons {
-    ($($name:literal),* $(,)?) => {
-        &[$((concat!("icons/nebula-", $name, ".svg"),
-            include_bytes!(concat!("../../assets/icons/nebula-", $name, ".svgz")).as_slice(),
-        )),*]
-    };
-}
-const COMPRESSED_ICONS: &[(&str, &[u8])] = compressed_icons![
+const COMPRESSED_ICONS: &[(&str, &[u8])] = icons![
     "agent-cursor",
     "agent-copilot",
     "agent-openai",
@@ -174,4 +167,23 @@ pub mod backup {
     pub const FOLDER: &str = "icons/nebula-backup-folder.svg";
     pub const LOCK: &str = "icons/nebula-backup-lock.svg";
     pub const CHECK: &str = "icons/nebula-backup-check.svg";
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn navigation_icons_load_the_exact_editable_svg_sources() {
+        let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
+        for (path, _) in NEBULA_ICONS {
+            let source = std::fs::read(directory.join(path)).unwrap();
+            let loaded = NebulaAssets.load(path).unwrap().unwrap();
+            assert_eq!(loaded.as_ref(), source, "compressed icon is stale: {path}");
+        }
+        assert_eq!(
+            NebulaAssets.load("icons/square-terminal.svg").unwrap(),
+            NebulaAssets.load(nav::TERMINAL).unwrap()
+        );
+    }
 }
