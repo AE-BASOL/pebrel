@@ -80,6 +80,7 @@ impl Render for NebulaWorkspace {
             .bg(gpui::transparent_black())
             .font(crate::gpui_shell::typography::ui_font(cx))
             .text_color(cx.theme().foreground)
+            .child(self.render_sidebar_resize_capture(cx))
             .can_drop({
                 let runtime_window_id = self.runtime_window_id;
                 move |value, _, _| {
@@ -115,8 +116,6 @@ impl Render for NebulaWorkspace {
                 },
             ))
             .on_mouse_move(cx.listener(|this, event, window, cx| {
-                this.update_details_panel_resize(event, window, cx);
-                this.update_left_sidebar_resize(event, window, cx);
                 this.continue_pending_tab_drag(event, window, cx);
                 // pane 拖拽的待命态同理：罩层只在激活后才存在，越阈值那一下
                 // 的 move 必须由根节点喂进去。
@@ -126,10 +125,6 @@ impl Render for NebulaWorkspace {
             // TerminalView 可能在 bubble phase 消费释放，导致 dock 永远不提交。
             .capture_any_mouse_up(cx.listener(|this, event: &gpui::MouseUpEvent, window, cx| {
                 if event.button != MouseButton::Left {
-                    return;
-                }
-                if this.finish_details_panel_resize(cx) || this.finish_left_sidebar_resize(cx) {
-                    cx.stop_propagation();
                     return;
                 }
                 // pane 拖拽先结算：它和 tab 拖拽互斥（起手位置不同），但待命态

@@ -35,6 +35,59 @@ impl ResizeDrag {
 }
 
 impl NebulaWorkspace {
+    pub(super) fn render_sidebar_resize_capture(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let workspace = cx.entity().downgrade();
+        gpui::canvas(
+            |_, _, _| {},
+            move |_, _, window, _| {
+                // Install even before a press: release can arrive before the
+                // next paint. Only a live resize consumes these window events.
+                let moving = workspace.clone();
+                window.on_mouse_event(move |event: &gpui::MouseMoveEvent, phase, window, cx| {
+                    if phase != gpui::DispatchPhase::Capture {
+                        return;
+                    }
+                    let handled = moving
+                        .update(cx, |view, cx| {
+                            if view.sidebar_resizing.is_none() && !view.is_details_panel_resizing()
+                            {
+                                return false;
+                            }
+                            view.update_details_panel_resize(event, window, cx);
+                            view.update_left_sidebar_resize(event, window, cx);
+                            true
+                        })
+                        .unwrap_or(false);
+                    if handled {
+                        cx.stop_propagation();
+                    }
+                });
+                let releasing = workspace.clone();
+                window.on_mouse_event(move |event: &gpui::MouseUpEvent, phase, window, cx| {
+                    if phase != gpui::DispatchPhase::Capture || event.button != MouseButton::Left {
+                        return;
+                    }
+                    let handled = releasing
+                        .update(cx, |view, cx| {
+                            if !window.is_window_active() {
+                                return view.cancel_details_panel_resize(cx)
+                                    | view.cancel_left_sidebar_resize(cx);
+                            }
+                            view.finish_details_panel_resize(cx)
+                                | view.finish_left_sidebar_resize(cx)
+                        })
+                        .unwrap_or(false);
+                    if handled {
+                        cx.stop_propagation();
+                    }
+                });
+            },
+        )
+        .absolute()
+        .inset_0()
+        .into_any_element()
+    }
+
     pub(super) fn subscribe_sidebar_resize_cancel(
         window: &Window,
         cx: &mut Context<Self>,
@@ -109,8 +162,13 @@ impl NebulaWorkspace {
         cx: &mut Context<Self>,
     ) {
         let Some(drag) = &mut self.sidebar_resizing else { return };
-        if event.pressed_button != Some(MouseButton::Left) || !window.is_window_active() {
+        if !window.is_window_active() {
             self.cancel_left_sidebar_resize(cx);
+            return;
+        }
+        // Windows non-client moves report None while the button is still held.
+        // Keep the last valid preview until an explicit release or cancellation.
+        if event.pressed_button != Some(MouseButton::Left) {
             return;
         }
         let raw = drag.start_width + f32::from(event.position.x) - drag.start_x;
@@ -154,16 +212,6 @@ impl NebulaWorkspace {
                 .inset_0()
                 .occlude()
                 .cursor_col_resize()
-                .on_mouse_move(cx.listener(|view, event, window, cx| {
-                    view.update_left_sidebar_resize(event, window, cx);
-                    cx.stop_propagation();
-                }))
-                .on_mouse_up(
-                    MouseButton::Left,
-                    cx.listener(|view, _, _, cx| {
-                        view.finish_left_sidebar_resize(cx);
-                    }),
-                )
                 .when(drag.close, |overlay| {
                     overlay.child(collapse_hint(true, self.sidebar_width, cx))
                 })

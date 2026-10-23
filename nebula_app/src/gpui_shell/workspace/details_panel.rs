@@ -456,6 +456,10 @@ impl NebulaWorkspace {
         )
     }
 
+    pub(super) fn is_details_panel_resizing(&self) -> bool {
+        self.details_panel.resize.is_some()
+    }
+
     pub(super) fn update_details_panel_resize(
         &mut self,
         event: &gpui::MouseMoveEvent,
@@ -463,8 +467,11 @@ impl NebulaWorkspace {
         cx: &mut Context<Self>,
     ) {
         let Some(drag) = &mut self.details_panel.resize else { return };
-        if event.pressed_button != Some(MouseButton::Left) || !window.is_window_active() {
+        if !window.is_window_active() {
             self.cancel_details_panel_resize(cx);
+            return;
+        }
+        if event.pressed_button != Some(MouseButton::Left) {
             return;
         }
         let maximum = panel_width(MAX_WIDTH, f32::from(window.viewport_size().width));
@@ -505,17 +512,6 @@ impl NebulaWorkspace {
                 .inset_0()
                 .occlude()
                 .cursor_col_resize()
-                .on_mouse_move(cx.listener(|this, event, window, cx| {
-                    this.update_details_panel_resize(event, window, cx);
-                    cx.stop_propagation();
-                }))
-                .on_mouse_up(
-                    MouseButton::Left,
-                    cx.listener(|this, _, _, cx| {
-                        this.finish_details_panel_resize(cx);
-                        cx.stop_propagation();
-                    }),
-                )
                 .when(drag.close, |overlay| {
                     overlay.child(super::sidebar_resize::collapse_hint(
                         false,

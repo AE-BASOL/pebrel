@@ -375,6 +375,226 @@ fn left_sidebar_close_and_escape_share_the_right_sidebar_detent(cx: &mut TestApp
     assert_eq!(workspace.read_with(&cx, |view, _| view.sidebar_width), original);
 }
 
+// Use the rendered handles rather than injecting ResizeDrag: this exercises the
+// press-to-capture path as well as the release that hitbox listeners cannot see.
+fn prepare_sidebar_resize(
+    workspace: &Entity<NebulaWorkspace>,
+    cx: &mut VisualTestContext,
+    left: bool,
+) -> (gpui::Point<gpui::Pixels>, gpui::Point<gpui::Pixels>) {
+    cx.update(|window, cx| {
+        let mut settings =
+            crate::gpui_shell::config::Settings::load(nebula_settings::ThemeName::Nord);
+        settings.panel_resize = true;
+        cx.set_global(settings);
+        workspace.update(cx, |view, cx| {
+            view.tabs_position = nebula_settings::TabsPositionName::Sidebar;
+            view.sidebar_collapsed = false;
+            view.sidebar_width = 320.0;
+            view.side_panel.open = true;
+            view.details_panel.width = 320.0;
+            cx.notify();
+        });
+        window.activate_window();
+        window.draw(cx).clear(cx);
+    });
+    let handle = if left { "sidebar-resize-handle" } else { "workspace-details-resize" };
+    let start = cx.debug_bounds(handle).unwrap().center();
+    let outside = cx.update(|window, _| {
+        let x = if left { px(-20.0) } else { window.viewport_size().width + px(20.0) };
+        point(x, start.y)
+    });
+    (start, outside)
+}
+
+fn sidebar_resize_state(
+    workspace: &Entity<NebulaWorkspace>,
+    cx: &VisualTestContext,
+    left: bool,
+) -> (bool, f32, Option<bool>) {
+    workspace.read_with(cx, |view, _| {
+        if left {
+            (
+                !view.sidebar_collapsed,
+                view.sidebar_width,
+                view.sidebar_resizing.map(|drag| drag.close),
+            )
+        } else {
+            (
+                view.side_panel.open,
+                view.details_panel.width,
+                view.details_panel.resize.map(|drag| drag.close),
+            )
+        }
+    })
+}
+
+fn sidebar_drag_to_width(
+    cx: &mut VisualTestContext,
+    start: gpui::Point<gpui::Pixels>,
+    left: bool,
+    width: f32,
+) {
+    let delta = if left { width - 320.0 } else { 320.0 - width };
+    cx.simulate_mouse_move(
+        point(start.x + px(delta), start.y),
+        Some(MouseButton::Left),
+        Modifiers::default(),
+    );
+    cx.run_until_parked();
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+}
+
+#[gpui::test]
+fn sidebar_resize_outside_release_closes_both_panels(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("outside-release.md");
+    std::fs::write(&path, "# Heading").unwrap();
+    let (workspace, mut cx) = open(path, cx);
+    for left in [true, false] {
+        let (start, outside) = prepare_sidebar_resize(&workspace, &mut cx, left);
+        cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+        let minimum = if left { nebula_settings::MIN_SIDEBAR_WIDTH } else { MIN_WIDTH };
+        sidebar_drag_to_width(&mut cx, start, left, minimum - 100.0);
+        assert_eq!(sidebar_resize_state(&workspace, &cx, left).2, Some(true));
+        cx.simulate_mouse_up(outside, MouseButton::Left, Modifiers::default());
+        cx.run_until_parked();
+        assert_eq!(sidebar_resize_state(&workspace, &cx, left), (false, 320.0, None));
+        cx.simulate_mouse_up(outside, MouseButton::Left, Modifiers::default());
+        assert!(
+            !sidebar_resize_state(&workspace, &cx, left).0,
+            "duplicate release must not reopen"
+        );
+        workspace.update(&mut cx, |view, cx| {
+            if left {
+                view.sidebar_collapsed = false;
+                cx.notify();
+            } else {
+                view.toggle_document_details(cx);
+            }
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(sidebar_resize_state(&workspace, &cx, left), (true, 320.0, None));
+    }
+}
+
+#[gpui::test]
+fn sidebar_resize_nc_move_waits_for_real_release(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("nc-move.md");
+    std::fs::write(&path, "# Heading").unwrap();
+    let (workspace, mut cx) = open(path, cx);
+    for left in [true, false] {
+        let (start, outside) = prepare_sidebar_resize(&workspace, &mut cx, left);
+        cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+        let minimum = if left { nebula_settings::MIN_SIDEBAR_WIDTH } else { MIN_WIDTH };
+        sidebar_drag_to_width(&mut cx, start, left, minimum - 100.0);
+        let before = sidebar_resize_state(&workspace, &cx, left);
+        assert_eq!(before.2, Some(true));
+        // Windows WM_NCMOUSEMOVE reports no pressed button even during capture.
+        cx.simulate_mouse_move(point(start.x, start.y), None, Modifiers::default());
+        cx.run_until_parked();
+        assert_eq!(sidebar_resize_state(&workspace, &cx, left), before);
+        cx.simulate_mouse_move(outside, None, Modifiers::default());
+        cx.simulate_mouse_up(outside, MouseButton::Right, Modifiers::default());
+        assert_eq!(sidebar_resize_state(&workspace, &cx, left), before);
+        cx.simulate_mouse_up(outside, MouseButton::Left, Modifiers::default());
+        cx.run_until_parked();
+        assert_eq!(sidebar_resize_state(&workspace, &cx, left), (false, 320.0, None));
+    }
+}
+
+#[gpui::test]
+fn sidebar_resize_outside_release_keeps_width_and_respects_reversal(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("outside-width.md");
+    std::fs::write(&path, "# Heading").unwrap();
+    let (workspace, mut cx) = open(path, cx);
+    for left in [true, false] {
+        let (start, outside) = prepare_sidebar_resize(&workspace, &mut cx, left);
+        cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+        sidebar_drag_to_width(&mut cx, start, left, 360.0);
+        cx.simulate_mouse_up(outside, MouseButton::Left, Modifiers::default());
+        cx.run_until_parked();
+        assert_eq!(sidebar_resize_state(&workspace, &cx, left), (true, 360.0, None));
+
+        let (start, outside) = prepare_sidebar_resize(&workspace, &mut cx, left);
+        cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+        let minimum = if left { nebula_settings::MIN_SIDEBAR_WIDTH } else { MIN_WIDTH };
+        sidebar_drag_to_width(&mut cx, start, left, minimum - 100.0);
+        assert_eq!(sidebar_resize_state(&workspace, &cx, left).2, Some(true));
+        sidebar_drag_to_width(&mut cx, start, left, minimum + 20.0);
+        assert_eq!(sidebar_resize_state(&workspace, &cx, left).2, Some(false));
+        cx.simulate_mouse_up(outside, MouseButton::Left, Modifiers::default());
+        cx.run_until_parked();
+        assert_eq!(sidebar_resize_state(&workspace, &cx, left), (true, minimum + 20.0, None));
+    }
+}
+
+#[gpui::test]
+fn sidebar_resize_cancel_ignores_late_outside_release(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("outside-cancel.md");
+    std::fs::write(&path, "# Heading").unwrap();
+    let (workspace, mut cx) = open(path, cx);
+    for left in [true, false] {
+        for deactivate in [false, true] {
+            let (start, outside) = prepare_sidebar_resize(&workspace, &mut cx, left);
+            cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+            let minimum = if left { nebula_settings::MIN_SIDEBAR_WIDTH } else { MIN_WIDTH };
+            sidebar_drag_to_width(&mut cx, start, left, minimum - 100.0);
+            assert_eq!(sidebar_resize_state(&workspace, &cx, left).2, Some(true));
+            if deactivate {
+                cx.deactivate_window();
+            } else {
+                cx.simulate_keystrokes("escape");
+            }
+            cx.run_until_parked();
+            assert_eq!(sidebar_resize_state(&workspace, &cx, left), (true, 320.0, None));
+            cx.simulate_mouse_up(outside, MouseButton::Left, Modifiers::default());
+            cx.run_until_parked();
+            assert_eq!(sidebar_resize_state(&workspace, &cx, left), (true, 320.0, None));
+        }
+    }
+}
+
+#[gpui::test]
+fn sidebar_resize_outside_release_before_next_paint_clears_drag(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("outside-before-paint.md");
+    std::fs::write(&path, "# Heading").unwrap();
+    let (workspace, mut cx) = open(path, cx);
+    for left in [true, false] {
+        let (start, outside) = prepare_sidebar_resize(&workspace, &mut cx, left);
+        // Dispatch both events in the same update, with no opportunity to paint
+        // an active-drag overlay or install listeners after the press.
+        cx.update(|window, cx| {
+            window.dispatch_event(
+                gpui::PlatformInput::MouseDown(gpui::MouseDownEvent {
+                    position: start,
+                    button: MouseButton::Left,
+                    modifiers: Modifiers::default(),
+                    click_count: 1,
+                    first_mouse: false,
+                }),
+                cx,
+            );
+            assert!(workspace.read(cx).sidebar_resizing.is_some() == left);
+            assert!(workspace.read(cx).details_panel.resize.is_some() != left);
+            window.dispatch_event(
+                gpui::PlatformInput::MouseUp(gpui::MouseUpEvent {
+                    position: outside,
+                    button: MouseButton::Left,
+                    modifiers: Modifiers::default(),
+                    click_count: 1,
+                }),
+                cx,
+            );
+        });
+        assert_eq!(sidebar_resize_state(&workspace, &cx, left), (true, 320.0, None));
+    }
+}
+
 #[gpui::test]
 fn document_outline_and_files_share_one_slot_and_one_width(cx: &mut TestAppContext) {
     let directory = tempfile::tempdir().unwrap();
