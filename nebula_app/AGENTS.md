@@ -1,6 +1,7 @@
 # Nebula application rules
 
 - 本目录是应用编排和适配层；依赖方向保持为 UI/组合 → 应用能力 → 共享领域规则，不在视图里复制设置、持久化、终端状态或协议状态机。
+- 原生结果的块级呈现和目录折叠遵循 [`native_results`](../architecture/notes/nebula_app/gpui_shell/terminal/native_results/)；文字、链接和命中共享终端的滚动投影。
 - `src/gpui_shell` 负责 GPUI 呈现、命令和订阅。交互改动必须覆盖默认、hover、pressed、键盘焦点、disabled/loading 以及成功/失败中实际需要的状态。
 - 首帧窗口尺寸、非阻塞 logo 准备与原生呈现顺序的因果记录见 [`workspace`](../architecture/notes/nebula_app/gpui_shell/workspace/)。
 - Linux 静默启动、关窗守卫、桌面身份与 portal 激活令牌见 [`原生生命周期`](../architecture/notes/nebula_app/platform/2026-10-14-linux-desktop-lifecycle.md)。
