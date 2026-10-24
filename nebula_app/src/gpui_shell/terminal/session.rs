@@ -32,6 +32,14 @@ impl EventListener for EventProxy {
     fn send_event(&self, event: Event) {
         self.events.send(event);
     }
+
+    fn command_view(
+        &self,
+        shell: &str,
+        command: &str,
+    ) -> Option<nebula_terminal::inline_content::CommandView> {
+        crate::command_lenses::classify(shell, command)
+    }
 }
 
 impl crate::ssh_session::SshEventHost for EventProxy {
@@ -136,6 +144,7 @@ pub(super) fn local_options(
         log::warn!("Could not prepare shell integration: {error}");
     }
     crate::platform::environment::prepare_local_pty(&mut options);
+    options.env.insert("PEBREL_NATIVE_RESULTS".into(), "1".into());
     // WSL tab 的命令边界（OSC 133;D/A）与 cwd（OSC 7）：来宾登录 shell 默认
     // 不发，Agent 生命周期、目录树与 Git 视图都会失去来宾侧事实。只对
     // `wsl.exe` 启动生效，见 [`crate::shell_detect::wsl_cwd_report_env`]。
@@ -147,7 +156,16 @@ pub(super) fn local_options(
             .iter()
             .find(|(name, _)| name.eq_ignore_ascii_case("WSLENV"))
             .map(|(_, value)| value.as_str());
-        let additions = crate::shell_detect::wsl_cwd_report_env(&program, &args, current_wslenv);
+        // Only a guest that confirmed zsh can read it takes the bootstrap.
+        let zsh = crate::platform::wsl_guest_shell::takes_zsh_bootstrap(
+            &program,
+            &args,
+            &crate::shell_detect::effective_wslenv(current_wslenv),
+            crate::platform::wsl_guest_shell::verified,
+        )
+        .then(|| crate::platform::shell_integration::wsl_zsh_path().to_string_lossy().into_owned());
+        let additions =
+            crate::shell_detect::wsl_cwd_report_env(&program, current_wslenv, zsh.as_deref());
         for (name, value) in additions {
             options.env.retain(|existing, _| !existing.eq_ignore_ascii_case(&name));
             options.env.insert(name, value);

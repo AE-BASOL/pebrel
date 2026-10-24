@@ -19,7 +19,7 @@ struct Snapshot {
     comm: String,
     environment: Vec<u8>,
     cwd: PathBuf,
-    stdin: PathBuf,
+    rollout_fd: PathBuf,
     first_line: String,
 }
 
@@ -59,24 +59,24 @@ fn check(snapshot: &Snapshot, expected: &Expected<'_>) -> Result<(), &'static st
     if snapshot.cwd != expected.cwd {
         return Err("cwd is not the owned fixture root");
     }
-    if snapshot.stdin != expected.rollout {
-        return Err("fd/0 does not point to the owned rollout");
+    if snapshot.rollout_fd != expected.rollout {
+        return Err("fd/2 does not point to the owned rollout");
     }
     if snapshot.first_line != expected.first_line {
-        return Err("fd/0 metadata does not match the owned rollout");
+        return Err("fd/2 metadata does not match the owned rollout");
     }
     Ok(())
 }
 
 fn read_snapshot(proc_dir: &Path, owned_rollout: &Path) -> io::Result<Snapshot> {
-    let stdin = proc_dir.join("fd/0");
-    let link = std::fs::read_link(&stdin)?;
+    let rollout_fd = proc_dir.join("fd/2");
+    let link = std::fs::read_link(&rollout_fd)?;
     if link != owned_rollout {
-        return Err(io::Error::other("fixture fd/0 is not the owned rollout"));
+        return Err(io::Error::other("fixture fd/2 is not the owned rollout"));
     }
     // Never open a pipe/device when a failed fixture did not inherit our file.
-    if !std::fs::metadata(&stdin)?.is_file() {
-        return Err(io::Error::other("fixture fd/0 is not a regular file"));
+    if !std::fs::metadata(&rollout_fd)?.is_file() {
+        return Err(io::Error::other("fixture fd/2 is not a regular file"));
     }
     Ok(Snapshot {
         comm: String::from_utf8(read_bounded(std::fs::File::open(proc_dir.join("comm"))?, 512)?)
@@ -86,8 +86,8 @@ fn read_snapshot(proc_dir: &Path, owned_rollout: &Path) -> io::Result<Snapshot> 
             MAX_PROBE_OUTPUT,
         )?,
         cwd: std::fs::read_link(proc_dir.join("cwd"))?,
-        stdin: link,
-        first_line: read_first_line(&stdin)?,
+        rollout_fd: link,
+        first_line: read_first_line(&rollout_fd)?,
     })
 }
 
@@ -160,7 +160,7 @@ fn readiness_rejects_missing_or_wrong_owned_process_fields() {
             expected.codex_home,
         ),
         cwd: expected.cwd.into(),
-        stdin: expected.rollout.into(),
+        rollout_fd: expected.rollout.into(),
         first_line: expected.first_line.into(),
     };
     assert_eq!(check(&ready, &expected), Ok(()));
@@ -182,8 +182,8 @@ fn readiness_rejects_missing_or_wrong_owned_process_fields() {
     wrong.cwd = "/other/root".into();
     assert!(check(&wrong, &expected).unwrap_err().starts_with("cwd"));
     let mut wrong = ready.clone();
-    wrong.stdin = "/other/rollout.jsonl".into();
-    assert!(check(&wrong, &expected).unwrap_err().starts_with("fd/0"));
+    wrong.rollout_fd = "/other/rollout.jsonl".into();
+    assert!(check(&wrong, &expected).unwrap_err().starts_with("fd/2"));
     let mut wrong = ready.clone();
     wrong.first_line.clear();
     assert!(check(&wrong, &expected).unwrap_err().contains("metadata"));
@@ -197,7 +197,7 @@ fn readiness_rejects_missing_or_wrong_owned_process_fields() {
 }
 
 #[test]
-fn owned_snapshot_checks_real_cwd_and_regular_stdin_links() {
+fn owned_snapshot_checks_real_cwd_and_regular_rollout_fd_links() {
     use std::os::unix::fs::symlink;
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path().canonicalize().unwrap();
@@ -221,11 +221,11 @@ fn owned_snapshot_checks_real_cwd_and_regular_stdin_links() {
     )
     .unwrap();
     symlink(&root, proc.join("cwd")).unwrap();
-    symlink(&rollout, proc.join("fd/0")).unwrap();
+    symlink(&rollout, proc.join("fd/2")).unwrap();
     let snapshot = read_snapshot(&proc, &rollout).unwrap();
     assert_eq!(check(&snapshot, &expected), Ok(()));
-    std::fs::remove_file(proc.join("fd/0")).unwrap();
-    symlink(&root, proc.join("fd/0")).unwrap();
+    std::fs::remove_file(proc.join("fd/2")).unwrap();
+    symlink(&root, proc.join("fd/2")).unwrap();
     assert!(
         read_snapshot(&proc, &rollout).unwrap_err().to_string().contains("not the owned rollout")
     );

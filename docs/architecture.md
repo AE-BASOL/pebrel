@@ -25,6 +25,7 @@ to rename all existing directories or create abstract interfaces everywhere.
 | `nebula_app/src/display/suggest_engine.rs` | Shared candidate calculation from input snapshots; compatibility adapter for pane state | A second source registry or access to the terminal grid during calculation |
 | `nebula_hook` | Small process/lifecycle hook bridge | An application dependency container |
 | `nebula_app/src/i18n` | Static lookup, locale resolution and formatting | Runtime catalog parsing or UI ownership |
+| `nebula_app/src/scrollbar.rs` | Shared overlay-scrollbar geometry, hit testing and drag mapping | A renderer, view owner or input dispatcher |
 | `nebula_app/src/math` | Parse, validate, layout, compile and cache responsibilities | A duplicated per-shell math engine |
 | `nebula_app/src/platform` | Explicit platform capabilities and native adapters | A dumping ground for unrelated logic |
 | `nebula_app/src/ai_hook` | Normalized provider facts, bounded ordering, one shared pane lifecycle and owned installation policy; native Windows/Unix transports | Screen keyword rules or a separate state machine per UI shell |
@@ -43,6 +44,14 @@ The map records current responsibilities; it does not assert that every legacy
 file has already reached the target shape. Eleven oversized legacy files remain
 under [ratcheted budgets](project-constraints.md). Move their independent rules
 when working on the relevant capability; do not mix a whole-app rewrite into a fix.
+
+OSC 7501 program records belong to each `Term`, with bounded validation and
+prompt/process/reset lifetime shared by local PTYs and SSH. The GPUI product
+projects those records into existing status badges, progress and Runtime API
+states, before Hooks and screen/process inference. Pane/transport failure still
+takes precedence. Reports do not create Hook ownership, session ids or additional
+desktop notifications. See
+the [protocol boundary](../architecture/notes/nebula_terminal/program_status/2026-10-21-osc7501-record-lifecycle.md).
 
 ## Rust module names are not file locations
 

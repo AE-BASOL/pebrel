@@ -17,7 +17,7 @@ mod macos;
 #[cfg(windows)]
 mod windows;
 
-/// A short-lived native probe must finish before GUI, hooks or CLI setup.
+/// Native probe helpers run before GUI, hooks or CLI setup.
 pub(crate) fn run_helper_if_requested() -> Option<i32> {
     #[cfg(windows)]
     return windows::run_helper_if_requested();
@@ -94,7 +94,8 @@ pub(crate) struct CodexSession {
 /// WSL panes are inspected inside the guest because Windows Toolhelp cannot
 /// see Linux processes or their open session files. Linux hosts use the same
 /// process metadata directly. Windows inspects only the pane shell's verified
-/// descendants in a disposable helper, bounding potentially blocking file APIs.
+/// descendants in one reusable, process-owned helper. Each request remains bounded;
+/// a stalled helper is terminated before a later request can replace it.
 pub(crate) fn probe_codex_session(
     pane_id: u64,
     exec_context: Option<&crate::runtime_exec::PaneExecContext>,
@@ -525,6 +526,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn proc_probes_resolve_session_symlinks_and_preserve_ownership_boundaries() {
+        use std::os::fd::AsRawFd;
         use std::os::unix::fs::symlink;
 
         struct OwnedChild(std::process::Child);
@@ -552,9 +554,9 @@ mod tests {
             "id": ROOT_ID, "source": "cli", "thread_source": "user",
         }});
         std::fs::write(&rollout, format!("{metadata}\n")).unwrap();
-        // 只启动持有样本文件的休眠进程，不运行真实 CLI 或读取用户会话。
+        // 样本只持有日志文件；就绪字节保证 exec 已完成，避免读到继承的测试线程名。
         let program = root.path().join("codex");
-        symlink("/bin/sleep", &program).unwrap();
+        symlink("/bin/sh", &program).unwrap();
         let pane = "session-symlink-fixture";
         let instance = std::process::id().to_string();
         let fixture_cwd = root.path().canonicalize().unwrap();
@@ -573,20 +575,31 @@ mod tests {
         {
             let mut command = Command::new(&program);
             command
-                .arg("30")
+                .args(["-c", "printf R; read -r _"])
                 .current_dir(root.path())
                 .env_clear()
                 .env("HOME", &home)
                 .env("PEBREL_PANE_ID", pane)
                 .env("NEBULA_PANE_ID", pane)
                 .env(crate::agent_env::PROCESS_ENV, &instance)
-                .stdin(std::fs::File::open(&rollout).unwrap())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null());
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(std::fs::File::open(&rollout).unwrap());
             if let Some(value) = &codex_home {
                 command.env("CODEX_HOME", value);
             }
             let mut child = OwnedChild(command.spawn().unwrap());
+            // stdin 管道维持样本存活；父进程退出时 EOF 也能结束样本，不遗留休眠进程。
+            let mut ready = child.0.stdout.take().unwrap();
+            let mut event =
+                libc::pollfd { fd: ready.as_raw_fd(), events: libc::POLLIN, revents: 0 };
+            // SAFETY: pollfd 在调用期间有效；只等待就绪，不重试被测探测器或延长其期限。
+            let signaled =
+                unsafe { libc::poll(&mut event, 1, PROBE_TIMEOUT.as_millis() as libc::c_int) };
+            assert_eq!(signaled, 1, "fixture did not signal readiness");
+            let mut signal = [0];
+            ready.read_exact(&mut signal).unwrap();
+            assert_eq!(signal, [b'R']);
             let expected_child = proc_fixture::Expected {
                 pane,
                 instance: &instance,

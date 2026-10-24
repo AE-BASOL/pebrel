@@ -33,9 +33,11 @@ pub mod fonts;
 pub(crate) mod global_shortcut;
 #[cfg(all(windows, feature = "gpui-shell"))]
 pub(crate) mod keyboard;
+pub(crate) mod launch_directory;
 pub(crate) mod local_paths;
 pub mod notifications;
 pub(crate) mod pi_session;
+pub(crate) mod private_file;
 pub(crate) mod process;
 pub(crate) mod process_output;
 pub(crate) mod process_snapshot;
@@ -46,10 +48,14 @@ pub mod shell_integration;
 #[cfg(unix)]
 mod sound;
 pub(crate) mod ssh_agent;
+#[cfg(all(test, target_os = "macos"))]
+mod ssh_config_probe_tests;
 pub mod startup;
 #[cfg(unix)]
 pub(crate) mod tray_native;
 pub(crate) mod update_installation;
+#[cfg(feature = "gpui-shell")]
+pub(crate) mod video_underlay;
 #[cfg(feature = "gpui-shell")]
 pub(crate) mod window_capture;
 #[cfg(feature = "gpui-shell")]
@@ -58,6 +64,7 @@ pub(crate) mod window_chrome;
 pub(crate) mod window_material;
 #[cfg(all(unix, feature = "gpui-shell"))]
 pub(crate) mod window_visibility;
+pub(crate) mod wsl_guest_shell;
 pub(crate) mod wsl_hooks;
 
 pub use capabilities::CAPABILITIES;

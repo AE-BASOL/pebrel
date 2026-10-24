@@ -15,6 +15,7 @@
 ))]
 compile_error!(r#"at least one of the "x11"/"wayland" features must be enabled"#);
 
+#[cfg(feature = "legacy-shell")]
 use std::env;
 use std::error::Error;
 use std::fmt::Write as _;
@@ -50,6 +51,7 @@ mod chemistry;
 mod cli;
 mod clipboard;
 mod codex_config;
+mod command_lenses;
 mod completion;
 mod completion_context;
 mod config;
@@ -89,6 +91,8 @@ mod migrate;
 mod mobile_connection;
 mod motion;
 mod mux;
+mod native_result_model;
+mod native_view_cli;
 mod nebula_history;
 mod notify;
 #[cfg(windows)]
@@ -114,6 +118,7 @@ mod saved_commands;
 mod scheduler;
 #[cfg(test)]
 mod scientific_corpus;
+mod scrollbar;
 mod session;
 mod shell_detect;
 mod ssh;
@@ -222,13 +227,18 @@ fn main() -> Result<(), Box<dyn Error>> {
     #[cfg(feature = "gpui-shell")]
     if wants_gpui_shell(&options) {
         let terminal_options = &options.window_options.terminal_options;
-        let initial_cwd = terminal_options
-            .resolved_working_directory()
-            .filter(|path| path.is_dir())
-            .and_then(|path| std::path::absolute(path).ok());
         // `--shell <id>`（右键菜单「在 Pebrel 中打开（Ubuntu）」用它）一路带到
         // 首个标签；缺省仍然用设置里的默认 shell。
         let shell_id = terminal_options.shell_id();
+        let requested_shell = terminal_options.command().map(Into::into).or_else(|| {
+            crate::gpui_shell::workspace::shell_launch::startup_shell(shell_id.clone())
+        });
+        let initial_cwd = terminal_options.resolved_working_directory().and_then(|path| {
+            platform::launch_directory::validate(
+                path,
+                platform::launch_directory::is_wsl(requested_shell.as_ref()),
+            )
+        });
         platform::startup::prepare_gui();
         let _log_file = logging::initialize(&options).expect("Unable to initialize logger");
         // 显式点名的 shell 解析不了就别开窗：悄悄换回默认 shell 是这条路径最该
@@ -244,6 +254,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         #[cfg(windows)]
         if try_hand_over_to_resident(&options) {
             return Ok(());
+        }
+        // The first WSL pane spawns before any guest could answer; ask its guest
+        // now, off this thread, so a running distribution has answered by then
+        // (see `platform::wsl_guest_shell`). An explicit command opens no shell.
+        if terminal_options.command().is_none() {
+            let shell_id = shell_id.clone();
+            platform::wsl_guest_shell::warm_up(move || {
+                crate::gpui_shell::workspace::shell_launch::startup_shell(shell_id)
+            });
         }
         gpui_shell::run_shell(
             initial_cwd,
@@ -272,6 +291,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         Some(Subcommands::Theme(options)) => {
             std::process::exit(theme_library::package::cli::run(options))
         },
+        Some(Subcommands::View(options)) => std::process::exit(native_view_cli::run(options)),
         #[cfg(windows)]
         Some(Subcommands::NotifyTest) => std::process::exit(crate::notify::notify_test()),
         Some(Subcommands::SetupAi(options)) => {
@@ -582,13 +602,19 @@ fn resident_launch_directory(
     options: &cli::TerminalOptions,
     settings: &nebula_settings::RuntimeSettings,
 ) -> Option<std::path::PathBuf> {
-    // 进程 cwd 只是缺省值，不能在交接前把它提升成覆盖用户设置的显式目录。
-    options
-        .resolved_working_directory()
-        .or_else(|| settings.startup_directory_path())
-        .or_else(|| env::current_dir().ok())
-        .filter(|path| path.is_dir())
-        .and_then(|path| std::path::absolute(path).ok())
+    #[cfg(feature = "gpui-shell")]
+    let shell = options.command().map(Into::into).or_else(|| {
+        crate::gpui_shell::workspace::shell_launch::startup_shell(
+            options.shell_id().or_else(|| settings.shell.clone()),
+        )
+    });
+    #[cfg(not(feature = "gpui-shell"))]
+    let shell = options.command().map(Into::into);
+    platform::startup::resident_launch_directory(
+        options.resolved_working_directory(),
+        settings,
+        platform::launch_directory::is_wsl(shell.as_ref()),
+    )
 }
 
 #[cfg(test)]

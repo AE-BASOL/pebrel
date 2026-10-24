@@ -54,11 +54,13 @@
 <table>
   <tr>
     <td align="center" width="240">
-      <a href="https://fluxionai.space/register?source=github&campaign=pebrel&promo=pebrel"><img src="extra/logo/sponsor_fluxionai.png" alt="Fluxion AI" width="200" /></a><br />
-      <a href="https://fluxionai.space/register?source=github&campaign=pebrel&promo=pebrel"><strong>Fluxion AI</strong></a>
+      <a href="https://sidrune.ai/register?source=github&campaign=pebrel&promo=pebrel"><img src="extra/logo/sponsor_sidrune.png" alt="Sidrune AI" width="200" /></a><br />
+      <a href="https://sidrune.ai/register?source=github&campaign=pebrel&promo=pebrel"><strong>Sidrune AI</strong></a>
     </td>
     <td>
-      Thanks to Fluxion AI for sponsoring this project! Fluxion AI is one entry point for accessing and managing the world's leading AI models. It serves individual developers, technical teams and enterprises with a unified API; dynamic multi-route scheduling improves availability, and model performance, response time and cost stay transparent. Depending on the model and route, API calls can cost 40%–98% less than official or benchmark prices. <a href="https://fluxionai.space/register?source=github&campaign=pebrel&promo=pebrel">Sign up via this link</a> to receive $3 in API credit.
+      <p><strong>One entry point for accessing and managing the world's leading AI models</strong></p>
+      <p>Thanks to Sidrune AI for sponsoring this project! Sidrune AI serves individual developers, technical teams and enterprises with a unified API for accessing and managing the world's leading AI models. Dynamic multi-route scheduling improves availability, and model performance, response time and cost stay transparent. Depending on the model and route, API calls can cost 40%–98% less than official or benchmark prices.</p>
+      <p><a href="https://sidrune.ai/register?source=github&campaign=pebrel&promo=pebrel">Visit and sign up now</a> to receive $3 in API credit.</p>
     </td>
   </tr>
 </table>
@@ -76,6 +78,9 @@ each agent's activity, and read its output without leaving the application.
 - Sidebar or top tabs, draggable split panes, and per-pane working directories.
 - Saved workspace layouts and optional AI conversation restoration. On WSL and
   Linux, Codex session metadata can supply an ID when its hook has not reported one.
+- Native Windows Codex identity refreshes share a background helper with startup
+  cursor feedback disabled. Each refresh reads current metadata and remains bounded;
+  a stalled helper is stopped before a later refresh creates its replacement.
 - On Windows, optional background residency keeps running sessions alive when you
   close the window. Restoring a conversation after the process exits is a separate
   feature and requires a supported CLI and a usable session identity.
@@ -151,7 +156,9 @@ discover candidates from the current environment without matching prior commands
   states. Supported hook events provide more precise progress and attention signals.
 - Notifications follow their source pane; clicking one returns you to that terminal.
 - Captured Claude Code and Codex answers open in a reader with Markdown, formulas,
-  source text, and local image previews.
+  source text, and local image previews. Reader controls and notices follow the
+  selected language; Copy source preserves the complete original answer. See
+  [reader language behavior](docs/answer-reader-language.md).
 - Clipboard images are saved as PNG files and their paths inserted into local,
   WSL, or SSH sessions. Inline terminal images require the CLI to emit the supported
   OSC 1337 protocol; image attachment previews depend on the CLI itself.

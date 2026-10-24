@@ -5,8 +5,10 @@
 
 use super::*;
 mod bulk;
+mod clipboard;
 pub(super) use bulk::CommandSelection;
 use bulk::Deletion;
+use clipboard::editor_clipboard_input;
 mod groups;
 #[cfg(all(test, feature = "gpui-test-support", target_os = "windows"))]
 mod native_paste_tests;
@@ -359,7 +361,10 @@ impl NebulaWorkspace {
                         .w_full()
                         .gap_1()
                         .child(div().text_sm().font_semibold().child(language.pick("名称", "Name")))
-                        .child(Input::new(&name).w_full().accessibility_id("saved-command-name")),
+                        .child(editor_clipboard_input(
+                            Input::new(&name).w_full().accessibility_id("saved-command-name"),
+                            &name,
+                        )),
                 )
                 .child(
                     v_flex()
@@ -368,10 +373,11 @@ impl NebulaWorkspace {
                         .child(
                             div().text_sm().font_semibold().child(language.pick("命令", "Command")),
                         )
-                        .child(
+                        .child(editor_clipboard_input(
                             command_editor_input(&command, cx)
                                 .accessibility_id("saved-command-text"),
-                        ),
+                            &command,
+                        )),
                 )
                 .child(
                     gpui_component::checkbox::Checkbox::new("saved-command-append-enter")
@@ -561,12 +567,16 @@ impl NebulaWorkspace {
             let list = gpui::uniform_list(
                 "saved-command-results-scroll",
                 rows.len(),
-                cx.processor(move |this, range: std::ops::Range<usize>, _, cx| {
+                cx.processor(move |this, range: std::ops::Range<usize>, window, cx| {
                     range
                         .map(|index| match rows[index].clone() {
-                            ManagerRow::Command(command) => {
-                                this.render_saved_command_row(index, command, list_scrollable, cx)
-                            },
+                            ManagerRow::Command(command) => this.render_saved_command_row(
+                                index,
+                                command,
+                                list_scrollable,
+                                window,
+                                cx,
+                            ),
                             ManagerRow::Folder { id, name, count } => {
                                 this.render_command_folder(index, id, name, count, cx)
                             },
@@ -767,6 +777,9 @@ mod tests {
 
 #[cfg(all(test, feature = "gpui-test-support"))]
 mod input_tests;
+
+#[cfg(all(test, feature = "gpui-test-support"))]
+mod clipboard_tests;
 
 #[cfg(all(test, feature = "gpui-test-support"))]
 mod group_tests;
