@@ -7609,7 +7609,6 @@ impl Display {
                     alt_screen,
                     visible_cursor,
                     foreground_color,
-                    |_| true,
                 )
             } else {
                 Vec::new()
@@ -7634,12 +7633,7 @@ impl Display {
             &prepared_math,
             !alt_screen,
         );
-        let frame_images = inline_image::capture(
-            &terminal,
-            &mut pane_state.inline_images,
-            &view,
-            &pane_state.terminal_math,
-        );
+        let frame_images = inline_image::capture(&terminal, &mut pane_state.inline_images, &view);
 
         // Add damage from the terminal, keeping a pane-local copy: the shared
         // tracker gets flooded with a full-window mark every frame further

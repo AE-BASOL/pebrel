@@ -21,7 +21,6 @@ pub(super) fn capture<T: EventListener>(
     term: &Term<T>,
     images: &mut Vec<NebulaInlineImage>,
     view: &SizeInfo,
-    math: &super::terminal_math::TerminalMathState,
 ) -> Vec<ImageDraw> {
     images.retain(|image| image.placement.is_alive());
     if images.is_empty() {
@@ -36,8 +35,7 @@ pub(super) fn capture<T: EventListener>(
         };
         push_image_run(&mut runs, point.line as u16, point.column.0 as u16, tile);
     }
-    math.project_image_runs(&runs, view.columns())
-        .iter()
+    runs.iter()
         .filter_map(|run| {
             let image = images.iter().find(|image| image.placement.id == run.id)?;
             let layout = image.placement.layout;

@@ -29,6 +29,7 @@ pub mod cell;
 mod clear;
 pub mod color;
 mod damage;
+mod grid_content;
 mod inline_image;
 pub(crate) use inline_image::PendingImage;
 mod input;
@@ -710,20 +711,6 @@ impl<T> Term<T> {
     /// Access to the raw grid data structure.
     pub fn grid(&self) -> &Grid<Cell> {
         &self.grid
-    }
-
-    /// Mutable access to the raw grid data structure.
-    pub fn grid_mut(&mut self) -> &mut Grid<Cell> {
-        self.reset_input_cluster();
-        self.reading.invalidate();
-        self.grid.track_transient_content()
-    }
-
-    /// Internal marker writes need cached-row cleanup, but cannot introduce images.
-    pub(crate) fn inline_content_grid_mut(&mut self) -> &mut Grid<Cell> {
-        self.reset_input_cluster();
-        self.reading.invalidate();
-        self.grid.track_inline_content()
     }
 
     /// Resize terminal to new dimensions.

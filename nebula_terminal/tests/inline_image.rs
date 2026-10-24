@@ -5,10 +5,10 @@ use nebula_terminal::event::{Event, EventListener, WindowSize};
 use nebula_terminal::event_loop::StreamProcessor;
 use nebula_terminal::grid::Dimensions;
 use nebula_terminal::index::{Column, Line};
-use nebula_terminal::inline_image::{ImageCell, ImageIdentity, ImageOptions};
+use nebula_terminal::inline_image::ImageOptions;
 use nebula_terminal::render::{RenderSnapshot, SnapshotConfig};
 use nebula_terminal::term::Config;
-use nebula_terminal::term::reading::{ReadingError, ReadingPoint};
+use nebula_terminal::term::reading::ReadingPoint;
 
 #[derive(Clone, Default)]
 struct Listener(Arc<Mutex<Vec<Event>>>);
@@ -87,28 +87,6 @@ fn native_command_capture_preserves_mixed_image_output_at_every_split() {
         }
         assert_eq!(term.grid()[Line(3)][Column(0)].c, 'T');
     }
-}
-
-#[test]
-fn native_source_rejects_image_changes_and_snapshot_obeys_row_filter() {
-    let (mut term, mut stream, listener) = setup();
-    stream.feed(
-        &mut term,
-        &listener,
-        format!("{NATIVE_COMMAND}# Title\r\n\x1b]133;D;0\x07").as_bytes(),
-    );
-    let surface = term.grid()[Line(0)][Column(0)].inline_marker().unwrap().surface.clone();
-    assert!(surface.source_row_matches(0, &term.grid()[Line(0)][..]));
-    term.grid_mut()[Line(0)][Column(10)].set_image(ImageCell {
-        image: ImageIdentity::new(),
-        column: 0,
-        row: 0,
-    });
-    assert!(!surface.source_row_matches(0, &term.grid()[Line(0)][..]));
-    assert_eq!(snap(&term).image_runs.len(), 1);
-    let hidden =
-        RenderSnapshot::capture_rows(&term, &SnapshotConfig { rows: 8, cols: 20 }, |row| row != 0);
-    assert!(hidden.image_runs.is_empty());
 }
 
 #[test]
@@ -407,25 +385,4 @@ fn uncommitted_command_markers_do_not_record_image_output() {
         assert_eq!(term.completed_commands().count(), 0);
         assert_eq!(snap(&term).image_runs.len(), 2);
     }
-}
-
-#[test]
-fn external_image_cells_invalidate_reading_and_release_after_eviction() {
-    let listener = Listener::default();
-    let mut term = Term::new(
-        Config { scrolling_history: 0, ..Config::default() },
-        &Size(20, 8),
-        listener.clone(),
-    );
-    let mut stream = StreamProcessor::default();
-    stream.feed(&mut term, &listener, b"\n\n\n\n\n\n\n\n");
-    let span = term.reading_span();
-    let image = ImageIdentity::new();
-    let lifetime = Arc::downgrade(&image);
-    term.grid_mut()[Line(0)][Column(0)].set_image(ImageCell { image, column: 0, row: 0 });
-    assert_eq!(term.reading_chunk(span, None, 1, 1), Err(ReadingError::StaleEpoch));
-    assert_eq!(snap(&term).image_runs.len(), 1);
-    stream.feed(&mut term, &listener, b"\n");
-    assert!(snap(&term).image_runs.is_empty());
-    assert!(lifetime.upgrade().is_none());
 }
