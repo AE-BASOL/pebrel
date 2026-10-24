@@ -52,6 +52,26 @@ Symmetric completion with zero new sampling, timers or IO:
    completion notification fires — the late real hook arrives normally
    and is deduplicated per turn.
 
+Review corrections (2026-10-24, maintainer counterexamples):
+
+5. The nested-shell OSC 7 weak edge no longer clears a weakly inferred
+   running command on the cwd report alone: OSC 7 is a directory signal
+   and a running command can emit it (`bash -c 'printf OSC7; sleep 60'`).
+   The clear now requires prompt evidence from the pane process tree —
+   every process is the root session shell or a nested interactive
+   shell; any command child vetoes. SSH panes keep the prompt-render
+   inference (their process tree lives remotely; known boundary).
+6. A reconciliation settle to Done/Idle is marked as **inferred**: the
+   duplicate-completion guard only rejects replays of authoritative
+   completions, so a late real TurnDone with the same turn id is
+   accepted and its success/failure outcome and notification land
+   (failing outcomes settle to Idle, not a ready Done).
+7. The `pending_submit` barrier lives only until hook silence crosses
+   the stall threshold: when a submission and every subsequent hook are
+   lost, the barrier expires on the first stalled tick (samples reset),
+   and the normal two-stable-frames evidence applies in both
+   directions.
+
 ## Rejected alternatives
 
 - Fixing only Done → Working and leaving Blocked: permission answers and
@@ -88,6 +108,16 @@ Symmetric completion with zero new sampling, timers or IO:
   `remote_lost_prompt_submit_is_reignited_by_stalled_working_screen`
   (full first turn → lost ignition → no reignite while the hook timeline
   is active → two spinner samples reignite Running with identity kept).
+
+- Review-driven regressions:
+  `a_running_command_emitting_osc7_does_not_finish_itself` (live command
+  child vetoes; the settle only after it exits),
+  `late_authoritative_turn_done_supersedes_an_inferred_done` and
+  `late_failed_turn_done_supersedes_an_inferred_done` (late success and
+  failure after an inferred Done),
+  `pending_submit_barrier_expires_once_hooks_stay_silent_past_the_stall`
+  and `expired_submit_barrier_lets_a_later_idle_screen_settle` (recovery
+  boundary in both directions).
 
 ## Supersedes
 
