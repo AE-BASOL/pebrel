@@ -1563,7 +1563,7 @@ impl Render for TerminalView {
             root = root.children(self.file_upload_indicator(cx));
             root = root.children(self.native_result_elements(window, cx));
             if self.ssh_disconnected() {
-                root = root.child(self.ssh_disconnect_banner(cx));
+                root = root.child(self.ssh_disconnect_notice(cx));
             }
             // SSH 连接卡片（旧壳 `display::ssh_connect` 的 GPUI 形态）：
             // 状态机/文案/常量直接复用，卡片遮罩盖住空 grid。350ms 显示
