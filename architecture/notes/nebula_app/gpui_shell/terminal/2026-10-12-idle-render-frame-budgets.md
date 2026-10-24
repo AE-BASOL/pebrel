@@ -58,6 +58,27 @@ throttling:
    gate-regex cost, never the sampling cadence (see the Fleet lesson
    above).
 
+Review corrections (2026-10-24, maintainer findings):
+
+6. The armed spinner chain rechecks minimization **every tick** using the
+   native window handle captured at arm time (`native_window_minimized`);
+   previously only the render-side offscreen probe could notice, and
+   render stalls while minimized — a visible badge followed by a
+   minimize kept notifying at ~12.5 Hz.
+7. The watchdog snapshot cache no longer holds its mutex during the
+   full-machine enumeration: the fast path locks only for the freshness
+   check and pure map reads, misses enumerate **outside** the lock and
+   publish under a short critical section (last writer wins, a still
+   fresh table is never rolled back), and the publish timestamp is
+   taken **after** enumeration completes so the TTL is not pre-spent on
+   the enumeration itself. Concurrent misses enumerate in parallel —
+   hook-route validation can no longer queue behind a seconds-long
+   `ps`.
+8. The identify/detect memo is keyed by `(program, screen)` in a small
+   bounded map (8 slots, cleared wholesale on manifest generation
+   changes) instead of a global single slot: alternating panes evicted
+   each other and the stated multi-pane hits never happened.
+
 ## Rejected alternatives
 
 - Throttling the whole render path or short-circuiting
@@ -87,6 +108,17 @@ throttling:
   (`terminal/view/tests.rs`, `display/animations.rs` spinner phase test).
 - Full `cargo test -p nebula` green; manual Fleet-derived measurements
   documented above.
+
+- Review-driven regressions:
+  `slow_snapshot_does_not_serialize_concurrent_readers` (two 150 ms
+  enumerations overlap instead of queueing on the cache lock),
+  `snapshot_timestamp_is_taken_after_enumeration_completes` (cache age
+  counts from completion),
+  `alternating_pane_screens_keep_their_own_memo_slots` (two panes of one
+  agent each hit their own slot).
+- Native minimize/restore/tray-hide/close verification of the spinner
+  chain and visual acceptance of the 8 s cursor steady state remain
+  pending on native platforms, as the review requested.
 
 ## Supersedes
 
