@@ -542,17 +542,23 @@ impl NebulaWorkspace {
                     row.child(
                         div()
                             .id(("sidebar-pane-count", ix))
+                            .size(px(28.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(4.0))
+                            .hover(|style| style.bg(theme.muted.opacity(0.5)))
+                            .active(|style| style.bg(theme.muted))
                             .flex_shrink_0()
                             .cursor_pointer()
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 cx.stop_propagation();
                                 this.cycle_pane_focus(ix, window, cx);
                             }))
-                            .child(pane_header::split_badge(
-                                pane_count,
+                            .child(pane_header::split_layout_icon(
+                                &self.tabs[ix],
                                 label_px,
                                 if active { active_fg } else { muted },
-                                if active { active_bg } else { theme.muted },
                             )),
                     )
                 })
@@ -991,7 +997,7 @@ impl NebulaWorkspace {
             return slot;
         }
         let theme = cx.theme();
-        let (ink, dim, badge_fill) = (theme.foreground, theme.muted_foreground, theme.muted);
+        let (ink, dim) = (theme.foreground, theme.muted_foreground);
         let dark = theme.is_dark();
         let settings = cx.try_global::<crate::gpui_shell::config::Settings>();
         let chrome_family = theme.font_family.clone();
@@ -1050,9 +1056,9 @@ impl NebulaWorkspace {
                         .text_color(ink)
                         .child(title),
                 )
-                // 折叠态没有侧栏行可看，分屏数量只能挂在这里；> 1 才画。
+                // 折叠态在标题旁显示相同的分屏布局缩略图。
                 .when(pane_count > 1, |row| {
-                    row.child(pane_header::split_badge(pane_count, label_px, dim, badge_fill))
+                    row.child(pane_header::split_layout_icon(&self.tabs[self.active], label_px, dim))
                 }),
         )
     }
