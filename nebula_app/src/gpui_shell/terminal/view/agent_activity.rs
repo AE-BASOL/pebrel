@@ -181,12 +181,14 @@ impl TerminalView {
             let screen = ((self.effective_program_status().is_none()
                 && self.agent_activity.allows_screen())
                 || reconcile_remote)
-            .then(|| {
-                let start = Point::new(Line((lines - lines.min(24)) as i32), Column(0));
-                let end =
-                    Point::new(Line(lines as i32 - 1), Column(term.columns().saturating_sub(1)));
-                term.bounds_to_string(start, end)
-            });
+                .then(|| {
+                    let start = Point::new(Line((lines - lines.min(24)) as i32), Column(0));
+                    let end = Point::new(
+                        Line(lines as i32 - 1),
+                        Column(term.columns().saturating_sub(1)),
+                    );
+                    term.bounds_to_string(start, end)
+                });
             (prompt_restored, screen)
         };
         if prompt_restored
