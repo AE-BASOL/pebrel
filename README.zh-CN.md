@@ -54,11 +54,13 @@
 <table>
   <tr>
     <td align="center" width="240">
-      <a href="https://fluxionai.space/register?source=github&campaign=pebrel&promo=pebrel"><img src="extra/logo/sponsor_fluxionai.png" alt="Fluxion AI" width="200" /></a><br />
-      <a href="https://fluxionai.space/register?source=github&campaign=pebrel&promo=pebrel"><strong>Fluxion AI</strong></a>
+      <a href="https://sidrune.ai/register?source=github&campaign=pebrel&promo=pebrel"><img src="extra/logo/sponsor_sidrune.png" alt="Sidrune AI" width="200" /></a><br />
+      <a href="https://sidrune.ai/register?source=github&campaign=pebrel&promo=pebrel"><strong>Sidrune AI</strong></a>
     </td>
     <td>
-      感谢 Fluxion AI 赞助本项目！Fluxion AI 是一个入口，接入并管理全球主流 AI 模型：面向个人开发者、技术团队与企业，通过统一 API 接入并管理全球主流 AI 模型；通过多线路动态调度提升可用性，模型表现、响应时间与费用透明可查。根据不同模型与线路，API 调用成本较官方或基准价格可降低 40%—98%。<a href="https://fluxionai.space/register?source=github&campaign=pebrel&promo=pebrel">立即访问并注册</a>，即可获得 $3 API 额度。
+      <p><strong>一个入口，接入并管理全球主流 AI 模型</strong></p>
+      <p>感谢 Sidrune AI 赞助本项目！Sidrune AI 面向个人开发者、技术团队与企业，通过统一 API 接入并管理全球主流 AI 模型；通过多线路动态调度提升可用性，模型表现、响应时间与费用透明可查。根据不同模型与线路，API 调用成本较官方或基准价格可降低 40%—98%。</p>
+      <p><a href="https://sidrune.ai/register?source=github&campaign=pebrel&promo=pebrel">立即访问并注册</a>，即可获得 $3 API 额度。</p>
     </td>
   </tr>
 </table>
@@ -75,6 +77,8 @@ Pebrel（原名 Nebula）把本地 Shell、远程主机、文件和 AI 命令行
 - 侧栏或顶部标签、可拖拽分屏，以及各窗格独立的工作目录。
 - 保存工作区布局，可选恢复 AI 对话。在 WSL 与 Linux 中，Codex 的 hook 未上报 ID 时，
   可从当前会话元数据补全身份。
+- Windows 原生 Codex 身份刷新复用后台辅助进程，并禁用启动光标提示。每次仍读取当前
+  元数据并限制等待时间；辅助进程卡住时先终止，后续刷新再创建替代进程。
 - Windows 下可选择后台驻留，让关窗后的会话继续运行。进程退出后重新接续已保存的对话
   是另一项功能，需要 CLI 支持恢复，并且有可用的会话身份。
 - 智能补齐与历史补齐、自定义快捷键，以及集成的 Shell 提示符。
@@ -136,6 +140,7 @@ WSL 发行版，以及 `cat` 读取带空格的文件名。使用内置 Powerlin
 - Claude Code、Codex 等可识别的 CLI 显示各自图标与活动状态；受支持的 hook 事件提供更准确的进度和待处理信号。
 - 通知跟随来源窗格，点击即可返回对应终端。
 - 已捕获的 Claude Code 与 Codex 回答可在阅读器中打开，支持 Markdown、公式、原文和本地图片预览。
+  阅读器控件与提示随所选语言显示；复制原文保留完整回答。详见[阅读器语言说明](docs/answer-reader-language.md)。
 - 剪贴板图片会保存为 PNG，并把路径插入本地、WSL 或 SSH 会话。终端内直接显示图片需要 CLI
   输出受支持的 OSC 1337 协议；附件缩略图取决于 CLI 自身。
 

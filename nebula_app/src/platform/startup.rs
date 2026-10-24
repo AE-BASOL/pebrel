@@ -6,6 +6,25 @@ pub(crate) fn report_error(error: &dyn std::fmt::Display, gui_launch: bool) {
     let _ = (error, gui_launch);
 }
 
+/// 两种权限的重复启动共用目录优先级，进程 cwd 不覆盖显式目录或用户设置。
+pub(crate) fn resident_launch_directory(
+    explicit: Option<std::path::PathBuf>,
+    settings: &nebula_settings::RuntimeSettings,
+    wsl: bool,
+) -> Option<std::path::PathBuf> {
+    explicit
+        .or_else(|| {
+            settings
+                .startup_directory
+                .as_deref()
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .and_then(|path| super::launch_directory::validate(path.into(), wsl))
+        })
+        .or_else(|| (!wsl).then(|| std::env::current_dir().ok()).flatten())
+        .and_then(|path| super::launch_directory::validate(path, wsl))
+}
+
 #[cfg(windows)]
 mod console;
 #[cfg(feature = "gpui-shell")]
@@ -147,6 +166,28 @@ fn startup_shortcut() -> std::io::Result<std::path::PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn wsl_handover_does_not_reclassify_an_inherited_host_directory_as_explicit() {
+        use nebula_settings::{RawSettings, RuntimeSettings};
+        let settings = RuntimeSettings::from_raw(&RawSettings::from_text(""));
+        assert_eq!(super::resident_launch_directory(None, &settings, true), None);
+        assert!(super::resident_launch_directory(None, &settings, false).is_some());
+        let guest = std::path::PathBuf::from("/home/pebrel-fixture/work");
+        assert_eq!(
+            super::resident_launch_directory(Some(guest.clone()), &settings, true),
+            Some(guest.clone())
+        );
+        let settings = RuntimeSettings::from_raw(&RawSettings::from_text(
+            "startup_directory=/home/pebrel-fixture/work",
+        ));
+        assert_eq!(super::resident_launch_directory(None, &settings, true), Some(guest));
+        let directory = tempfile::tempdir().unwrap();
+        assert_eq!(
+            super::resident_launch_directory(Some(directory.path().into()), &settings, true),
+            Some(directory.path().into())
+        );
+    }
+
     #[test]
     fn silent_start_requires_a_tray_and_native_window_hiding() {
         use nebula_settings::{RawSettings, RuntimeSettings};
