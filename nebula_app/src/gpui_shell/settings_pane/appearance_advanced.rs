@@ -112,7 +112,7 @@ impl SettingsPane {
                 cx,
             ))
             .child(self.slider_row(
-                language.pick("终端正文不透明度", "Terminal content opacity"),
+                language.text(crate::i18n::Message::SettingsOpacityTitle),
                 help("opacity", language),
                 &self.opacity_slider,
                 opacity,
