@@ -59,6 +59,13 @@ impl Render for NebulaWorkspace {
             }
         };
         let settings_active = self.settings_open;
+        let settings_content = settings_active
+            || matches!(self.tabs.get(self.active), Some(WorkspaceTab::Settings { .. }));
+        let content_background = if settings_content {
+            crate::gpui_shell::theme::settings_content_bg(cx)
+        } else {
+            crate::gpui_shell::theme::card_content_bg(cx)
+        };
         let top_tabs = self.tabs_position == nebula_settings::TabsPositionName::Top;
         let reader_focus = self.reader_focus_active(cx);
         // dock 预览：被拖 tab 悬于终端区时高亮目标半区（松手即挂到那侧）。
@@ -320,7 +327,7 @@ impl Render for NebulaWorkspace {
                             div()
                                 .size_full()
                                 .rounded(px(card_style.radius))
-                                .bg(crate::gpui_shell::theme::card_content_bg(cx))
+                                .bg(content_background)
                                 .when(card_style.shadow, |card| {
                                     // 投影落在有圆角的这一层，才会跟着卡的形状走。
                                     // 父容器没有 overflow_hidden，所以 blur 可以溢出

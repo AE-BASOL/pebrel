@@ -17,6 +17,10 @@
     "en_us": "English"
   },
   "settings": {
+    "opacity": {
+      "title": "ウィンドウ背景の不透明度",
+      "description": "値を下げるほどターミナルと設定の背景が透明になります。文字は不透明のままです。"
+    },
     "completion": {
       "mode": "補完モード",
       "cycle": "補完モードを切り替え",
