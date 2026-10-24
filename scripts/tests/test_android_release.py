@@ -2,15 +2,55 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
+from mobile.tools.build_ghostty import build_environment
 from scripts import android_release as android
 from scripts.preview_release import sha256
 
 
 class AndroidReleaseTests(unittest.TestCase):
+    def test_extracted_terminal_source_cannot_discover_the_application_tag(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            sources = root / "unpacked" / "terminal-core"
+            sources.mkdir(parents=True)
+            environment = os.environ.copy()
+            for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_CEILING_DIRECTORIES"):
+                environment.pop(name, None)
+
+            def git(*args, cwd=root, env=environment):
+                return subprocess.run(
+                    ["git", "-C", str(cwd), *args], env=env,
+                    text=True, encoding="utf-8", capture_output=True,
+                )
+
+            self.assertEqual(git("init").returncode, 0)
+            committed = git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                            "-c", "commit.gpgsign=false", "-c", "core.hooksPath=",
+                            "commit", "--allow-empty", "-m", "Application fixture")
+            self.assertEqual(committed.returncode, 0, committed.stderr)
+            self.assertEqual(git("tag", "v2.2.0").returncode, 0)
+            # 失败对照重现上游的真实 Git 查询，证明标签来自父仓库。
+            leaked = git("describe", "--exact-match", "--tags", cwd=sources)
+            self.assertEqual(leaked.stdout.strip(), "v2.2.0")
+            with patch.dict(os.environ, environment, clear=True):
+                for inherited in ({}, {"GIT_DIR": str(root / ".git"),
+                                       "GIT_WORK_TREE": str(root),
+                                       "GIT_COMMON_DIR": str(root / ".git")}):
+                    with self.subTest(inherited=inherited), patch.dict(os.environ, inherited):
+                        isolated = build_environment(sources, root / "ndk", root / "output")
+                        detected = git("rev-parse", "--abbrev-ref", "HEAD", cwd=sources, env=isolated)
+                        self.assertNotEqual(detected.returncode, 0)
+                        self.assertIn("not a git repository", detected.stderr.lower())
+                        self.assertEqual(isolated["ANDROID_NDK_HOME"], str(root / "ndk"))
+            self.assertEqual(git("describe", "--exact-match", "--tags").stdout.strip(), "v2.2.0")
+
     def identity(self):
         metadata = {"applicationId": android.APPLICATION_ID, "variantName": "preview", "elements": [
             {"filters": [], "outputFile": "app-preview.apk", "versionCode": 18, "versionName": "2.0.0-preview"},
@@ -99,8 +139,12 @@ class AndroidReleaseTests(unittest.TestCase):
         workflow = (root / ".github/workflows/release.yml").read_text(encoding="utf-8")
         android_workflow = (root / ".github/workflows/android-release.yml").read_text(encoding="utf-8")
         self.assertIn("uses: ./.github/workflows/android-release.yml", workflow)
+        android_job = workflow.split("\n  android:\n", 1)[1].split("\n  aggregate:\n", 1)[0]
+        self.assertIn("needs.prepare.outputs.include_android == 'true'", android_job)
         self.assertIn("needs: [prepare, linux, macos, windows, windows-arm64, android]", workflow)
         self.assertIn("release-dist/*.apk", workflow)
+        self.assertIn("android_assets=()", workflow)
+        self.assertIn('"${android_assets[@]}" release-dist/SHA256SUMS', workflow)
         for required in (":app:testDebugUnitTest", ":app:lintPreview", ":app:assemblePreview",
                          ":app:connectedPreviewAndroidTest", "--commit", "stable-package-android",
                          "stable-evidence-android", "aarch64-unknown-linux-musl", "x86_64-unknown-linux-musl"):
@@ -108,6 +152,43 @@ class AndroidReleaseTests(unittest.TestCase):
         self.assertNotIn("continue-on-error", android_workflow)
         self.assertNotIn("assembleDebug", android_workflow)
         self.assertNotIn("keytool -genkey", android_workflow)
+        self.assertIn("dist/*-relay-manual.tar.gz", android_workflow)
+        self.assertIn("workflow_dispatch:", android_workflow)
+        self.assertEqual(android_workflow.count("ref: ${{ env.SOURCE_COMMIT }}"), 2)
+        self.assertEqual(android_workflow.count('test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"'), 2)
+        self.assertEqual(android_workflow.count('--commit "$SOURCE_COMMIT"'), 2)
+        self.assertNotIn('--commit "$GITHUB_SHA"', android_workflow)
+        self.assertIn("GIT_CEILING_DIRECTORIES: ${{ github.workspace }}/mobile/android", android_workflow)
+
+    def test_desktop_only_222_has_no_android_package_or_manual_kit(self):
+        self.assertIsNone(android.manual_asset_name("2.2.2"))
+        with self.assertRaises(ValueError):
+            android.asset_name("2.2.2")
+        for version in ("2.2.1", "2.2.3"):
+            with self.subTest(version=version):
+                self.assertTrue(android.asset_name(version).endswith(".apk"))
+                self.assertTrue(android.manual_asset_name(version).endswith("-relay-manual.tar.gz"))
+
+    def test_manual_kit_evidence_is_required_only_after_the_published_211_manifest(self):
+        self.assertIsNone(android.manual_asset_name("2.1.1"))
+        version, commit = "2.1.2", "a" * 40
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            apk = root / android.asset_name(version)
+            apk.write_bytes(b"APK identity fixture")
+            kit = root / android.manual_asset_name(version)
+            kit.write_bytes(b"manual kit identity fixture")
+            data = {"schema_version": 1, "status": "passed", "commit": commit, "version": version,
+                    "application_id": android.APPLICATION_ID, "version_code": 21,
+                    "certificate_sha256": android.CERTIFICATE_SHA256, "apk": apk.name, "sha256": sha256(apk),
+                    "tests": {"unit": {"passed": 1}, "instrumented": {"passed": 1}},
+                    "relay_kit": {"file": kit.name, "sha256": sha256(kit)}}
+            report = root / "report.json"
+            report.write_text(json.dumps(data), encoding="utf-8")
+            android.validate_evidence(report, root, version, commit)
+            kit.write_bytes(b"changed")
+            with self.assertRaisesRegex(ValueError, "Manual relay"):
+                android.validate_evidence(report, root, version, commit)
 
 
 if __name__ == "__main__":

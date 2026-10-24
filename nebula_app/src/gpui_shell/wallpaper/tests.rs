@@ -15,6 +15,26 @@ fn letterbox_edges_stay_square_and_native_alignment_inherits_card_corners() {
     assert_eq!(corners.bottom_right, px(0.0));
 }
 
+#[test]
+fn native_underlay_composites_exactly_like_a_wallpaper_painted_above_the_surface() {
+    for surface in [0.0, 0.3, 0.62, 0.78, 1.0] {
+        for wallpaper in [0.0, 0.2, 0.38, 0.75, 1.0] {
+            let (alpha, layer) = underlay_composition(surface, wallpaper);
+            // Weights of video, surface color and whatever lies behind the window.
+            let above =
+                [wallpaper, surface * (1.0 - wallpaper), (1.0 - surface) * (1.0 - wallpaper)];
+            let below = [(1.0 - alpha) * layer, alpha, (1.0 - alpha) * (1.0 - layer)];
+            for (expected, actual) in above.iter().zip(below) {
+                assert!(
+                    (expected - actual).abs() < 1e-6,
+                    "surface {surface}, wallpaper {wallpaper}: {above:?} != {below:?}"
+                );
+            }
+            assert!((0.0..=1.0).contains(&layer));
+        }
+    }
+}
+
 fn settings(path: Option<PathBuf>) -> nebula_settings::RuntimeSettings {
     let mut settings = nebula_settings::RuntimeSettings::load();
     settings.background_image = path.map(|path| path.to_string_lossy().into_owned());
@@ -22,6 +42,7 @@ fn settings(path: Option<PathBuf>) -> nebula_settings::RuntimeSettings {
     settings.background_image_fit = Some("fill".into());
     settings.background_image_alignment = Some("center".into());
     settings.background_image_cover_chrome = false;
+    settings.background_effects = nebula_settings::BackgroundEffects::default();
     settings
 }
 
@@ -55,14 +76,15 @@ fn loading_yields_and_layout_opacity_refreshes_reuse_the_same_image(cx: &mut Tes
     cx.update(|cx| update_wallpaper(&rt, 0.8, BlurModeName::None, cx));
     cx.run_until_parked();
     cx.update(|cx| {
-        let wp = cx.global::<VisualEffects>().wallpaper.as_ref().unwrap();
+        let effects = cx.global::<VisualEffects>();
+        let wp = effects.wallpaper.as_ref().unwrap();
         assert!(Arc::ptr_eq(&original, wp.image.as_ref().unwrap()));
-        assert_eq!(wp.opacity, 0.75);
-        assert_eq!(wp.fit, BackgroundImageFit::Uniform);
+        assert_eq!(effects.layout.opacity, 0.75);
+        assert_eq!(effects.layout.fit, BackgroundImageFit::Uniform);
         assert_eq!(chrome_surface_opacity(cx), 0.78);
         for width in 800..1000 {
             let bounds = Bounds::new(point(px(100.0), px(30.0)), size(px(width as f32), px(600.0)));
-            let _ = image_bounds(wp, bounds, 1.5);
+            let _ = image_bounds(wp, effects.layout, bounds, 1.5);
             assert!(Arc::ptr_eq(&original, wp.image.as_ref().unwrap()));
         }
         rt.background_image_opacity = 0.0;
@@ -111,12 +133,8 @@ fn latest_request_wins_and_clearing_during_decode_cannot_restore_an_image(cx: &m
 
 #[test]
 fn card_and_chrome_share_the_window_anchor_and_preserve_native_physical_size() {
-    let mut wp = Wallpaper {
-        path: PathBuf::new(),
-        image: None,
-        stamp: None,
-        width: 800,
-        height: 400,
+    let wp = Wallpaper { path: PathBuf::new(), image: None, stamp: None, width: 800, height: 400 };
+    let mut layout = WallpaperLayout {
         fit: BackgroundImageFit::UniformToFill,
         alignment: BackgroundImageAlignment::Center,
         cover_chrome: true,
@@ -124,16 +142,16 @@ fn card_and_chrome_share_the_window_anchor_and_preserve_native_physical_size() {
     };
     let anchor = Bounds::new(point(px(0.0), px(0.0)), size(px(600.0), px(600.0)));
     assert_eq!(
-        image_bounds(&wp, anchor, 1.0),
+        image_bounds(&wp, layout, anchor, 1.0),
         Bounds::new(point(px(-300.0), px(0.0)), size(px(1200.0), px(600.0)))
     );
-    wp.fit = BackgroundImageFit::Uniform;
+    layout.fit = BackgroundImageFit::Uniform;
     assert_eq!(
-        image_bounds(&wp, anchor, 1.0),
+        image_bounds(&wp, layout, anchor, 1.0),
         Bounds::new(point(px(0.0), px(150.0)), size(px(600.0), px(300.0)))
     );
-    wp.fit = BackgroundImageFit::None;
-    assert_eq!(image_bounds(&wp, anchor, 2.0).size, size(px(400.0), px(200.0)));
-    wp.alignment = BackgroundImageAlignment::BottomRight;
-    assert_eq!(image_bounds(&wp, anchor, 2.0).origin, point(px(200.0), px(400.0)));
+    layout.fit = BackgroundImageFit::None;
+    assert_eq!(image_bounds(&wp, layout, anchor, 2.0).size, size(px(400.0), px(200.0)));
+    layout.alignment = BackgroundImageAlignment::BottomRight;
+    assert_eq!(image_bounds(&wp, layout, anchor, 2.0).origin, point(px(200.0), px(400.0)));
 }

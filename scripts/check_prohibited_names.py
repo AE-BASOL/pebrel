@@ -112,7 +112,70 @@ REMOTE_SESSION_PATTERNS = tuple(re.compile(pattern) for pattern in (
     r"\b(?:exec )?tmux (?:new-session -A -s|kill-session -t) '[^'\n]+'",
     r"\bexec herdr(?=[\"'\s])",
     r"\bherdr session (?:attach|stop) '[^'\n]+'",
+    r"\bcommand -v (?:tmux|herdr)(?=\s+>)",
+    r"\bGet-Command herdr(?= -ErrorAction\b)",
+    r"\btmux (?:-u )?(?:list-sessions|list-windows|list-clients)(?= -[a-zA-Z]\b)",
+    r"\btmux (?:select-window -t|select-pane -t|display-message -p -t|attach-session -t)(?= )",
+    r"\bherdr session list --json\b",
+    r"\bherdr session attach(?= \$\{psQuote\()",
+    r"\bherdr --session(?= \$\{(?:quote|psQuote)\()",
 ))
+# 发现器的类型标签是线协议的一部分；只允许明确的构造/分派位置，
+# 不放行任意字符串字面量，更不能吞掉同行的说明、链接或比较文案。
+REMOTE_DISCOVERY_TAG_PATTERNS = tuple(re.compile(pattern) for pattern in (
+    r'\bdata\["(?:tmux|herdr)"\]',
+    r'\bSshSessionMode\.TMUX\s+->\s+"tmux"',
+    r'\bSshSessionMode\.HERDR\s+->\s+"herdr"',
+    r'^\s*"(?:tmux|herdr)"(?= ->)',
+    r'\bwarnings \+= "herdr"',
+    r"\[char\]30 \+ 'herdr'(?= \+ \[char\]10)",
+))
+# Model tags belong to the remote-session consumers and their behavioral tests,
+# not to arbitrary labels or UI strings elsewhere in the mobile tree.
+REMOTE_MODEL_REFERENCE_PATTERNS = tuple(re.compile(pattern) for pattern in (
+    r'\bRemoteSession\("(?:tmux|herdr)"(?=,)',
+    r'\b(?:session|it)\??\.kind (?:==|!=) "(?:tmux|herdr)"',
+))
+REMOTE_MODEL_CONSUMERS = (
+    "/connection/RemoteSessions.kt", "/connection/TmuxSessionControl.kt",
+    "/session/SessionRepository.kt",
+)
+REMOTE_CONTROL_PATTERNS = tuple(re.compile(pattern) for pattern in (
+    r"\btmux copy-mode(?= -t )",
+    r"\btmux send-keys -X(?= -(?:N|t) )",
+))
+REMOTE_DISCOVERY_TEST_PATTERNS = tuple(re.compile(pattern) for pattern in (
+    r'\bProcessBuilder\("tmux", "-V"\)',
+    r'\bcommand\("tmux", (?="-f", "/dev/null", "new-session"|"kill-server"\))',
+    r'\bremove\("TMUX"\)',
+))
+REMOTE_PROCESS_FIXTURE_PATTERN = re.compile(
+    r"^\s*[0-9]+ [0-9]+ (?:pts/[0-9]+|\?) tmux: (?:client|server)\b"
+)
+
+
+def remote_reference_remainder(path: str, text: str) -> str:
+    is_test = path.startswith(("mobile/android/app/src/test/", "mobile/android/app/src/androidTest/"))
+    model_test = is_test and path.endswith("Test.kt") and any(
+        part in path for part in ("/connection/", "/session/")
+    )
+    if path.endswith(REMOTE_MODEL_CONSUMERS) or model_test:
+        for pattern in REMOTE_MODEL_REFERENCE_PATTERNS:
+            text = pattern.sub("", text)
+    if path.endswith("/connection/RemoteSessions.kt"):
+        for pattern in REMOTE_DISCOVERY_TAG_PATTERNS:
+            text = pattern.sub("", text)
+    if path.endswith(("/connection/TmuxSessionControl.kt", "/connection/TmuxSessionControlTest.kt")):
+        for pattern in REMOTE_CONTROL_PATTERNS:
+            text = pattern.sub("", text)
+    if is_test and path.endswith("/connection/TmuxDiscoveryTest.kt"):
+        for pattern in REMOTE_DISCOVERY_TEST_PATTERNS:
+            text = pattern.sub("", text)
+    if is_test and path.endswith("/connection/SshPtyIdentityTest.kt"):
+        text = REMOTE_PROCESS_FIXTURE_PATTERN.sub("", text)
+    for pattern in REMOTE_SESSION_PATTERNS:
+        text = pattern.sub("", text)
+    return text
 
 
 def mobile_reference_remainder(path: str, text: str) -> str:
@@ -134,8 +197,7 @@ def mobile_reference_remainder(path: str, text: str) -> str:
             "", text,
         )
     if path.startswith("mobile/android/app/src/") and path.endswith(".kt"):
-        for pattern in REMOTE_SESSION_PATTERNS:
-            text = pattern.sub("", text)
+        text = remote_reference_remainder(path, text)
         if path.endswith("/connection/SshSessionMode.kt"):
             text = text.replace('TMUX("tmux")', "").replace('HERDR("herdr")', "")
     return text
@@ -173,9 +235,7 @@ def changed_paths(*revision_args: str) -> list[str]:
 
 def added_lines(path: str, *revision_args: str) -> Iterable[tuple[int, str]]:
     patch = git("diff", *revision_args, "--no-ext-diff", "--unified=0", "--", path)
-    for line_no, raw_line in enumerate(patch.decode("utf-8").splitlines(), 1):
-        if raw_line.startswith("+") and not raw_line.startswith("+++"):
-            yield line_no, raw_line[1:]
+    yield from added_patch_lines(patch, None)
 
 
 def scan_added_lines(*revision_args: str) -> list[str]:
@@ -191,22 +251,22 @@ def scan_added_lines(*revision_args: str) -> list[str]:
 
 
 def added_patch_lines(patch: bytes, merge_parent_count: int | None) -> Iterable[tuple[int, str]]:
-    lines = patch.decode("utf-8").splitlines()
-    if merge_parent_count is None:
-        for line_no, raw_line in enumerate(lines, 1):
-            if raw_line.startswith("+") and not raw_line.startswith("+++"):
-                yield line_no, raw_line[1:]
-        return
-
+    # Git 的 hunk 标题可在 UTF-8 码点中间截断；它不是新增源码。
+    # 先按物理行识别 ASCII 差异前缀，仅对真正新增的内容严格解码。
     in_hunk = False
-    prefix = "+" * merge_parent_count
-    for line_no, raw_line in enumerate(lines, 1):
-        if raw_line.startswith("@@@"):
+    parents = merge_parent_count if merge_parent_count is not None else 1
+    prefix = b"+" * parents
+    for line_no, raw_line in enumerate(patch.split(b"\n"), 1):
+        raw_line = raw_line.removesuffix(b"\r")
+        if raw_line.startswith(b"diff --"):
+            in_hunk = False
+            continue
+        if raw_line.startswith(b"@@"):
             in_hunk = True
             continue
-        # Combined diff headers (including `+++ `) occur before the hunk.
+        # 文件标题在 hunk 之前；正文里的多个 '+' 仍是需要检查的源码。
         if in_hunk and raw_line.startswith(prefix):
-            yield line_no, raw_line[merge_parent_count:]
+            yield line_no, raw_line[parents:].decode("utf-8")
 
 
 def scan_pending_commits(revision_range: str) -> list[str]:

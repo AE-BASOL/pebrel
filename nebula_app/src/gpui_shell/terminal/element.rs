@@ -27,9 +27,17 @@ use super::cursor_painter::{CursorPaint, paint_box_glyph};
 use super::view::TerminalView;
 use super::view::cursor::CursorGeometry;
 
+mod cell_fit;
 #[cfg(test)]
 #[path = "element/color_tests.rs"]
 mod color_tests;
+mod reading;
+#[cfg(all(test, feature = "gpui-test-support"))]
+pub(in crate::gpui_shell) mod snapshot_probe;
+
+#[path = "element/app_colors.rs"]
+mod app_colors;
+use app_colors::{resolve_app_colors_into, resolve_text_foreground};
 
 pub struct TerminalElement {
     view: gpui::Entity<TerminalView>,
@@ -114,12 +122,18 @@ impl TerminalElement {
         };
         // 分段只反映内容与宽度类，绝不掺入光标状态：per-cell 绘制下反色只是
         // 换色，若让闪烁相位改变分段，整行会随闪烁重塑形而跳字。
-        let snapshot = RenderSnapshot::capture(
+        let projection = view.native_results.projection.borrow();
+        let source_rows = projection.source_rows(rows);
+        let snapshot = RenderSnapshot::capture_rows(
             &term,
-            &SnapshotConfig { rows: rows as u16, cols: cols as u16 },
+            &SnapshotConfig { rows: source_rows as u16, cols: cols as u16 },
+            |row| !projection.covers(row),
         );
         let history = term.history_size();
-        let dashed = super::osc_links::dashed_cells(&term, &hint_config, rows, cols);
+        let dashed =
+            super::osc_links::dashed_cells_where(&term, &hint_config, source_rows, cols, |row| {
+                !projection.covers(row)
+            });
         let scrollback_floor = term.grid().scrolled_out();
         let image_anchor = scrollback_floor.saturating_add(history) as i64;
         let viewport_top_abs = image_anchor + i64::from(term.viewport_origin_for(rows).0);
@@ -164,14 +178,19 @@ impl TerminalElement {
         self.view.update(cx, |view, _| {
             resolve_app_colors_into(snap, theme, overrides, &mut view.color_resolver);
             for cell in links.values_mut() {
-                cell.fg = resolve_text_foreground(
+                if let Some(fg) = resolve_text_foreground(
                     cell.fg,
                     cell.bg,
                     cell.bold,
+                    cell.dim,
+                    cell.bg_dim,
                     theme,
                     overrides,
                     &mut view.color_resolver,
-                );
+                ) {
+                    cell.fg = fg;
+                    cell.dim = false;
+                }
             }
         });
     }
@@ -321,6 +340,8 @@ impl Element for TerminalElement {
         else {
             return;
         };
+        #[cfg(all(test, feature = "gpui-test-support"))]
+        snapshot_probe::record(&self.view, &snap, bounds, layout, cx);
         let suggest_anchor =
             snap.cursor.as_ref().map(|cursor| (cursor.row as usize, cursor.col as usize));
         self.view.update(cx, |view, cx| {
@@ -360,6 +381,9 @@ impl Element for TerminalElement {
                 view.math.bind_resources(cx);
                 let size_info =
                     super::math_overlay::grid_size_info(layout.cols, layout.rows, cell_w, line_h);
+                if view.reading.panel.is_some() {
+                    return view.math.clear_frame(&size_info, math_pixels_per_point);
+                }
                 // CLI identity must not disable grid math. The answer reader
                 // replaces TerminalElement in TerminalView::render only while
                 // actually open; merely detecting Codex/Claude is not a handoff.
@@ -377,11 +401,13 @@ impl Element for TerminalElement {
             .view
             .update(cx, |view, cx| view.math.finalize_frame(pending_math_frame, scale_factor, cx));
 
+        let vertical = self.view.read(cx).native_results.projection.borrow().clone();
+        let row_y = |row: f32| layout.line_height * vertical.row(row);
         let cell_rect = |row: usize, start: usize, count: usize| -> Bounds<Pixels> {
             Bounds::new(
                 point(
                     bounds.origin.x + layout.cell_width * start as f32,
-                    bounds.origin.y + layout.line_height * row as f32,
+                    bounds.origin.y + row_y(row as f32),
                 ),
                 size(layout.cell_width * count as f32, layout.line_height),
             )
@@ -408,6 +434,10 @@ impl Element for TerminalElement {
                 .cursor
                 .as_ref()
                 .map_or(0, |c| target_col as i32 - i32::from(c.col)),
+            row_projection_shift: snap
+                .cursor
+                .as_ref()
+                .map_or(0.0, |c| vertical.row(c.row as f32) - c.row as f32),
             shape: snap.cursor.as_ref().map_or(CursorShape::Hidden, |c| c.shape),
         };
         let visual = self.view.update(cx, |view, cx| {
@@ -415,7 +445,7 @@ impl Element for TerminalElement {
                 snap.cursor.as_ref(),
                 target_col,
                 cursor_geometry,
-                snap.display_offset == 0,
+                vertical.scroll_state().map_or(snap.display_offset == 0, |(offset, _)| offset == 0),
                 window,
                 cx,
             )
@@ -470,7 +500,7 @@ impl Element for TerminalElement {
                 if start >= end {
                     return;
                 }
-                let color = theme.resolve(color, &overrides, false);
+                let color = theme.resolve_styled(color, &overrides, false, run.dim);
                 for visual in math_frame.projected_runs(
                     run.row as usize,
                     start as usize..end as usize,
@@ -518,6 +548,7 @@ impl Element for TerminalElement {
                 ));
             }
         }
+        self.paint_reading_highlight(bounds, layout, viewport_top_abs, window, cx);
         let selection_foreground = theme.selection_foreground;
         let selected_foreground = |row: u16, col: u16| -> Option<Rgba> {
             let foreground = selection_foreground?;
@@ -613,11 +644,13 @@ impl Element for TerminalElement {
             let fg = if app_cursor
                 .is_some_and(|cursor| cursor.row == glyph.row && cursor.col == glyph.col)
             {
-                app_cursor_color.unwrap_or_else(|| theme.resolve(glyph.fg, &overrides, glyph.bold))
+                app_cursor_color.unwrap_or_else(|| {
+                    theme.resolve_styled(glyph.fg, &overrides, glyph.bold, glyph.dim)
+                })
             } else if let Some(foreground) = selected_foreground(glyph.row, glyph.col) {
                 foreground
             } else {
-                theme.resolve(glyph.fg, &overrides, glyph.bold)
+                theme.resolve_styled(glyph.fg, &overrides, glyph.bold, glyph.dim)
             };
             let span = if glyph.wide { 2.0 } else { 1.0 };
             let Some(prims) = boxdraw::primitives(
@@ -630,7 +663,7 @@ impl Element for TerminalElement {
             };
             let origin = point(
                 snap_to_device(bounds.origin.x + layout.cell_width * visual_col as f32, scale),
-                snap_to_device(bounds.origin.y + layout.line_height * glyph.row as f32, scale),
+                snap_to_device(bounds.origin.y + row_y(glyph.row as f32), scale),
             );
             paint_box_glyph(window, &prims, origin, fg);
             if let Some(cursor) = &cursor_paint {
@@ -664,7 +697,7 @@ impl Element for TerminalElement {
                 let fg: Hsla = if let Some(foreground) = selected_foreground(seg.row, cell.col) {
                     foreground.into()
                 } else {
-                    theme.resolve(cell.fg, &overrides, cell.bold).into()
+                    theme.resolve_styled(cell.fg, &overrides, cell.bold, cell.dim).into()
                 };
                 let dashed_link = dashed.contains_key(&(seg.row, cell.col));
                 let underline = (cell.underline && !dashed_link).then(|| UnderlineStyle {
@@ -685,7 +718,7 @@ impl Element for TerminalElement {
                 };
                 let origin = point(
                     bounds.origin.x + layout.cell_width * visual_col as f32,
-                    bounds.origin.y + layout.line_height * seg.row as f32,
+                    bounds.origin.y + row_y(seg.row as f32),
                 );
                 let count = if ligatures && !seg.wide && !dashed_link {
                     super::ligatures::span_len(remaining, |next, offset| {
@@ -732,11 +765,12 @@ impl Element for TerminalElement {
                     }
                     cells = &remaining[count..];
                 } else {
-                    let shaped = window.text_system().shape_line(
-                        SharedString::from(cell.text.clone()),
+                    let shaped = cell_fit::shape_cell(
+                        window.text_system(),
+                        &cell.text,
                         font_size,
-                        &[run.clone()],
-                        None,
+                        &run,
+                        layout.cell_width,
                     );
                     let _ = shaped.paint(
                         origin,
@@ -774,7 +808,7 @@ impl Element for TerminalElement {
             let color = if let Some(foreground) = selected_foreground(row, col) {
                 foreground
             } else {
-                theme.resolve(cell.fg, &overrides, cell.bold)
+                theme.resolve_styled(cell.fg, &overrides, cell.bold, cell.dim)
             };
             super::link_underline::paint(
                 window,
@@ -801,6 +835,7 @@ impl Element for TerminalElement {
                 (layout.cell_width.as_f32(), layout.line_height.as_f32()),
                 math_pixels_per_point,
                 Rgba { a: 1.0, ..selection_fill },
+                &|y| row_y(y / layout.line_height.as_f32()).as_f32(),
                 window,
                 cx,
             );
@@ -829,8 +864,7 @@ impl Element for TerminalElement {
             let viewport_top = bounds.origin.y.as_f32();
             let viewport_bottom = viewport_top + bounds.size.height.as_f32();
             for inline in inline_images {
-                let y = bounds.origin.y
-                    + layout.line_height * (inline.abs_line as i64 - viewport_top_abs) as f32;
+                let y = bounds.origin.y + row_y((inline.abs_line as i64 - viewport_top_abs) as f32);
                 let mut width = inline.display_width / device_scale;
                 let mut height = inline.display_height / device_scale;
                 let fit = (bounds.size.width.as_f32() / width.max(1.0)).min(1.0);
@@ -855,6 +889,12 @@ impl Element for TerminalElement {
                     );
                 });
             }
+        }
+
+        if snap.cursor.is_none() {
+            super::effects::paint(
+                &self.view, bounds, &theme, &overrides, None, focused, window, cx,
+            );
         }
 
         if let Some(cursor) = &snap.cursor {
@@ -894,30 +934,13 @@ impl Element for TerminalElement {
                             colors.ghost,
                             point(
                                 bounds.origin.x + layout.cell_width * cursor_visual_col as f32,
-                                bounds.origin.y + layout.line_height * cursor.row as f32,
+                                bounds.origin.y + row_y(cursor.row as f32),
                             ),
                             layout.cell_width,
                             layout.line_height,
                             avail,
                         );
                     }
-                }
-                if !popup_items.is_empty() {
-                    paint_completion_popup(
-                        window,
-                        cx,
-                        &popup_items,
-                        popup_selected,
-                        popup_offset,
-                        popup_hovered,
-                        cursor.row as usize,
-                        cursor_visual_col,
-                        layout,
-                        &bounds,
-                        &colors,
-                        &font,
-                        font_size,
-                    );
                 }
             }
 
@@ -927,6 +950,37 @@ impl Element for TerminalElement {
             }
 
             // IME 组合文本锚点与预编辑串：跟随光标单元格。
+            // 后处理位于真实终端与光标之后，补齐菜单和预编辑串之前。
+
+            super::effects::paint(
+                &self.view,
+                bounds,
+                &theme,
+                &overrides,
+                cursor_paint.as_ref(),
+                focused,
+                window,
+                cx,
+            );
+            let colors = crate::gpui_shell::theme::completion_colors(cx, theme.background);
+            if !popup_items.is_empty() {
+                paint_completion_popup(
+                    window,
+                    cx,
+                    &popup_items,
+                    popup_selected,
+                    popup_offset,
+                    popup_hovered,
+                    vertical.row(cursor.row as f32).max(0.0) as usize,
+                    cursor_visual_col,
+                    layout,
+                    &bounds,
+                    &colors,
+                    &font,
+                    font_size,
+                );
+            }
+
             let anchor = cell_rect(cursor.row as usize, cursor_visual_col, 1);
             let marked = self.view.read(cx).marked_text.clone();
             self.view.update(cx, |view, _| view.ime_bounds = anchor);
@@ -963,12 +1017,12 @@ impl Element for TerminalElement {
             }
         }
 
-        // Overlay 滚动条：贴着底部时拇指为 None 不画，滚进历史才浮在网格右缘。
+        // Overlay 滚动条：可见性由用户策略和拖拽状态共同决定。
         // 几何来自 view 的单一真值源——命中测试拿的是同一个矩形（旧壳
         // `draw_scrollbar` / `scrollbar_grab` 共用 `scrollbar_geometry` 同构）。
         let (dragging, thumb) = {
             let view = self.view.read(cx);
-            (view.scrollbar_dragging(), view.scrollbar_thumb(snap.display_offset, history))
+            (view.scrollbar_highlighted(), view.scrollbar_thumb(snap.display_offset, history))
         };
         if let Some(thumb) = thumb {
             let color = if dragging {
@@ -1000,7 +1054,7 @@ impl Element for TerminalElement {
                 window,
                 cx,
                 &hover.preview,
-                hover.anchor_row as usize,
+                vertical.row(hover.anchor_row as f32).max(0.0) as usize,
                 anchor_col,
                 layout,
                 &bounds,
@@ -1677,60 +1731,6 @@ pub(super) fn rgb_from_rgba(color: Rgba) -> crate::display::color::Rgb {
     crate::display::color::Rgb::new(r, g, b)
 }
 
-/// [`TerminalElement::resolve_app_colors`] 的实际逻辑（脱开 GPUI 实体，可测）。
-fn resolve_app_colors_into(
-    snap: &mut RenderSnapshot,
-    theme: &Palette,
-    overrides: &Colors,
-    resolver: &mut crate::display::terminal_color::TerminalColorResolver,
-) {
-    use crate::display::content::is_terminal_graphic;
-    use crate::display::terminal_color::is_fixed_color;
-
-    for run in &mut snap.bg_runs {
-        let base = rgb_from_rgba(theme.resolve(run.color, overrides, false));
-        let resolved = resolver.resolve_background(base, is_fixed_color(run.color, overrides));
-        if resolved != base {
-            run.color = Color::Spec(resolved.0);
-        }
-    }
-    for cell in snap.segments.iter_mut().flat_map(|segment| segment.cells.iter_mut()) {
-        // 图形字符的颜色表达图形本身，不是正文对比度——图标被「矫正」成另一个
-        // 颜色就是另一张图了。
-        let graphic = cell.text.chars().next().is_some_and(is_terminal_graphic);
-        if graphic {
-            continue;
-        }
-        // 对比度是一对颜色的属性：这个前景可不可读，取决于它**这一格**底下是
-        // 什么，而不是主题底色。默认底色的格子没有 bg run，所以 `SnapCell::bg`
-        // 单独带着这个值。
-        cell.fg = resolve_text_foreground(cell.fg, cell.bg, cell.bold, theme, overrides, resolver);
-    }
-}
-
-fn resolve_text_foreground(
-    fg: Color,
-    bg: Color,
-    bold: bool,
-    theme: &Palette,
-    overrides: &Colors,
-    resolver: &mut crate::display::terminal_color::TerminalColorResolver,
-) -> Color {
-    use crate::display::terminal_color::is_fixed_color;
-    let bg_base = rgb_from_rgba(theme.resolve(bg, overrides, false));
-    let bg = resolver.resolve_background(bg_base, is_fixed_color(bg, overrides));
-    // Resolve bold before contrast adjustment; Spec must retain that brightening.
-    let base = rgb_from_rgba(theme.resolve(fg, overrides, bold));
-    let resolved = resolver.resolve_foreground(
-        base,
-        bg,
-        true,
-        rgb_from_rgba(theme.foreground),
-        rgb_from_rgba(theme.background),
-    );
-    if resolved != base { Color::Spec(resolved.0) } else { fg }
-}
-
 pub(super) fn rgba_rgb(color: crate::display::color::Rgb, alpha: f32) -> Rgba {
     Rgba {
         r: f32::from(color.r) / 255.0,
@@ -1857,6 +1857,7 @@ mod tests {
     fn popup_keeps_a_single_short_exact_command_visible() {
         let items = [NebulaCompletionItem {
             replace_chars: 0,
+            replace_after_chars: 0,
             label: "cat".to_owned(),
             insert: " ".to_owned(),
             kind: NebulaCompletionKind::Command,
@@ -1882,6 +1883,7 @@ mod tests {
     fn popup_layout_preserves_the_unselected_state() {
         let items = [NebulaCompletionItem {
             replace_chars: 0,
+            replace_after_chars: 0,
             label: "git pull upstream".to_owned(),
             insert: " upstream".to_owned(),
             kind: NebulaCompletionKind::History,
@@ -1899,6 +1901,7 @@ mod tests {
         let items = (0..30)
             .map(|index| NebulaCompletionItem {
                 replace_chars: 0,
+                replace_after_chars: 0,
                 label: format!("command-{index}"),
                 insert: format!("{index}"),
                 kind: NebulaCompletionKind::Command,
@@ -1931,6 +1934,7 @@ mod tests {
     fn popup_flips_above_the_cursor_near_the_bottom_edge() {
         let items = [NebulaCompletionItem {
             replace_chars: 0,
+            replace_after_chars: 0,
             label: "completion.rs".to_owned(),
             insert: "ompletion.rs".to_owned(),
             kind: NebulaCompletionKind::File,

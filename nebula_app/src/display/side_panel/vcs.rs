@@ -320,7 +320,7 @@ impl SidePanel {
             let mut guest_args: Vec<OsString> = [
                 "-d",
                 located.distro.as_str(),
-                "--",
+                "--exec",
                 "git",
                 "-C",
                 located.guest.as_str(),
@@ -824,12 +824,10 @@ pub(crate) fn read_git(root: &Path) -> Option<GitInfo> {
 /// 代价是每次快照多一次 `wsl.exe` 进程往返（发行版没运行时还会把它拉起
 /// 来）。快照本来就在后台线程上、且有节流，不进渲染路径。
 pub(crate) fn read_git_wsl(located: &crate::shell_detect::WslCwd) -> Option<GitInfo> {
-    use std::process::Command;
     let location = format!("{}:{}", located.distro, located.guest);
     collect_git_info(|args| {
-        let mut cmd = Command::new("wsl.exe");
-        cmd.args(["-d", &located.distro, "--", "git", "-C", &located.guest, "--no-optional-locks"])
-            .args(args);
+        let mut cmd = crate::shell_detect::wsl_exec_command(&located.distro, None);
+        cmd.args(["git", "-C", &located.guest, "--no-optional-locks"]).args(args);
         run_git(cmd, args, &location, Some(WSL_COMMAND_TIMEOUT))
     })
 }
@@ -901,7 +899,7 @@ pub(crate) fn collect_git_info(run: impl Fn(&[&str]) -> Option<String>) -> Optio
         "--date-order",
         "--decorate=full",
         "--max-count=128",
-        "--format=%x1e%H%x1f%h%x1f%D%x1f%s%x1f%an%x1f%ct%x1f%P",
+        "--format=%x1e%H%x1f%h%x1f%D%x1f%s%x1f%an%x1f%ae%x1f%ct%x1f%P",
     ])
     .map(|output| parse_git_history(&output))
     .unwrap_or_default();
@@ -923,6 +921,7 @@ pub(crate) fn parse_git_history(output: &str) -> Vec<GitCommit> {
             let decorations = fields.next().unwrap_or_default().trim().to_owned();
             let subject = fields.next().unwrap_or_default().to_owned();
             let author = fields.next().unwrap_or_default().to_owned();
+            let author_email = fields.next().unwrap_or_default().to_owned();
             let timestamp = fields.next().and_then(|value| value.parse().ok()).unwrap_or(0);
             let parent_hashes =
                 fields.next().unwrap_or_default().split_whitespace().map(str::to_owned).collect();
@@ -932,6 +931,7 @@ pub(crate) fn parse_git_history(output: &str) -> Vec<GitCommit> {
                 decorations,
                 subject,
                 author,
+                author_email,
                 timestamp,
                 parent_hashes,
             })

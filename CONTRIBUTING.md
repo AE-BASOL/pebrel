@@ -3,7 +3,9 @@
 Pebrel 1.6 uses the `pebrel` command, Pebrel installation directories, and
 `PEBREL_*` environment variables. Legacy configuration and integration identifiers
 remain compatibility inputs; follow the [identity migration decision](docs/architecture-decisions.md#adr-0003---pebrel-16-identity-migration)
-when changing them. Internal Rust crate and source-directory names remain stable.
+when changing them. Internal Rust names migrate one module at a time. The completion package now uses
+`pebrel-completions`; its source directory remains `nebula-completions/` until the
+scan-root migration is validated. See the [package identity decision](architecture/notes/nebula-completions/2026-09-30-package-identity.md).
 
 ## Required reading
 
@@ -37,6 +39,61 @@ problem in a rule is a reason to review the rule, not to conceal or ignore a fai
 No programming contribution is required to be useful. Clear reproduction steps,
 native-language review and accessibility feedback also help the project.
 
+## Commercial promotion policy
+
+PRs, Issues, and their comments must not be used for advertising, commercial
+promotion, or traffic solicitation. This includes promotional provider presets,
+referral links, signup incentives, and unrelated brand placement disguised as
+feature contributions or bug reports. Close any PR or Issue containing unauthorized
+promotion directly; no further maintainer confirmation is required. Apply this
+rule once the promotional content and lack of authorization are established.
+
+For commercial cooperation, sponsorship, or other business requests, email
+[fickleheartedkeys@163.com](mailto:fickleheartedkeys@163.com). Do not negotiate
+commercial arrangements through PRs or Issues. Sponsor content explicitly approved
+by the maintainer is handled within that approval's scope; it does not authorize
+other promotional submissions.
+
+Review the actual user need and changed content. Necessary compatibility fixes,
+Agent integrations, and upstream attribution are not advertising merely because
+they name a service or product. A small diff, passing CI, or first-time contributor
+status does not establish a need for a provider addition or override this policy.
+
+Review the submission body, actual diff, attachments, and linked destinations,
+not just the title. Relevant provider integrations still require a demonstrated
+project need; a working endpoint or a vendor's own description is not approval.
+Verify any claimed sponsorship with a traceable maintainer decision. Record only
+the approval's scope in public, not private email or commercial terms.
+
+Once an unauthorized promotional submission is verified, close it with a brief
+policy link and email contact, without repeating promotional links or copy.
+Withdraw any mistaken approval and remove that change from pending integrations.
+If an unrelated account posts an advertisement under an otherwise legitimate PR
+or Issue, moderate that comment rather than closing the legitimate contribution.
+This is a content-review rule, not an automatic keyword/domain blacklist.
+
+严禁利用 PR、Issue 及其评论进行广告宣传、商业推广或引流，包括以功能贡献或
+问题反馈为名植入服务商推广、返利链接、注册优惠和无关品牌内容。核实属于未经授权的
+推广后，直接关闭对应 PR 或 Issue，无需再次向维护者确认。
+商业合作、赞助及其他商业需求须通过上述项目邮箱沟通，不得通过 PR 或 Issue 商业洽谈。
+经维护者明确批准的赞助内容按批准范围处理，不构成对其他推广提交的授权。
+审阅应核实真实用户需求及改动内容；必要的兼容修复、Agent 集成和上游署名不因包含
+品牌名称就被视为广告。改动小、CI 通过或首次贡献者身份均不能代替需求审查。
+
+审阅须检查正文、实际差异、附件及链接去向，而非只看标题；新增服务商即使接口可用，
+仍须有真实项目需求，服务商自述不等于维护者批准。声称已获赞助授权时，应核对可追溯的
+维护者决定；公开记录只说明批准范围，不披露私人邮件或商业条款。
+核实为未授权推广提交后直接关闭，简短引用规则及商业邮箱，不重复传播推广链接或文案。
+若此前误批，应撤销认可并从待合并集成中排除。无关账号在正常 PR 或 Issue 下发布广告时，
+处理该广告评论，不因此关闭正常贡献。本规则依赖内容审查，不使用关键词或域名一刀切。
+
+This section is the authoritative policy. Agent instructions, review guidance,
+and submission templates link here and summarize it for their audience.
+When changing the policy or contact address, update those summaries together.
+READMEs introduce the product and do not duplicate this policy. / 本节为规则的
+唯一权威说明；规则或联系邮箱变化时，同步检查代理指引、审阅约束和提交模板中的
+摘要与链接。README 用于项目介绍，不重复收录本规则。
+
 ## First code contribution
 
 1. Fork the existing `Kuddev/pebrel` repository and create your work branch from the
@@ -58,8 +115,7 @@ unrelated generated files. Preserve third-party license/attribution notices and
 identify the source of any externally copied code or assets for license review.
 
 Keep one-off test scripts and probe outputs under `tmp/`; external project checkouts
-and investigation notes belong in the reserved `research/`, `reference-projects/`
-or `external-probes/` local directories. These are not vendored build dependencies:
+and investigation notes belong outside the checkout. These are not vendored build dependencies:
 do not blanket-ignore `third_party/` or maintained test/diagnostic sources. `docs/`
 is private by default; public documentation needs an exact reviewed allowlist entry
 in `.gitignore`. Do not publish competitor studies or HTML prototypes by opening a
@@ -72,10 +128,15 @@ raise any existing tracked private artifact for an explicit maintainer decision.
    cross-layer dependency, persisted format, core abstraction or threading model
    before implementing it. Record significant decisions under the owning path in
    `architecture/notes/`; ordinary fixes do not create a note.
-2. Keep one conceptual change per PR. A necessary extraction and its behavior
-   tests may accompany the feature; unrelated rewrites and formatting may not.
-   The `pr-size` check fails above 1500 changed source lines (docs, lockfiles
-   and assets excluded); split instead of asking for an exemption.
+2. Organize each PR around a complete, independently verifiable feature module.
+   A necessary extraction and its behavior tests may accompany the feature;
+   unrelated rewrites and formatting may not. Prefer cohesive boundaries to
+   mechanical splitting. The default `pr-size` limit is 1500 changed source lines
+   (additions plus deletions; docs, lockfiles and assets excluded). Maintainers may
+   approve individual exceptions with `size-exempt` and a brief rationale when
+   keeping the module together makes the change easier to review and verify.
+   **No PR may exceed 5000 counted source lines, even with `size-exempt`.**
+   The label does not waive code review, tests, dependency rules or per-file limits.
 3. Put shared rules in their existing authority. UI modules adapt those rules;
    they must not fork persistence, state transitions or domain behavior.
 4. Add regression tests that fail for the defect, and test error/cancellation
@@ -181,7 +242,7 @@ feature work; there is no routine `--skip-architecture` option.
 ## 中文摘要
 
 - 先读架构图、工程合同和决策记录；按职责拆分，不按行号切片。
-- 一个 PR 只做一件事；改动超过 1500 行源码（不计文档、lockfile、资源）`pr-size` 会失败，请拆分。
+- PR 以完整、可独立验证的功能模块为主，按职责边界拆分，不机械切片。源码增删行默认门槛为 1500（不计文档、lockfile、资源）；维护者可说明理由并用 `size-exempt` 批准个别例外，但任何 PR 都不得超过 5000 行。豁免不替代 review、测试、依赖规则或单文件行数约束。
 - Draft 和 Ready PR 共用路径策略：文档不构建原生应用，普通共享代码跑完整 Linux 测试，平台路径及条件编译追加相应原生架构，依赖/CI/打包等改动跑全量。main、每日定时和手动验证保留五平台。十项必需检查名称不变，结果汇总明确注明未运行的平台，已选择的测试失败仍阻止合并；原生套件和 doctest 不删减。
 - 附加截图留在贡献者 fork 中生成；上游按需执行，不重复自动跑整套截图构建，也不上传 PR 专属的大型编译缓存。截图与原生回归测试不能互相替代。
 - 2000 行是现有仓库的防灾上限，800 行只提示审查，不是“大厂标准”。

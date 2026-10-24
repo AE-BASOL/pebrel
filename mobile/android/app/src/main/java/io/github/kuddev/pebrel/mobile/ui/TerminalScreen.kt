@@ -1,6 +1,5 @@
 package io.github.kuddev.pebrel.mobile.ui
 
-import android.view.KeyEvent
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -22,11 +21,14 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
+import io.github.kuddev.pebrel.terminal.TerminalShortcut
 import io.github.kuddev.pebrel.mobile.R
 import io.github.kuddev.pebrel.mobile.connection.DesktopPane
 import io.github.kuddev.pebrel.mobile.connection.DesktopTab
 import io.github.kuddev.pebrel.mobile.connection.DesktopReconnect
+import io.github.kuddev.pebrel.mobile.connection.SshFailureKind
 import io.github.kuddev.pebrel.mobile.connection.SshSessionMode
+import io.github.kuddev.pebrel.mobile.connection.RemoteAttachment
 import io.github.kuddev.pebrel.mobile.session.DesktopWorkspace
 import io.github.kuddev.pebrel.mobile.session.LocalSession
 import io.github.kuddev.pebrel.mobile.session.SessionRepository
@@ -34,25 +36,34 @@ import kotlinx.coroutines.delay
 
 @Composable
 fun LocalTerminalScreen(session: LocalSession, repository: SessionRepository, onBack: () -> Unit, onSessions: () -> Unit,
-                        onRetry: () -> Unit, onEdit: () -> Unit, onClose: () -> Unit, onFiles: (() -> Unit)? = null) {
+                        onRetry: () -> Unit, onEdit: () -> Unit, onClose: () -> Unit, onFiles: (() -> Unit)? = null,
+                        onAttachRemote: ((RemoteAttachment) -> Unit)? = null, active: Boolean = true) {
     val prefs by repository.display.state.collectAsStateWithLifecycle()
     var direct by rememberSaveable(session.id, prefs.directInput) { mutableStateOf(prefs.directInput) }
     val attachments = rememberTerminalAttachmentAction(session, repository) { direct = false }
     var closing by remember { mutableStateOf(false) }
+    var retryCredentials by remember(session.id) { mutableStateOf(false) }
+    val retry = {
+        if (session.failure in setOf(SshFailureKind.AUTH, SshFailureKind.KEY)) retryCredentials = true else onRetry()
+    }
+    var remoteSessions by remember(session.id) { mutableStateOf(false) }
     var focused by rememberSaveable(session.id) { mutableStateOf(false) }
     var keyboardRequest by remember(session.id) { mutableIntStateOf(0) }
     val trust by repository.trust.collectAsStateWithLifecycle()
     if (!focused) TerminalHeader(session.title,
         if (session.source == "Local") stringResource(R.string.local_device) else session.source,
-        session.status, onBack, onSessions, { closing = true }, onFiles = onFiles)
+        session.status, onBack, onSessions, { closing = true }, onFiles = onFiles,
+        onRemoteSessions = if (onAttachRemote != null && session.host != null && session.status == "ready") ({ remoteSessions = true }) else null)
     Column(Modifier.fillMaxSize()) {
-        if (session.status == "ended" || (session.status == "failed" && session.hasConnected)) TerminalDisconnected(session, if (session.host != null) onRetry else null)
+        if (session.status == "ended" || (session.hasConnected && session.status != "ready"))
+            TerminalDisconnected(session, if (session.host != null) retry else null)
         Box(Modifier.weight(1f).fillMaxWidth()) {
             key(session.id) {
-                TerminalSurface(session, repository, Modifier.fillMaxSize(), direct, prefs.fontSize, keyboardRequest)
+                // 退出动画仍保留旧视图，但它已失去输入所有权；延迟单击不得在文件页弹回键盘。
+                TerminalSurface(session, repository, Modifier.fillMaxSize(), direct && active, prefs.fontSize, keyboardRequest)
             }
-            if (session.host != null && (session.status == "connecting" || (session.status == "failed" && !session.hasConnected))) {
-                SshConnectionStatus(session, onClose, onRetry, onEdit,
+            if (session.host != null && !session.hasConnected && session.status in setOf("connecting", "failed")) {
+                SshConnectionStatus(session, onClose, retry, onEdit,
                     trust = trust?.takeIf { it.ownerId == session.id }, onTrust = repository::answerTrust)
             }
         }
@@ -60,27 +71,25 @@ fun LocalTerminalScreen(session: LocalSession, repository: SessionRepository, on
             direct = it
             if (it) keyboardRequest++
         }, { label ->
-            val key = when (label) {
-                "Ctrl+B" -> KeyEvent.KEYCODE_B
-                "Ctrl+C" -> KeyEvent.KEYCODE_C
-                "Esc" -> KeyEvent.KEYCODE_ESCAPE
-                "Tab", "Shift+Tab" -> KeyEvent.KEYCODE_TAB
-                "←" -> KeyEvent.KEYCODE_DPAD_LEFT
-                "→" -> KeyEvent.KEYCODE_DPAD_RIGHT
-                "↑" -> KeyEvent.KEYCODE_DPAD_UP
-                else -> KeyEvent.KEYCODE_DPAD_DOWN
-            }
-            val control = label in setOf("Ctrl+C", "Ctrl+B")
-            val letter = if (control) label.last().lowercase() else ""
-            val modifiers = if (control) 2 else if (label == "Shift+Tab") 1 else 0
-            if (!session.terminal.key(key, modifiers,
-                    text = letter, unshifted = letter.firstOrNull()?.code ?: 0)) repository.error.value = "input_rejected"
+            val key = TerminalShortcut.parse(label)
+            if (key == null || !session.terminal.key(key.code, key.modifiers, text = key.text, unshifted = key.unshifted))
+                repository.error.value = "input_rejected"
         }, onKeyboard = { keyboardRequest++ }, focused = focused, onToggleFocus = { focused = !focused },
             onAttach = attachments.pick, attachmentBusy = attachments.busy,
-            extraShortcuts = if (session.host?.sessionMode in setOf(SshSessionMode.TMUX, SshSessionMode.HERDR)) listOf("Ctrl+B") else emptyList()) { command ->
+            extraShortcuts = if (session.attachment != null || session.host?.sessionMode in setOf(SshSessionMode.TMUX, SshSessionMode.HERDR)) listOf("Ctrl+B") else emptyList()) { command ->
             val bytes = (command + "\r").toByteArray()
             session.terminal.tryWrite(bytes, 0, bytes.size)
         }
+    }
+    if (retryCredentials) SshRetryCredentials(session.host?.keyUri?.isNotEmpty() == true,
+        onDismiss = { retryCredentials = false }, onRetry = { secret ->
+            retryCredentials = false
+            repository.retrySsh(session.id, secret)
+        })
+    if (session.hasConnected) trust?.takeIf { it.ownerId == session.id }?.let { HostTrustForm(it, repository::answerTrust) }
+    if (remoteSessions) RemoteSessionSheet(session, repository, { remoteSessions = false }) {
+        remoteSessions = false
+        onAttachRemote?.invoke(it)
     }
     if (closing) AlertDialog(onDismissRequest = { closing = false }, title = { Text(stringResource(R.string.close_session)) },
         text = { Text(stringResource(R.string.close_session_confirm, session.title)) },
@@ -101,7 +110,7 @@ fun DesktopTerminalScreen(desktop: DesktopWorkspace, pane: DesktopPane, reposito
     var showPermission by remember(identity) { mutableStateOf(false) }
     var showDetails by remember(identity) { mutableStateOf(false) }
     // TUI 边框和光标属于桌面网格；手机重排只作为用户主动选择的阅读模式。
-    var wrapLines by rememberSaveable(identity) { mutableStateOf(false) }
+    val wrapLines = prefs.desktopWrapLines
     val enabled = desktop.allowInput && desktop.status == "ready"
     LaunchedEffect(enabled) { if (enabled) showPermission = false }
     val input = remember(identity, enabled, desktop.connectionGeneration) { repository.desktopInput(desktop.id, pane) }
@@ -116,7 +125,7 @@ fun DesktopTerminalScreen(desktop: DesktopWorkspace, pane: DesktopPane, reposito
     if (!focused) TerminalHeader(pane.displayTitle, desktop.host.name, desktop.status, onBack, onSessions,
         onGit = onGit.takeIf { pane.sshDestination == null }, gitEnabled = desktop.status == "ready",
         onDetails = { showDetails = true }, onConversation = onConversation.takeIf { pane.agent != null },
-        wrapLines = wrapLines, onToggleWrap = { wrapLines = !wrapLines })
+        wrapLines = wrapLines, onToggleWrap = { repository.display.update { it.copy(desktopWrapLines = !it.desktopWrapLines) } })
     Column(Modifier.fillMaxSize()) {
         if (desktop.status != "ready") Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically) {
@@ -136,23 +145,16 @@ fun DesktopTerminalScreen(desktop: DesktopWorkspace, pane: DesktopPane, reposito
             prefs.pinchZoom, { size -> repository.display.update { it.copy(fontSize = size) } },
             Modifier.weight(1f).fillMaxWidth(), frame = if (output.target == identity) output.frame else null,
             inputTarget = input.takeIf { enabled && direct }, keyboardRequest = keyboardRequest,
-            loading = output.loading, connected = desktop.status == "ready", wrapLines = wrapLines)
+            loading = output.loading, connected = desktop.status == "ready", wrapLines = wrapLines,
+            zoomScale = prefs.desktopZoom, onZoomScale = { scale -> repository.display.update { it.copy(desktopZoom = scale) } },
+            pasteTarget = input.takeIf { enabled }, scrollTarget = input.takeIf { enabled },
+            onHistoryPage = { start -> repository.requestDesktopHistory(desktop.id, pane, start) })
         if (output.loading && output.text.isBlank()) LinearProgressIndicator(Modifier.fillMaxWidth())
         CommandComposer(identity, repository, enabled, direct, {
             direct = it
             if (it) keyboardRequest++
         }, { label ->
-            val code = when (label) {
-                "Ctrl+C" -> KeyEvent.KEYCODE_C
-                "Esc" -> KeyEvent.KEYCODE_ESCAPE
-                "Tab", "Shift+Tab" -> KeyEvent.KEYCODE_TAB
-                "←" -> KeyEvent.KEYCODE_DPAD_LEFT
-                "→" -> KeyEvent.KEYCODE_DPAD_RIGHT
-                "↑" -> KeyEvent.KEYCODE_DPAD_UP
-                else -> KeyEvent.KEYCODE_DPAD_DOWN
-            }
-            val modifiers = if (label == "Ctrl+C") 2 else if (label == "Shift+Tab") 1 else 0
-            input.key(code, modifiers)
+            if (TerminalShortcut.parse(label)?.send(input) != true) repository.error.value = "input_rejected"
         }, onKeyboard = { keyboardRequest++ }, focused = focused, onToggleFocus = { focused = !focused },
             send = input::submit)
     }
@@ -197,7 +199,8 @@ private fun DesktopPaneDetails(desktop: DesktopWorkspace, pane: DesktopPane, col
 internal fun TerminalHeader(title: String, endpoint: String, status: String, onBack: () -> Unit, onSessions: () -> Unit,
                            onClose: (() -> Unit)? = null, onGit: (() -> Unit)? = null, gitEnabled: Boolean = true,
                            onDetails: (() -> Unit)? = null, onConversation: (() -> Unit)? = null, conversationActive: Boolean = false,
-                           onFiles: (() -> Unit)? = null, wrapLines: Boolean = false, onToggleWrap: (() -> Unit)? = null) {
+                           onFiles: (() -> Unit)? = null, wrapLines: Boolean = false, onToggleWrap: (() -> Unit)? = null,
+                           onRemoteSessions: (() -> Unit)? = null) {
     var menu by remember { mutableStateOf(false) }
     val connection = "$endpoint · ${statusLabel(status)}"
     Row(Modifier.fillMaxWidth().height(48.dp).background(MaterialTheme.colorScheme.background), verticalAlignment = Alignment.CenterVertically) {
@@ -218,9 +221,11 @@ internal fun TerminalHeader(title: String, endpoint: String, status: String, onB
             if (onConversation != null) TerminalHeaderAction(if (conversationActive) R.drawable.ic_terminal else R.drawable.ic_chat,
                 stringResource(if (conversationActive) R.string.chat_terminal else R.string.chat_title), onConversation)
             if (onFiles != null) TerminalHeaderAction(R.drawable.ic_git_folder, stringResource(R.string.sftp_title), onFiles, enabled = status == "ready")
-            if (onClose != null || onDetails != null || onToggleWrap != null) Box {
+            if (onClose != null || onDetails != null || onToggleWrap != null || onRemoteSessions != null) Box {
                 TerminalHeaderAction(R.drawable.ic_more, stringResource(R.string.more_actions), { menu = true })
                 DropdownMenu(menu, { menu = false }) {
+                    if (onRemoteSessions != null) DropdownMenuItem(text = { Text(stringResource(R.string.remote_sessions)) },
+                        onClick = { menu = false; onRemoteSessions() })
                     if (onToggleWrap != null) DropdownMenuItem(
                         text = { Text(stringResource(R.string.terminal_wrap_lines)) },
                         trailingIcon = { Checkbox(checked = wrapLines, onCheckedChange = null) },

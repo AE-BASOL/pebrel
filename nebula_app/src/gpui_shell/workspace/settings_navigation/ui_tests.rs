@@ -52,7 +52,7 @@ fn open_workspace(
     window.simulate_resize(gpui::size(px(1280.0), px(900.0)));
     workspace_out.as_ref().unwrap().update(window, |workspace, cx| {
         workspace.tabs_position = nebula_settings::TabsPositionName::Top;
-        workspace.sync_settings_layout();
+        workspace.sync_settings_layout(false);
         cx.notify();
     });
     window.run_until_parked();
@@ -71,6 +71,14 @@ fn tab_bounds(selector: &'static str, cx: &mut VisualTestContext) -> gpui::Bound
         window.draw(cx).clear(cx);
     });
     cx.debug_bounds(selector).expect("visible tab bounds")
+}
+
+fn numbered_tab_shortcuts() -> [&'static str; 2] {
+    if crate::platform::Platform::current() == crate::platform::Platform::MacOS {
+        ["cmd-1", "cmd-3"]
+    } else {
+        ["ctrl-1", "ctrl-3"]
+    }
 }
 
 #[gpui::test]
@@ -110,10 +118,11 @@ fn switching_top_tabs_keeps_settings_reachable_until_explicit_close(cx: &mut Tes
 #[gpui::test]
 fn keyboard_navigation_can_return_to_background_settings(cx: &mut TestAppContext) {
     let (_directory, workspace, mut cx) = open_workspace(2, cx);
-    for shortcut in ["ctrl-1", "alt-1"] {
+    let [first_tab, third_tab] = numbered_tab_shortcuts();
+    for shortcut in [first_tab, "alt-1"] {
         cx.simulate_keystrokes(shortcut);
         assert!(!workspace.read_with(&cx, |workspace, _| workspace.settings_open));
-        cx.simulate_keystrokes("ctrl-3");
+        cx.simulate_keystrokes(third_tab);
         assert!(workspace.read_with(&cx, |workspace, _| workspace.settings_open));
         cx.simulate_keystrokes("ctrl-tab");
         assert!(!workspace.read_with(&cx, |workspace, _| workspace.settings_open));
@@ -122,7 +131,7 @@ fn keyboard_navigation_can_return_to_background_settings(cx: &mut TestAppContext
     }
     cx.simulate_keystrokes("ctrl-shift-w");
     assert_eq!(workspace.read_with(&cx, |workspace, _| workspace.top_tab_count()), 2);
-    cx.simulate_keystrokes("ctrl-3");
+    cx.simulate_keystrokes(third_tab);
     assert!(!workspace.read_with(&cx, |workspace, _| workspace.settings_open));
 }
 
@@ -130,13 +139,13 @@ fn keyboard_navigation_can_return_to_background_settings(cx: &mut TestAppContext
 fn settings_survives_overflow_and_layout_changes(cx: &mut TestAppContext) {
     let (_directory, workspace, mut cx) = open_workspace(12, cx);
     cx.simulate_resize(gpui::size(px(760.0), px(900.0)));
-    cx.simulate_keystrokes("ctrl-1");
+    cx.simulate_keystrokes(numbered_tab_shortcuts()[0]);
     for position in
         [nebula_settings::TabsPositionName::Sidebar, nebula_settings::TabsPositionName::Top]
     {
         workspace.update(&mut cx, |workspace, cx| {
             workspace.tabs_position = position;
-            workspace.sync_settings_layout();
+            workspace.sync_settings_layout(false);
             cx.notify();
         });
         assert_eq!(workspace.read_with(&cx, |workspace, _| workspace.top_tab_count()), 13);
@@ -145,6 +154,36 @@ fn settings_survives_overflow_and_layout_changes(cx: &mut TestAppContext) {
     let settings = tab_bounds("top-tab-12", &mut cx);
     assert!(settings.origin.x >= px(0.0) && settings.right() <= px(760.0));
     workspace.read_with(&cx, |workspace, _| assert!(workspace.settings_open));
+}
+
+#[gpui::test]
+fn instant_slide_animation_keeps_the_side_panel_static(cx: &mut TestAppContext) {
+    let (_directory, workspace, mut cx) = open_workspace(1, cx);
+    // With the slide animation off, folding the main sidebar for the settings
+    // page must not arm the fold animation: the column snaps into place.
+    workspace.update(&mut cx, |workspace, cx| {
+        workspace.tabs_position = nebula_settings::TabsPositionName::Sidebar;
+        workspace.settings_open = true;
+        workspace.sidebar_collapsed = false;
+        workspace.sync_settings_layout(true);
+    });
+    workspace.read_with(&cx, |workspace, _| {
+        assert!(workspace.sidebar_collapsed, "sidebar mode folds for settings");
+        assert!(!workspace.sidebar_fold_armed, "instant: fold animation not armed");
+    });
+    // The default slide mode keeps arming the fold as before.
+    workspace.update(&mut cx, |workspace, _| {
+        workspace.sidebar_collapsed = false;
+        workspace.sync_settings_layout(false);
+    });
+    workspace.read_with(&cx, |workspace, _| {
+        assert!(workspace.sidebar_fold_armed, "slide: fold animation armed");
+    });
+    workspace.update(&mut cx, |workspace, _| workspace.sync_settings_layout(true));
+    workspace.read_with(&cx, |workspace, _| {
+        assert!(workspace.sidebar_collapsed);
+        assert!(!workspace.sidebar_fold_armed, "mode switch must clear an unchanged fold");
+    });
 }
 
 #[gpui::test]
@@ -170,13 +209,13 @@ fn density_changes_real_tab_bounds_and_sidebar_drag_pitch(cx: &mut TestAppContex
     for position in [TabsPositionName::Sidebar, TabsPositionName::Top] {
         for (density, height, gap, title_height) in [
             (DensityName::Standard, 34.0, 8.0, 48.0),
-            (DensityName::Compact, 32.0, 4.0, 40.0),
+            (DensityName::Compact, 32.0, 4.0, 48.0),
             (DensityName::Standard, 34.0, 8.0, 48.0),
         ] {
             workspace.update(&mut cx, |workspace, cx| {
                 workspace.tabs_position = position;
                 workspace.density = density;
-                workspace.sync_settings_layout();
+                workspace.sync_settings_layout(tab_reveal_instant(cx));
                 workspace.reveal_active_tab();
                 cx.notify();
             });

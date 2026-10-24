@@ -87,7 +87,7 @@ class MainActivity : ComponentActivity() {
         var addRelay by remember { mutableStateOf(false) }
         var deployRelay by remember { mutableStateOf(false) }
         var login by remember { mutableStateOf<HostProfile?>(null) }
-        var retrySession by remember { mutableStateOf<String?>(null) }
+        var pendingAttachment by remember { mutableStateOf<RemoteAttachment?>(null) }
         var switcher by remember { mutableStateOf(false) }
         val desktop = desktops.find { it.id == desktopId }
         val pane = desktop?.panes?.find { it.id == paneId && it.window == windowId }
@@ -138,10 +138,10 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(desktopId, relays) {
             if (page in setOf("pane", "desktop", "git", "file", "conversation")) repository.restoreDesktop(desktopId)?.let { desktopId = it }
         }
-        fun connectHost(host: HostProfile, previous: String? = null) {
+        fun connectHost(host: HostProfile, attachment: RemoteAttachment? = null) {
             if (credentialBusy) return
-            if (!repository.hasSavedPassword(host)) {
-                retrySession = previous
+            if (!repository.hasSavedPassword(host) && host.keyUri.isEmpty()) {
+                pendingAttachment = attachment
                 login = host
                 return
             }
@@ -149,13 +149,12 @@ class MainActivity : ComponentActivity() {
             credentialScope.launch {
                 var secret: CharArray? = null
                 try {
-                    secret = repository.loadSavedPassword(host)
+                    secret = repository.passwordForConnection(host, null)
                     if (secret == null) {
-                        retrySession = previous
+                        pendingAttachment = attachment
                         login = host
                     } else {
-                        previous?.let(repository::closeTerminal)
-                        openSession(repository.ssh(host, checkNotNull(secret)))
+                        openSession(repository.ssh(host, checkNotNull(secret), attachment))
                         secret = null
                     }
                 } finally {
@@ -168,6 +167,14 @@ class MainActivity : ComponentActivity() {
             val id = repository.local()
             finishOnboarding()
             openSession(id)
+        }
+        fun newSshTab(source: String, attachment: RemoteAttachment? = null) {
+            if (credentialBusy) return
+            credentialBusy = true
+            credentialScope.launch {
+                try { repository.newSshTab(source, attachment)?.let(::openSession) }
+                finally { credentialBusy = false }
+            }
         }
         var notificationRequested by rememberSaveable { mutableStateOf(false) }
         val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
@@ -198,6 +205,8 @@ class MainActivity : ComponentActivity() {
                 desktopId = target.getStringExtra("desktop").orEmpty()
                 windowId = target.getLongExtra("window", -1)
                 paneId = target.getLongExtra("pane", -1)
+                paneProcess = target.getLongExtra("process", -1).takeIf { it >= 0 }
+                repository.restoreDesktop(desktopId)?.let { desktopId = it }
                 showPage("pane")
             }
         }
@@ -243,15 +252,15 @@ class MainActivity : ComponentActivity() {
                     "terminal" -> {
                         val session = sessions.find { it.id == selected }
                         if (session != null) LocalTerminalScreen(session, repository, ::back, { switcher = true },
-                            onRetry = { session.host?.let { host ->
-                                connectHost(hosts.find { it.id == host.id } ?: host, session.id)
-                            } },
+                            onRetry = { repository.retrySsh(session.id) },
                             onEdit = { session.host?.let { host ->
                                 editHost = hosts.find { it.id == host.id } ?: host; hostForm = true
                                 repository.closeTerminal(session.id); back()
                             } },
                             onClose = { repository.closeTerminal(session.id); back() },
-                            onFiles = session.files?.let { { showPage("sftp") } })
+                            onFiles = session.files?.let { { showPage("sftp") } },
+                            active = page == route,
+                            onAttachRemote = { entry -> newSshTab(session.id, entry) })
                         else LaunchedEffect(selected) { showPage("home") }
                     }
                     "sftp" -> {
@@ -330,6 +339,14 @@ class MainActivity : ComponentActivity() {
         }
         if (switcher) AlertDialog(onDismissRequest = { switcher = false }, title = { Text(stringResource(R.string.all_sessions)) }, text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
+                val current = sessions.find { it.id == selected }
+                if (current?.host != null) NavigationRow(R.drawable.ic_plus,
+                    stringResource(R.string.tab_new_terminal), current.host.name) { newSshTab(current.id) }
+                NavigationRow(R.drawable.ic_server, stringResource(R.string.ssh_hosts),
+                    stringResource(R.string.ssh_new_tab_host_hint)) { switcher = false; showPage("hosts") }
+                NavigationRow(R.drawable.ic_terminal, stringResource(R.string.local_terminal),
+                    stringResource(R.string.local_device)) { switcher = false; openLocal() }
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 val cards = sessionCards(sessions, desktops)
                 if (cards.isEmpty()) HelperText(stringResource(R.string.no_sessions))
                 cards.forEach { card ->
@@ -402,7 +419,8 @@ class MainActivity : ComponentActivity() {
         if (deployRelay) RelayDeploymentFlow(repository, onCancel = { deployRelay = false })
         login?.let { host -> LoginForm(
             host = host,
-            onCancel = { login = null; retrySession = null },
+            onCancel = { login = null; pendingAttachment = null },
+            attachmentLabel = pendingAttachment?.title,
             passwordSaved = savedCredentials.isNotEmpty() && repository.hasSavedPassword(host),
             busy = credentialBusy,
             onClearPassword = {
@@ -420,10 +438,9 @@ class MainActivity : ComponentActivity() {
                         if (connectionPassword == null) repository.error.value = "credential_missing"
                         else if (repository.saveHostWithCredentials(host, password, rememberPassword)) {
                             val secret = checkNotNull(connectionPassword)
-                            retrySession?.let(repository::closeTerminal)
-                            retrySession = null
                             if (computer) openDesktop(repository.connectDesktop(host, secret, input))
-                            else openSession(repository.ssh(host, secret))
+                            else openSession(repository.ssh(host, secret, pendingAttachment))
+                            pendingAttachment = null
                             connectionPassword = null
                             login = null
                         }

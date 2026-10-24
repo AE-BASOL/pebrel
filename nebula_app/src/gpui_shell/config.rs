@@ -81,6 +81,7 @@ pub struct Settings {
     pub copy_on_select: bool,
     pub scrollback_lines: usize,
     pub scroll_speed: f32,
+    pub scrollbar_visibility: nebula_settings::ScrollbarVisibility,
     /// Pointer handlers and split rendering only read these cached preferences.
     pub focus_follows_mouse: bool,
     pub dim_inactive_panes: bool,
@@ -91,10 +92,9 @@ pub struct Settings {
     /// 标签关闭按钮与标签插入动画都在渲染热路径读取，必须随全局设置驻留内存。
     pub tab_close_visible: bool,
     pub tab_reveal: nebula_settings::TabRevealName,
-    /// 命令补全三设置（settings.txt 的 `ghost`/`accept`/`completion_style`），
+    /// 命令补全设置（settings.txt 的 `ghost`/`completion_style`），
     /// 类型直接用旧壳 display 的语义枚举：接受键判定与样式分支两壳同源。
     pub ghost: bool,
-    pub accept: crate::display::AcceptKey,
     pub completion_style: crate::display::CompletionStyle,
     /// 单元格宽度取整方式；同一窗口宽度下必须与旧壳得到相同列数。
     pub cell_width_mode: nebula_settings::CellWidthModeName,
@@ -123,6 +123,12 @@ pub(crate) fn ui_language(cx: &App) -> UiLanguage {
 
 pub(crate) fn panel_resize(cx: &App) -> bool {
     cx.try_global::<Settings>().is_some_and(|settings| settings.panel_resize)
+}
+
+/// 只查询内存快照，避免动画渲染读盘；初始化前保持默认滑动行为。
+pub(crate) fn tab_reveal_instant(cx: &App) -> bool {
+    cx.try_global::<Settings>()
+        .is_some_and(|settings| settings.tab_reveal == nebula_settings::TabRevealName::Instant)
 }
 
 pub(crate) fn ctrl_wheel_font_zoom(cx: &App) -> bool {
@@ -291,6 +297,7 @@ impl Settings {
             copy_on_select: runtime.copy_on_select,
             scrollback_lines: runtime.scrollback_lines,
             scroll_speed: runtime.scroll_speed,
+            scrollbar_visibility: runtime.scrollbar_visibility,
             focus_follows_mouse: runtime
                 .focus_follows_mouse
                 .unwrap_or(raw.mouse.focus_follows_mouse),
@@ -300,15 +307,7 @@ impl Settings {
             tab_close_visible: runtime.tab_close_visible,
             tab_reveal: runtime.tab_reveal,
             ghost: runtime.ghost,
-            accept: match runtime.accept.settings_value() {
-                "right" => crate::display::AcceptKey::Right,
-                "tab" => crate::display::AcceptKey::Tab,
-                _ => crate::display::AcceptKey::Both,
-            },
-            completion_style: match runtime.completion_style.settings_value() {
-                "popup" => crate::display::CompletionStyle::Popup,
-                _ => crate::display::CompletionStyle::Inline,
-            },
+            completion_style: runtime.completion_style,
             cell_width_mode: runtime.cell_width_mode,
             cjk_bold_regular: runtime.cjk_bold_regular,
             shell_id: runtime.shell.clone(),
@@ -1147,8 +1146,8 @@ mod tests {
         let original_cursor = paper.cursor;
         let original_selection = paper.selection;
         apply_theme(&mut paper, ThemeName::Paper);
-        assert_eq!(paper.foreground, rgba8([0x1a, 0x1a, 0x1a]));
-        assert_eq!(paper.ansi[15], rgba8([0x2f, 0x2e, 0x2e]));
+        assert_eq!(paper.foreground, rgba8([0x2f, 0x2e, 0x2b]));
+        assert_eq!(paper.ansi[15], rgba8([0x4a, 0x43, 0x3b]));
         assert_eq!(paper.cursor, original_cursor);
         assert_eq!(paper.cursor_text, None);
         assert_eq!(paper.selection, original_selection);

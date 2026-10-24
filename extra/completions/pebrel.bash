@@ -46,6 +46,12 @@ _pebrel() {
             pebrel,tab)
                 cmd="pebrel__tab"
                 ;;
+            pebrel,theme)
+                cmd="pebrel__theme"
+                ;;
+            pebrel,view)
+                cmd="pebrel__view"
+                ;;
             pebrel,window)
                 cmd="pebrel__window"
                 ;;
@@ -331,6 +337,12 @@ _pebrel() {
             pebrel__help,tab)
                 cmd="pebrel__help__tab"
                 ;;
+            pebrel__help,theme)
+                cmd="pebrel__help__theme"
+                ;;
+            pebrel__help,view)
+                cmd="pebrel__help__view"
+                ;;
             pebrel__help,window)
                 cmd="pebrel__help__window"
                 ;;
@@ -493,6 +505,18 @@ _pebrel() {
             pebrel__help__tab,rename)
                 cmd="pebrel__help__tab__rename"
                 ;;
+            pebrel__help__theme,check)
+                cmd="pebrel__help__theme__check"
+                ;;
+            pebrel__help__theme,import)
+                cmd="pebrel__help__theme__import"
+                ;;
+            pebrel__help__theme,limits)
+                cmd="pebrel__help__theme__limits"
+                ;;
+            pebrel__help__theme,pack)
+                cmd="pebrel__help__theme__pack"
+                ;;
             pebrel__help__window,close)
                 cmd="pebrel__help__window__close"
                 ;;
@@ -598,6 +622,36 @@ _pebrel() {
             pebrel__tab__help,rename)
                 cmd="pebrel__tab__help__rename"
                 ;;
+            pebrel__theme,check)
+                cmd="pebrel__theme__check"
+                ;;
+            pebrel__theme,help)
+                cmd="pebrel__theme__help"
+                ;;
+            pebrel__theme,import)
+                cmd="pebrel__theme__import"
+                ;;
+            pebrel__theme,limits)
+                cmd="pebrel__theme__limits"
+                ;;
+            pebrel__theme,pack)
+                cmd="pebrel__theme__pack"
+                ;;
+            pebrel__theme__help,check)
+                cmd="pebrel__theme__help__check"
+                ;;
+            pebrel__theme__help,help)
+                cmd="pebrel__theme__help__help"
+                ;;
+            pebrel__theme__help,import)
+                cmd="pebrel__theme__help__import"
+                ;;
+            pebrel__theme__help,limits)
+                cmd="pebrel__theme__help__limits"
+                ;;
+            pebrel__theme__help,pack)
+                cmd="pebrel__theme__help__pack"
+                ;;
             pebrel__window,close)
                 cmd="pebrel__window__close"
                 ;;
@@ -617,7 +671,7 @@ _pebrel() {
 
     case "${cmd}" in
         pebrel)
-            opts="-q -v -e -T -o -h -V --print-events --ref-test --embed --gpui --config-file --socket --daemon --working-directory --shell --hold --command --title --class --option --help --version [DIRECTORY] ctl env window tab pane agent migrate config plugin setup-ai help"
+            opts="-q -v -e -T -o -h -V --print-events --ref-test --embed --gpui --config-file --socket --daemon --working-directory --shell --hold --command --title --class --option --help --version [DIRECTORY] view ctl env window tab pane agent migrate config plugin theme setup-ai help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -2536,7 +2590,7 @@ _pebrel() {
             return 0
             ;;
         pebrel__help)
-            opts="ctl env window tab pane agent migrate config plugin setup-ai help"
+            opts="view ctl env window tab pane agent migrate config plugin theme setup-ai help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -3431,6 +3485,90 @@ _pebrel() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
+        pebrel__help__theme)
+            opts="check pack import limits"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pebrel__help__theme__check)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pebrel__help__theme__import)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pebrel__help__theme__limits)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pebrel__help__theme__pack)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pebrel__help__view)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
         pebrel__help__window)
             opts="close"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
@@ -4185,6 +4323,202 @@ _pebrel() {
                     ;;
                 --timeout-ms)
                     COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pebrel__theme)
+            opts="-h --help check pack import limits help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pebrel__theme__check)
+            opts="-h --help <PATH>"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pebrel__theme__help)
+            opts="check pack import limits help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pebrel__theme__help__check)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pebrel__theme__help__help)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pebrel__theme__help__import)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pebrel__theme__help__limits)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pebrel__theme__help__pack)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pebrel__theme__import)
+            opts="-h --help <PATH>"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pebrel__theme__limits)
+            opts="-h --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pebrel__theme__pack)
+            opts="-h --output --author --preview --github --license --version --help <THEME>"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --output)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --author)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --preview)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --github)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --license)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --version)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pebrel__view)
+            opts="-h --type --native --plain --help [INPUT] [COMMAND]..."
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --type)
+                    COMPREPLY=($(compgen -W "markdown table git" -- "${cur}"))
                     return 0
                     ;;
                 *)

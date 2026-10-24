@@ -74,8 +74,10 @@ fun SshConnectionStatus(session: LocalSession, onCancel: () -> Unit, onRetry: ()
 fun TerminalDisconnected(session: LocalSession, onRetry: (() -> Unit)?) {
     Surface(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .45f)) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
-            HelperText(stringResource(if (session.status == "ended") R.string.session_ended_hint else failureText(session.failure)))
-            onRetry?.let { retry -> TextButton(retry) { Text(stringResource(R.string.retry)) } }
+            val connecting = session.status in setOf("connecting", "reconnecting")
+            HelperText(stringResource(if (connecting) R.string.desktop_reconnecting
+                else if (session.status == "ended") R.string.session_ended_hint else failureText(session.failure)))
+            onRetry?.let { retry -> TextButton(retry, enabled = session.status != "connecting") { Text(stringResource(R.string.retry)) } }
         }
     }
 }
@@ -92,6 +94,7 @@ private fun failureText(kind: SshFailureKind?): Int = when (kind) {
     SshFailureKind.TIMEOUT -> R.string.ssh_error_timeout
     SshFailureKind.REFUSED -> R.string.ssh_error_refused
     SshFailureKind.AUTH -> R.string.ssh_error_auth
+    SshFailureKind.KEY -> R.string.ssh_error_key
     SshFailureKind.HOST_KEY_CHANGED -> R.string.ssh_error_host_key
     SshFailureKind.TRUST_REJECTED -> R.string.ssh_error_trust
     SshFailureKind.CHANNEL -> R.string.ssh_error_channel

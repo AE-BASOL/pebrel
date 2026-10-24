@@ -290,6 +290,8 @@ impl WindowIdentity {
 /// Available CLI subcommands.
 #[derive(Subcommand, Debug)]
 pub enum Subcommands {
+    /// Render Markdown, JSON tables, or Git progress in the current terminal.
+    View(crate::native_view_cli::Options),
     /// Agent-oriented terminal control: split panes, run commands, start Codex/Claude,
     /// send prompts, wait for state changes, and read verified terminal output.
     Ctl(ControlOptions),
@@ -313,6 +315,8 @@ pub enum Subcommands {
     Config(ConfigOptions),
     /// Check or invoke a local plugin package without starting a GUI or plugin daemon.
     Plugin(crate::plugins::cli::Options),
+    /// Export, verify, or import a portable ZIP theme package.
+    Theme(crate::theme_library::package::cli::Options),
     /// Test system notification (toast) delivery.
     #[cfg(windows)]
     NotifyTest,

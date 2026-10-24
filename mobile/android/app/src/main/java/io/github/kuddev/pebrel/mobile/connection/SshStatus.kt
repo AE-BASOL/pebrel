@@ -9,7 +9,7 @@ import java.net.UnknownHostException
 
 enum class SshStage { NETWORK, VERIFYING, AUTHENTICATING, OPENING_SHELL }
 enum class SshFailureKind {
-    UNKNOWN_HOST, TIMEOUT, REFUSED, AUTH, HOST_KEY_CHANGED, TRUST_REJECTED, CHANNEL, NETWORK, CRYPTO, NEGOTIATION, UNKNOWN,
+    UNKNOWN_HOST, TIMEOUT, REFUSED, AUTH, HOST_KEY_CHANGED, TRUST_REJECTED, CHANNEL, NETWORK, CRYPTO, NEGOTIATION, UNKNOWN, KEY,
 }
 
 class SshFailure(val kind: SshFailureKind, cause: Exception) : IOException(kind.name, cause)
@@ -24,7 +24,8 @@ fun classifySshFailure(error: Throwable?): SshFailureKind {
         causes.any { it is ConnectException } -> SshFailureKind.REFUSED
         causes.any { it is java.security.GeneralSecurityException } -> SshFailureKind.CRYPTO
         causes.any { it is NativeSshException } -> causes.filterIsInstance<NativeSshException>().first().let {
-            SshFailureKind.entries.firstOrNull { kind -> kind.name == it.code } ?: SshFailureKind.UNKNOWN
+            if (it.code == "CLOSED") SshFailureKind.NETWORK
+            else SshFailureKind.entries.firstOrNull { kind -> kind.name == it.code } ?: SshFailureKind.UNKNOWN
         }
         causes.any { it is NoRouteToHostException } -> SshFailureKind.NETWORK
         causes.any { it is IOException } -> SshFailureKind.NETWORK
