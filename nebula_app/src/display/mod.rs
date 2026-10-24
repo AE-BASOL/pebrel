@@ -7609,6 +7609,7 @@ impl Display {
                     alt_screen,
                     visible_cursor,
                     foreground_color,
+                    |_| true,
                 )
             } else {
                 Vec::new()
@@ -7633,7 +7634,12 @@ impl Display {
             &prepared_math,
             !alt_screen,
         );
-        let frame_images = inline_image::capture(&terminal, &mut pane_state.inline_images, &view);
+        let frame_images = inline_image::capture(
+            &terminal,
+            &mut pane_state.inline_images,
+            &view,
+            &pane_state.terminal_math,
+        );
 
         // Add damage from the terminal, keeping a pane-local copy: the shared
         // tracker gets flooded with a full-window mark every frame further
@@ -9114,20 +9120,11 @@ impl Display {
         ));
         // OSC 1337 inline images collected by the pane passes: draw above the
         // cells, below the chrome/modals.
-        if !self.nebula_frame_images.is_empty() {
-            let size = self.size_info;
-            let images = std::mem::take(&mut self.nebula_frame_images);
-            for image in &images {
-                self.renderer.draw_inline_image_clipped(
-                    &size,
-                    image.id,
-                    &image.rgba,
-                    image.pixels,
-                    image.bounds,
-                    Some(image.clip),
-                );
-            }
-        }
+        inline_image::paint(
+            &mut self.renderer,
+            &self.size_info,
+            std::mem::take(&mut self.nebula_frame_images),
+        );
 
         // Draw Nebula window chrome (title bar and tab sidebar).
         chrome::draw_chrome(self);

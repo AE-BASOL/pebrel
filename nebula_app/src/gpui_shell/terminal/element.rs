@@ -371,8 +371,13 @@ impl Element for TerminalElement {
             );
             self.view.update(cx, |view, cx| {
                 view.math.bind_resources(cx);
-                let size_info =
-                    super::math_overlay::grid_size_info(layout.cols, layout.rows, cell_w, line_h);
+                let vertical = view.native_results.projection.borrow();
+                let size_info = super::math_overlay::grid_size_info(
+                    layout.cols,
+                    vertical.source_rows(layout.rows),
+                    cell_w,
+                    line_h,
+                );
                 if view.reading.panel.is_some() {
                     return view.math.clear_frame(&size_info, math_pixels_per_point);
                 }
@@ -383,7 +388,14 @@ impl Element for TerminalElement {
                     return view.math.clear_frame(&size_info, math_pixels_per_point);
                 };
                 let term = term.lock();
-                view.math.plan_frame(&term, &size_info, foreground, font_px, math_pixels_per_point)
+                view.math.plan_frame(
+                    &term,
+                    &size_info,
+                    foreground,
+                    font_px,
+                    math_pixels_per_point,
+                    |row| !vertical.covers(row),
+                )
             })
         };
         // 位图预检必须在格子绘制之前、term 锁之外：合成不出位图的公式不能进
@@ -845,9 +857,10 @@ impl Element for TerminalElement {
         );
 
         let inline_images = self.view.update(cx, |view, _| view.inline_images.frame_images());
+        let image_runs = math_frame.project_image_runs(&snap.image_runs, layout.cols);
         super::inline_image::paint(
             &inline_images,
-            &snap.image_runs,
+            &image_runs,
             bounds,
             layout.cell_width,
             layout.line_height,

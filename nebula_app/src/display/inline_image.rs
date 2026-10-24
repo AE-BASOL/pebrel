@@ -7,6 +7,8 @@ use nebula_terminal::grid::Dimensions;
 use nebula_terminal::inline_image::push_image_run;
 use nebula_terminal::term::{Term, point_to_viewport_from};
 
+use crate::renderer::Renderer;
+
 use super::{NebulaInlineImage, SizeInfo};
 
 pub(super) struct ImageDraw {
@@ -17,10 +19,24 @@ pub(super) struct ImageDraw {
     pub clip: (f32, f32, f32, f32),
 }
 
+pub(super) fn paint(renderer: &mut Renderer, view: &SizeInfo, images: Vec<ImageDraw>) {
+    for image in &images {
+        renderer.draw_inline_image_clipped(
+            view,
+            image.id,
+            &image.rgba,
+            image.pixels,
+            image.bounds,
+            Some(image.clip),
+        );
+    }
+}
+
 pub(super) fn capture<T: EventListener>(
     term: &Term<T>,
     images: &mut Vec<NebulaInlineImage>,
     view: &SizeInfo,
+    math: &super::terminal_math::TerminalMathState,
 ) -> Vec<ImageDraw> {
     images.retain(|image| image.placement.is_alive());
     if images.is_empty() {
@@ -35,7 +51,8 @@ pub(super) fn capture<T: EventListener>(
         };
         push_image_run(&mut runs, point.line as u16, point.column.0 as u16, tile);
     }
-    runs.iter()
+    math.project_image_runs(&runs, view.columns())
+        .iter()
         .filter_map(|run| {
             let image = images.iter().find(|image| image.placement.id == run.id)?;
             let layout = image.placement.layout;
