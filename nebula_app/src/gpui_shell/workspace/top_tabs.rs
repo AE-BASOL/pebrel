@@ -321,6 +321,7 @@ impl NebulaWorkspace {
                                 pitch,
                                 offset: 0.0,
                                 active: false,
+                                force_tear_out: false,
                                 dock: None,
                             });
                         }),
