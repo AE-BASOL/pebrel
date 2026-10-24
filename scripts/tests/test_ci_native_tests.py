@@ -176,7 +176,7 @@ class NativeSuiteTests(unittest.TestCase):
         release = (root / ".github/workflows/release.yml").read_text(encoding="utf-8")
         self.assertIn("run: python scripts/ci_native_tests.py\n", release)
 
-    def test_nextest_reserves_only_shared_settings_and_exact_bounded_git_fixtures(self):
+    def test_nextest_reserves_only_shared_settings_and_exact_bounded_process_fixtures(self):
         root = Path(__file__).resolve().parents[2]
         config = tomllib.loads((root / ".config/nextest.toml").read_text(encoding="utf-8"))
         self.assertEqual(config["test-groups"], {"theme-studio": {"max-threads": 1}})
@@ -192,7 +192,12 @@ class NativeSuiteTests(unittest.TestCase):
                           " or test(font_size_click_input_commits_cancels_and_bounds_values)"
                           " or test(cjk_dropdown_selection_preserves_the_english_font_chain)"
                           " or test(review_regression_font_fields_align_and_dropdown_toggles_with_search)"
-                          " or test(=gpui_shell::workspace::keyboard_bindings::tests::dispatch::hybrid_completion_uses_window_tab_dispatch_in_both_workspace_layouts)",
+                          " or test(=gpui_shell::workspace::keyboard_bindings::tests::dispatch::hybrid_completion_uses_window_tab_dispatch_in_both_workspace_layouts)"
+                          " or test(=gpui_shell::workspace::windowing::elevated_launch::tests::elevated_launch_reuses_window_and_preserves_each_program_and_directory)"
+                          " or test(=gpui_shell::workspace::windowing::elevated_launch::tests::elevated_launch_new_window_policy_and_invalid_requests_preserve_existing_tabs)"
+                          " or test(=gpui_shell::workspace::windowing::elevated_launch::tests::update_recovery_tracks_its_windows_and_retries_only_missing_slots)"
+                          " or test(=gpui_shell::settings_pane::tests::rename_keymap_row_is_searchable_and_enters_capture)"
+                          " or test(=gpui_shell::settings_pane::providers::interaction_tests::api_key_and_json_edits_stay_in_sync_without_recursive_updates)",
                 "test-group": "theme-studio",
             }, {
                 "filter": "test(=gpui_shell::terminal::view::startup_tests::"
@@ -207,7 +212,12 @@ class NativeSuiteTests(unittest.TestCase):
                 "filter": "test(=completion::tests::completion_requests_work_without_a_view_and_keep_repository_invalidation)"
                           " or test(=completion::tests::editor_cursor_requests_replace_only_the_active_token_and_keep_following_options)"
                           " or test(=completion::tests::checkout_completion_combines_branches_and_paths_and_scopes_remote_demand)"
-                          " or test(=completion::tests::explicit_tracking_requests_keep_edits_scoped_and_do_not_execute)",
+                          " or test(=completion::tests::explicit_tracking_requests_keep_edits_scoped_and_do_not_execute)"
+                          " or test(=completion::tests::network_completion_reads_configured_remotes_and_refspecs_without_network_access)",
+                "threads-required": "num-test-threads",
+            }, {
+                "filter": "test(=tty::windows::test::bash_input::"
+                          "git_bash_wrapped_input_can_be_fully_erased_in_byte_and_utf8_locales)",
                 "threads-required": "num-test-threads",
             }],
         })
@@ -219,6 +229,21 @@ class NativeSuiteTests(unittest.TestCase):
             "completion_capsules_keep_all_chinese_choices_at_large_font_size",
         ):
             self.assertIn(f"fn {name}(", segmented)
+
+        # 这些夹具同样会写共享设置；只加入真实函数，不放宽其它测试的调度。
+        elevated = (root / "nebula_app/src/gpui_shell/workspace/windowing/elevated_launch.rs").read_text(encoding="utf-8")
+        for name in (
+            "elevated_launch_reuses_window_and_preserves_each_program_and_directory",
+            "elevated_launch_new_window_policy_and_invalid_requests_preserve_existing_tabs",
+            "update_recovery_tracks_its_windows_and_retries_only_missing_slots",
+        ):
+            self.assertIn(f"fn {name}(", elevated)
+
+        bash_input = (root / "nebula_terminal/src/tty/windows/test/bash_input.rs").read_text(encoding="utf-8")
+        self.assertIn(
+            "fn git_bash_wrapped_input_can_be_fully_erased_in_byte_and_utf8_locales()",
+            bash_input,
+        )
 
     def test_native_caches_are_default_branch_snapshots_not_per_pr_uploads(self):
         root = Path(__file__).resolve().parents[2]

@@ -95,7 +95,7 @@ impl TerminalView {
             cell_width: (cell_w.as_f32() * scale).round().max(1.0) as u16,
             cell_height: (line_h.as_f32() * scale).round().max(1.0) as u16,
         };
-        let initial_cwd = match &launch {
+        let mut initial_cwd = match &launch {
             TerminalLaunch::Local { cwd, .. } => {
                 cwd.as_ref().map(|path| path.to_string_lossy().into_owned()).unwrap_or_default()
             },
@@ -150,6 +150,9 @@ impl TerminalView {
                     },
                 );
                 let options = session::local_options(spawn_shell, pane_id, cwd);
+                if let Some(cwd) = &options.working_directory {
+                    initial_cwd = cwd.to_string_lossy().into_owned();
+                }
                 let history_cwd = startup_history_directory(&options, &suggest_env);
                 completion_cwd = history_cwd
                     .as_ref()
@@ -267,6 +270,11 @@ impl TerminalView {
         ];
 
         let mut view = Self {
+            _history_subscription: cx
+                .observe_global::<crate::gpui_shell::completion_history::ClearState>(|view, cx| {
+                    view.invalidate_completion_history(cx);
+                }),
+            native_results: Default::default(),
             pane_id,
             session,
             focus_handle,
@@ -275,6 +283,7 @@ impl TerminalView {
             effect: None,
             answers: crate::assistant_answer::AnswerInbox::default(),
             answer_reader: None,
+            reading: super::super::reading::ReadingState::default(),
             confirmation: super::super::confirmation::ConfirmationState::default(),
             font: mono_font(&families[0], FontWeight::NORMAL, FontStyle::Normal, ligatures),
             font_bold: mono_font(&families[1], FontWeight::BOLD, FontStyle::Normal, ligatures),
@@ -311,6 +320,9 @@ impl TerminalView {
             active_run: None,
             last_run: None,
             agent_activity: Default::default(),
+            program_status: None,
+            program_status_seen: false,
+            pty_failed: false,
             progress: crate::taskbar::TaskProgress::None,
             pending_runtime_submit: None,
             pending_shell_command: None,
@@ -325,6 +337,7 @@ impl TerminalView {
             ssh_label: None,
             exec_context,
             ssh_stage: None,
+            ssh_retry_pending: false,
             ssh_connect: None,
             ssh_connect_last_step: std::time::Instant::now(),
             ai_session: None,
@@ -335,6 +348,11 @@ impl TerminalView {
             error,
             exited: None,
             scrollbar_drag: None,
+            scrollbar_hovered: false,
+            scrollbar_visibility: cx
+                .try_global::<Settings>()
+                .map(|settings| settings.scrollbar_visibility)
+                .unwrap_or_default(),
             origin: point(px(0.0), px(0.0)),
             cell_width: cell_w,
             line_height: line_h,
