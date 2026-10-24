@@ -653,7 +653,7 @@ impl NebulaWorkspace {
             .flex_shrink_0()
             // workspace 根保持透明，侧栏自己只铺一层壳色；否则终端卡会
             // 叠到根底色上，把 Acrylic 的目标透明度二次增浓。
-            .bg(theme.background)
+            .bg(crate::gpui_shell::theme::tab_bar_background(cx))
             // 上边距为零：侧栏 / 终端卡 / 右侧抽屉三列顶边一律贴 chrome 下沿
             // （用户 08-26 裁定「左侧 tab 抬到和文件树顶部一致」）。左右和底部
             // 仍是旧壳的 8px。
