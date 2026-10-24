@@ -501,11 +501,13 @@ class SessionRepository(private val context: Context,
         discoveryJobs.remove(id)?.cancel()
         tmuxCheckpoints.remove(id)?.cancel()
         tmuxControls.remove(id)
-        val detectShell = attachment == null && host.sessionMode == SshSessionMode.SHELL
+        val detectShell = host.sessionMode == SshSessionMode.SHELL && attachment?.session?.kind != "herdr"
         val control = if (detectShell || attachment?.session?.kind == "tmux" || (attachment == null && host.sessionMode == SshSessionMode.TMUX))
             TmuxSessionControl(connection::query, { target -> main.post {
-                if (sshConnections[id] === connection) update(id) { it.copy(attachment = target) }
-            } }, detectShell = detectShell) else null
+                if (sshConnections[id] === connection) update(id) {
+                    if (it.status == "ready") it.copy(attachment = target) else it
+                }
+            } }, detectShell = detectShell, endpoint = attachment?.session?.tmux ?: TmuxEndpoint()) else null
         if (control != null) tmuxControls[id] = control
         cancelTrust(id)
         sshConnections[id] = connection
@@ -568,10 +570,10 @@ class SessionRepository(private val context: Context,
                 if (sshConnections[id] !== connection) return@withContext
                 val inventory = result.getOrNull()
                 val host = live.value.find { it.id == id }?.host
+                // Inventory is for browsing, not proof that this PTY attached to a session.
+                // In particular, a vanished target must not be replaced by a reused name.
                 update(id) { it.copy(remote = inventory ?: it.remote, discovering = false, discoveryFailed = result.isFailure,
-                    host = if (inventory == null || inventory.os == "term") it.host else it.host?.copy(icon = inventory.os),
-                    attachment = it.attachment ?: if (inventory != null && it.host != null)
-                        RemoteSessions.configuredAttachment(it.host, inventory) else null) }
+                    host = if (inventory == null || inventory.os == "term") it.host else it.host?.copy(icon = inventory.os)) }
                 if (host != null && inventory != null && inventory.os != "term") {
                     val next = savedHosts.value.map { if (sameSshLogin(it, host) && it.icon == host.icon) it.copy(icon = inventory.os) else it }
                     if (next != savedHosts.value) { savedHosts.value = next; persistHosts() }
