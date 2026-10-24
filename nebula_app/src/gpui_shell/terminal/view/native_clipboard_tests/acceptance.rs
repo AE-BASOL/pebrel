@@ -116,7 +116,7 @@ async fn run_cases(
     owned_clipboard: &mut String,
 ) -> Result<serde_json::Value, String> {
     wait_for(cx, window, view, |view| {
-        view.completion_editor.ready_for_test()
+        view.completion_editor.ready()
             && view.native_clipboard_ready()
             && view
                 .session
