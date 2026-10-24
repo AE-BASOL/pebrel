@@ -84,9 +84,65 @@ pub(crate) fn compose_manual_proxy_url(
     Some((protocol, manual_proxy_value(protocol, host)))
 }
 
+/// Extra field state for editors whose normal text is projected from a saved URL.
+/// Complete values use the same composition contract as the GPUI input widget.
+#[derive(Debug, Default)]
+pub(crate) struct ManualProxyDraft {
+    incomplete: Option<String>,
+}
+
+impl ManualProxyDraft {
+    pub(crate) fn text<'a>(&'a self, saved: &'a str) -> &'a str {
+        self.incomplete.as_deref().unwrap_or_else(|| manual_proxy_parts(saved).1)
+    }
+
+    pub(crate) fn edit(
+        &mut self,
+        protocol: &mut ManualProxyProtocol,
+        saved: &mut String,
+        typed: String,
+    ) {
+        if let Some((selected, url)) = compose_manual_proxy_url(*protocol, &typed) {
+            *protocol = selected;
+            *saved = url;
+            self.clear();
+        } else {
+            self.incomplete = Some(typed);
+        }
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.incomplete = None;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{ManualProxyProtocol, manual_proxy_parts, manual_proxy_value};
+
+    #[test]
+    fn projected_editor_keeps_incomplete_draft_then_commits_or_clears() {
+        let mut draft = super::ManualProxyDraft::default();
+        let mut protocol = ManualProxyProtocol::Socks5;
+        let mut saved = "socks5://old.example:1080".to_owned();
+        for scheme in ["http://", "SOCKS5H://", "socks://"] {
+            draft.edit(&mut protocol, &mut saved, scheme.to_owned());
+            assert_eq!(draft.text(&saved), scheme);
+            assert_eq!(saved, "socks5://old.example:1080");
+        }
+        draft.edit(&mut protocol, &mut saved, "socks5h://proxy.example:1080".to_owned());
+        assert_eq!(protocol, ManualProxyProtocol::Socks5h);
+        assert_eq!(saved, "socks5h://proxy.example:1080");
+        assert_eq!(draft.text(&saved), "proxy.example:1080");
+        draft.edit(&mut protocol, &mut saved, "other.example:1081".to_owned());
+        assert_eq!(saved, "socks5h://other.example:1081");
+        draft.edit(&mut protocol, &mut saved, "http://".to_owned());
+        draft.clear();
+        assert_eq!(draft.text(&saved), "other.example:1081");
+        draft.edit(&mut protocol, &mut saved, String::new());
+        assert!(saved.is_empty());
+        assert!(draft.text(&saved).is_empty());
+    }
 
     #[test]
     fn protocol_and_address_round_trip_without_duplicate_prefixes() {

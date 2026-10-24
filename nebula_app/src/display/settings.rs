@@ -29,7 +29,6 @@ pub(crate) use super::background_color_model::{BACKGROUND_SWATCHES, hsv_to_rgb, 
 use super::keymap;
 pub(crate) use super::network_proxy_model::{
     MANUAL_PROXY_PROTOCOL_OPTIONS, ManualProxyProtocol, ProxyTestStatus, manual_proxy_parts,
-    manual_proxy_value,
 };
 use super::ui::theme::Skin;
 use super::ui::{icons, os_icons, surface, text_field, tokens, widgets};
