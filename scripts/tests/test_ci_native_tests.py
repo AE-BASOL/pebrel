@@ -217,11 +217,18 @@ class NativeSuiteTests(unittest.TestCase):
                           " or test(=completion::tests::network_completion_reads_configured_remotes_and_refspecs_without_network_access)",
                 "threads-required": "num-test-threads",
             }, {
+                "filter": "test(=ai_hook::unix::tests::"
+                          "local_hook_socket_routes_identity_and_releases_its_private_directory)",
+                "threads-required": "num-test-threads",
+            }, {
                 "filter": "test(=tty::windows::test::bash_input::"
                           "git_bash_wrapped_input_can_be_fully_erased_in_byte_and_utf8_locales)",
                 "threads-required": "num-test-threads",
             }],
         })
+
+        unix_hook = (root / "nebula_app/src/ai_hook/unix.rs").read_text(encoding="utf-8")
+        self.assertIn("fn local_hook_socket_routes_identity_and_releases_its_private_directory(", unix_hook)
 
         # 核对真实函数名，避免配置和期望同时保留旧名字却漏掉写设置的测试。
         segmented = (root / "nebula_app/src/gpui_shell/settings_pane/segmented/tests.rs").read_text(encoding="utf-8")
