@@ -127,27 +127,60 @@ fn direct_image_owner_dies_at_history_eviction_and_history_clear() {
 
 #[test]
 fn direct_image_reflow_preserves_every_source_tile_and_reset_releases_it() {
-    let (mut term, mut stream) = setup(1);
+    let (mut term, mut stream) = setup(3);
     stream.feed(&mut term, &Listener, b"\x1b[2;3H");
     let image = insert(&mut term, 4, 2);
-    term.resize(Size(10, 8));
-    let runs = snap(&term).image_runs;
-    let mut tiles: Vec<_> = runs
-        .iter()
-        .flat_map(|run| {
+    for columns in [3, 10] {
+        term.resize(Size(columns, 8));
+        let runs = snap(&term).image_runs;
+        assert!(!runs.is_empty());
+        for run in &runs {
             assert_eq!(run.id, image.id);
-            assert!(run.column + run.columns <= 10);
-            (0..usize::from(run.columns)).map(|offset| (run.source_row, run.source_column + offset))
-        })
-        .collect();
-    tiles.sort_unstable();
-    assert_eq!(
-        tiles,
-        (0..2).flat_map(|row| (0..4).map(move |column| (row, column))).collect::<Vec<_>>()
-    );
+            assert!(usize::from(run.column + run.columns) <= columns);
+        }
+        let mut tiles = Vec::new();
+        for row in -(term.history_size() as i32)..term.screen_lines() as i32 {
+            for cell in &term.grid()[Line(row)][..] {
+                if let Some(tile) = cell.image() {
+                    assert_eq!(tile.image.id, image.id);
+                    tiles.push((tile.row, tile.column));
+                }
+            }
+        }
+        tiles.sort_unstable();
+        assert_eq!(
+            tiles,
+            (0..2).flat_map(|row| (0..4).map(move |column| (row, column))).collect::<Vec<_>>()
+        );
+    }
     stream.feed(&mut term, &Listener, b"\x1bc");
     assert!(!image.is_alive());
     assert!(snap(&term).image_runs.is_empty());
+}
+
+#[test]
+fn direct_image_wraps_before_insertion_without_overwriting_full_text_line() {
+    let (mut term, mut stream) = setup(1);
+    stream.feed(&mut term, &Listener, b"12345678901234567890");
+    assert!(term.grid().cursor.input_needs_wrap);
+    insert(&mut term, 4, 1);
+    assert_eq!(term.grid()[Line(0)][Column(19)].c, '0');
+    let run = snap(&term).image_runs.remove(0);
+    assert_eq!((run.row, run.column, run.columns), (1, 0, 4));
+}
+
+#[test]
+fn direct_image_breaks_the_previous_text_grapheme_cluster() {
+    let (mut term, mut stream) = setup(1);
+    stream.feed(&mut term, &Listener, "\u{1f1e8}".as_bytes());
+    let image_column = term.grid().cursor.point.column;
+    insert(&mut term, 1, 1);
+    let next_column = term.grid().cursor.point.column;
+    stream.feed(&mut term, &Listener, "\u{1f1f3}".as_bytes());
+    assert_eq!(term.grid()[Line(0)][Column(0)].c, '\u{1f1e8}');
+    assert!(term.grid()[Line(0)][Column(0)].zerowidth().is_none_or(|chars| chars.is_empty()));
+    assert_eq!(term.grid()[Line(0)][next_column].c, '\u{1f1f3}');
+    assert_eq!(usize::from(snap(&term).image_runs[0].column), image_column.0);
 }
 
 #[test]

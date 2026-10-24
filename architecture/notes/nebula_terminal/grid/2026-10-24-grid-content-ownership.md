@@ -31,6 +31,10 @@ lookup until the corresponding content is introduced. Marker-only writes enable
 cleanup without selecting image-aware snapshots. Clone, serde and cursor-template
 transfer preserve the conservative contract.
 
+Direct insertion starts a new text-input boundary and uses the existing pending
+wrap operation before writing cells. It must not overwrite a completed text line.
+Protocol-specific sizing and rejection still belong to the later OSC adapter.
+
 Text-only native replacement cannot express pixels. Reject image-bearing command
 sources and invalidate a previously captured source if an image is inserted later,
 using the existing fingerprint pass rather than a second row traversal.
@@ -54,7 +58,8 @@ format or thread model changes. Hints are monotonic, not exact resource counts.
 
 Direct API tests cover fragment erasure, alternate screens, history eviction,
 history clearing, reflow, reset, public mutation, clone, serde and cursor-template
-transfer. Native capture tests cover shared metadata, source invalidation and
+transfer. Reflow compares source tiles over the full logical grid with enough
+history to avoid intentional eviction. Native capture tests cover shared metadata, source invalidation and
 marker-only cleanup. Core tests and the unchanged GPUI product configuration are
 validated independently of the later protocol and math changes.
 

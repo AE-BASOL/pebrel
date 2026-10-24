@@ -23,6 +23,10 @@ impl<T: EventListener> Term<T> {
     /// Place the image exactly like rows of terminal cells. OSC 1337 advances
     /// between image rows only; a trailing newline belongs to the application.
     pub fn nebula_insert_inline_image(&mut self, layout: ImageLayout) -> ImagePlacement {
+        self.reset_input_cluster();
+        if self.grid.cursor.input_needs_wrap {
+            self.wrapline();
+        }
         self.grid.track_transient_content();
         let image = ImageIdentity::new();
         // Prepare text attributes once; tiles clone this image template so a
