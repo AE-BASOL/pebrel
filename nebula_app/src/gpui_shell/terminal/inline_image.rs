@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use gpui::{Bounds, ContentMask, Corners, Pixels, RenderImage, Window, point, px, size};
 use image::{Frame, ImageFormat};
-use nebula_terminal::inline_image::{ImagePlacement, ImageRun};
+use nebula_terminal::inline_image::{ImageLayout, ImagePlacement, ImageRun};
 
 const MAX_IMAGE_PIXELS: u64 = 16 * 1024 * 1024;
 const MAX_IMAGE_ENCODED_BYTES: usize = 12 * 1024 * 1024;
@@ -138,6 +138,7 @@ pub(super) fn paint(
     bounds: Bounds<Pixels>,
     cell_width: Pixels,
     cell_height: Pixels,
+    row_y: &dyn Fn(f32) -> Pixels,
     window: &mut Window,
 ) {
     window.with_content_mask(Some(ContentMask { bounds }), |window| {
@@ -145,23 +146,14 @@ pub(super) fn paint(
             let Some(inline) = images.iter().find(|image| image.placement.id == run.id) else {
                 continue;
             };
-            let layout = inline.placement.layout;
-            let origin = point(
-                bounds.origin.x + cell_width * run.column as f32,
-                bounds.origin.y + cell_height * run.row as f32,
+            let (image_bounds, clip) = image_geometry(
+                inline.placement.layout,
+                run,
+                bounds.origin,
+                cell_width,
+                cell_height,
+                row_y,
             );
-            let image_bounds = Bounds::new(
-                point(
-                    origin.x - cell_width * run.source_column as f32,
-                    origin.y - cell_height * run.source_row as f32,
-                ),
-                size(
-                    cell_width * (layout.width / layout.cell_width),
-                    cell_height * (layout.height / layout.cell_height),
-                ),
-            );
-            let clip = Bounds::new(origin, size(cell_width * run.columns as f32, cell_height))
-                .intersect(&image_bounds);
             if clip.size.width <= px(0.0) || clip.size.height <= px(0.0) {
                 continue;
             }
@@ -179,6 +171,31 @@ pub(super) fn paint(
             });
         }
     });
+}
+
+pub(super) fn image_geometry(
+    layout: ImageLayout,
+    run: &ImageRun,
+    origin: gpui::Point<Pixels>,
+    cell_width: Pixels,
+    cell_height: Pixels,
+    row_y: &dyn Fn(f32) -> Pixels,
+) -> (Bounds<Pixels>, Bounds<Pixels>) {
+    let tile_origin =
+        point(origin.x + cell_width * run.column as f32, origin.y + row_y(run.row as f32));
+    let image_bounds = Bounds::new(
+        point(
+            tile_origin.x - cell_width * run.source_column as f32,
+            tile_origin.y - cell_height * run.source_row as f32,
+        ),
+        size(
+            cell_width * (layout.width / layout.cell_width),
+            cell_height * (layout.height / layout.cell_height),
+        ),
+    );
+    let clip = Bounds::new(tile_origin, size(cell_width * run.columns as f32, cell_height))
+        .intersect(&image_bounds);
+    (image_bounds, clip)
 }
 
 pub(super) fn decode_bytes(data: &[u8]) -> Result<(Arc<RenderImage>, usize), String> {

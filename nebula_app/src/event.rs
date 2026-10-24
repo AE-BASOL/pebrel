@@ -3053,7 +3053,7 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                             );
                         }
                     },
-                    TerminalEvent::AiHookEnvelope(_) => (),
+                    TerminalEvent::AiHookEnvelope(_) | TerminalEvent::ProgramStatusChanged => (),
                     TerminalEvent::Bell => {
                         if self.ctx.nebula_state.agent_activity.hook_seen() {
                             return;

@@ -16,6 +16,19 @@ impl EventListener for Listener {
     fn send_event(&self, event: Event) {
         self.0.lock().unwrap().push(event);
     }
+
+    fn command_view(
+        &self,
+        shell: &str,
+        command: &str,
+    ) -> Option<nebula_terminal::inline_content::CommandView> {
+        (shell == "pwsh:1" && command == "cat long.md").then(|| {
+            nebula_terminal::inline_content::CommandView {
+                mime: "text/markdown".into(),
+                title: command.into(),
+            }
+        })
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -51,6 +64,76 @@ fn snap(term: &Term<Listener>) -> RenderSnapshot {
         term,
         &SnapshotConfig { rows: term.screen_lines() as u16, cols: term.columns() as u16 },
     )
+}
+
+const NATIVE_COMMAND: &str = "\x1b]1337;SetUserVar=pebrel_shell=cHdzaDox\x07\x1b]1337;SetUserVar=pebrel_command=cHdzaDoxCmNhdCBsb25nLm1k\x07\x1b]133;C\x07";
+
+#[test]
+fn native_command_capture_preserves_mixed_image_output_at_every_split() {
+    let wire = format!(
+        "{NATIVE_COMMAND}# Title\r\n{}\r\nTAIL\r\n\x1b]133;D;0\x07",
+        image("width=3;height=2;preserveAspectRatio=0")
+    );
+    for split in 0..=wire.len() {
+        let (mut term, mut stream, listener) = setup();
+        stream.feed(&mut term, &listener, &wire.as_bytes()[..split]);
+        stream.feed(&mut term, &listener, &wire.as_bytes()[split..]);
+        assert_eq!(
+            snap(&term).image_runs.iter().map(|run| usize::from(run.columns)).sum::<usize>(),
+            6
+        );
+        for row in 0..4 {
+            assert!(term.grid()[Line(row)][Column(0)].inline_marker().is_none());
+        }
+        assert_eq!(term.grid()[Line(3)][Column(0)].c, 'T');
+    }
+}
+
+#[test]
+fn native_source_rejects_image_changes_and_snapshot_obeys_row_filter() {
+    let (mut term, mut stream, listener) = setup();
+    stream.feed(
+        &mut term,
+        &listener,
+        format!("{NATIVE_COMMAND}# Title\r\n\x1b]133;D;0\x07").as_bytes(),
+    );
+    let surface = term.grid()[Line(0)][Column(0)].inline_marker().unwrap().surface.clone();
+    assert!(surface.source_row_matches(0, &term.grid()[Line(0)][..]));
+    term.grid_mut()[Line(0)][Column(10)].set_image(ImageCell {
+        image: ImageIdentity::new(),
+        column: 0,
+        row: 0,
+    });
+    assert!(!surface.source_row_matches(0, &term.grid()[Line(0)][..]));
+    assert_eq!(snap(&term).image_runs.len(), 1);
+    let hidden =
+        RenderSnapshot::capture_rows(&term, &SnapshotConfig { rows: 8, cols: 20 }, |row| row != 0);
+    assert!(hidden.image_runs.is_empty());
+}
+
+#[test]
+fn synchronized_images_and_program_status_keep_reset_order_at_every_split() {
+    for end in ["\x1b[?2026l", ""] {
+        let wire = format!(
+            "\x1b[?2026h{}\x1bc\x1b]7501;state=working:id=fresh\x07{}{end}",
+            image("width=2;height=1"),
+            image("width=3;height=1")
+        );
+        for split in 0..=wire.len() {
+            let (mut term, mut stream, listener) = setup();
+            stream.feed(&mut term, &listener, &wire.as_bytes()[..split]);
+            stream.feed(&mut term, &listener, &wire.as_bytes()[split..]);
+            let status = || term.program_statuses().iter().next().unwrap().id.clone();
+            assert_eq!(status(), "fresh");
+            if end.is_empty() {
+                stream.stop_sync(&mut term);
+            }
+            assert_eq!(term.program_statuses().iter().next().unwrap().id, "fresh");
+            let runs = snap(&term).image_runs;
+            assert_eq!(runs.len(), 1);
+            assert_eq!(runs[0].columns, 3);
+        }
+    }
 }
 
 #[test]

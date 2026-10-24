@@ -682,8 +682,8 @@ pub(crate) struct FormulaOverlay {
     /// [`prepare_overlays`], which knows the rendered width.
     neighbours_above: [Option<(usize, usize)>; MAX_ABSORBED_BLANK_ROWS],
     neighbours_below: [Option<(usize, usize)>; MAX_ABSORBED_BLANK_ROWS],
-    /// Whether the corresponding occupied neighbour row is painted by another
-    /// formula. Formula rows cannot lend even the prose antialiasing sliver:
+    /// Whether the corresponding occupied neighbour row holds another formula
+    /// or non-text content. These cannot lend even the prose antialiasing sliver:
     /// two adjacent math clips must meet at the row boundary, not overlap it.
     formula_neighbours_above: [bool; MAX_ABSORBED_BLANK_ROWS],
     formula_neighbours_below: [bool; MAX_ABSORBED_BLANK_ROWS],

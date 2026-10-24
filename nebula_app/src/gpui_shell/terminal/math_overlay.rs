@@ -228,6 +228,7 @@ impl MathOverlay {
         default_foreground: Rgb,
         font_pixel_size: f32,
         pixels_per_point: f32,
+        include: impl Fn(usize) -> bool,
     ) -> PendingMathFrame {
         let alt_screen = term.mode().contains(TermMode::ALT_SCREEN);
         let selection = term.selection.as_ref().and_then(|selection| selection.to_range(term));
@@ -259,6 +260,7 @@ impl MathOverlay {
             alt_screen,
             cursor,
             default_foreground,
+            include,
         );
 
         let prepared = terminal_math::prepare_overlays(
@@ -503,6 +505,7 @@ pub fn paint_frame(
     cell: (f32, f32),
     pixels_per_point: f32,
     selection_color: Rgba,
+    map_y: &dyn Fn(f32) -> f32,
     window: &mut Window,
     cx: &mut App,
 ) {
@@ -514,14 +517,14 @@ pub fn paint_frame(
         // 裁剪跟随 bleed 预算（与旧壳 MathClip 同一矩形），交给 GPUI 的
         // content mask 执行像素级裁剪。
         let clip = Bounds::new(
-            point(origin.x + px(plan.clip_left), origin.y + px(plan.clip_top)),
+            point(origin.x + px(plan.clip_left), origin.y + px(map_y(plan.clip_top))),
             size(
                 px((plan.clip_right - plan.clip_left).max(0.0)),
-                px((plan.clip_bottom - plan.clip_top).max(0.0)),
+                px((map_y(plan.clip_bottom) - map_y(plan.clip_top)).max(0.0)),
             ),
         );
         let left = origin.x + px(plan.origin_x);
-        let baseline = origin.y + px(plan.baseline_y);
+        let baseline = origin.y + px(map_y(plan.baseline_y));
         window.with_content_mask(Some(gpui::ContentMask { bounds: clip }), |window| {
             math_view::paint_formula_image(
                 &source,
@@ -569,7 +572,7 @@ pub fn paint_frame(
                 );
                 let target = point(
                     origin.x + px(x),
-                    origin.y + px(plan.baseline_y + op.baseline_y) - line.ascent,
+                    origin.y + px(map_y(plan.baseline_y + op.baseline_y)) - line.ascent,
                 );
                 let _ = line.paint(
                     target,
@@ -646,8 +649,85 @@ mod tests {
         rows: usize,
     ) -> super::MathFrame {
         let size = grid_size_info(cols, rows, 8.0, 16.0);
-        let pending = overlay.plan_frame(term, &size, Rgb::new(0xd6, 0xda, 0xea), 16.0, 1.0);
+        let pending =
+            overlay.plan_frame(term, &size, Rgb::new(0xd6, 0xda, 0xea), 16.0, 1.0, |_| true);
         overlay.finalize_frame_with(pending, |_, _| true)
+    }
+
+    #[test]
+    fn native_source_filter_excludes_hidden_formulas_and_keeps_visible_tail() {
+        let term = term_with(24, 8, &[r"$x_1$", "", r"$y_2$", "", r"$z_3$"]);
+        let size = grid_size_info(24, 8, 8.0, 16.0);
+        let mut overlay = MathOverlay::default();
+        let pending =
+            overlay.plan_frame(&term, &size, Rgb::new(0xd6, 0xda, 0xea), 16.0, 1.0, |row| row != 2);
+        let frame = overlay.finalize_frame_with(pending, |_, _| true);
+        assert_eq!(frame.formulas.len(), 2);
+        assert!(frame.covers(0, 0));
+        assert!(!frame.covers(2, 0));
+        assert!(frame.covers(4, 0));
+    }
+
+    #[test]
+    fn hidden_native_formulas_do_not_exhaust_visible_scan_budget() {
+        let hidden = "$x$ ".repeat(64);
+        let term = term_with(320, 8, &[&hidden, "", "", "", "$z_3$"]);
+        let size = grid_size_info(320, 8, 8.0, 16.0);
+        let mut overlay = MathOverlay::default();
+        assert_eq!(plan(&mut overlay, &term, 320, 8).formulas.len(), 64);
+        for _ in 0..2 {
+            let pending =
+                overlay.plan_frame(&term, &size, Rgb::new(0xd6, 0xda, 0xea), 16.0, 1.0, |row| {
+                    row != 0
+                });
+            let frame = overlay.finalize_frame_with(pending, |_, _| true);
+            assert_eq!(frame.formulas.len(), 1);
+            assert!(frame.covers(4, 0));
+        }
+    }
+
+    #[test]
+    fn adjacent_image_rows_are_solid_formula_clip_boundaries() {
+        use nebula_terminal::inline_image::ImageLayout;
+        for prefixed in [false, true] {
+            let prefix = if prefixed { format!("$x{}$ ", " ".repeat(60)) } else { String::new() };
+            let text = format!("{prefix}{}", r"$\frac{1}{\frac{x}{y}}$");
+            let mut term = term_with(120, 6, &["", "", &text]);
+            let mut overlay = MathOverlay::default();
+            overlay.state.set_layout_resolver(std::sync::Arc::new(|source, pixels, _, _| {
+                let scale = pixels / 16.0;
+                let mut layout = crate::math::layout::MathLayout::default();
+                layout.metrics.width = if source.as_ref() == "x" { 8.0 } else { 16.0 } * scale;
+                layout.metrics.height = if source.as_ref() == "x" { 12.0 } else { 24.0 } * scale;
+                layout.metrics.depth = if source.as_ref() == "x" { 0.0 } else { 8.0 } * scale;
+                Some(std::sync::Arc::new(layout))
+            }));
+            let before = plan(&mut overlay, &term, 120, 6);
+            assert_eq!(before.formulas.len(), if prefixed { 2 } else { 1 });
+            assert!(before.formulas.last().unwrap().plan.clip_top < 32.0);
+            for row in [1, 3] {
+                term.grid_mut().cursor.point =
+                    Point::new(Line(row), Column(if prefixed { 3 } else { 0 }));
+                term.nebula_insert_inline_image(ImageLayout {
+                    width: 72.0,
+                    height: 16.0,
+                    cell_width: 8.0,
+                    cell_height: 16.0,
+                    columns: 9,
+                    rows: 1,
+                });
+            }
+            term.grid_mut().cursor.point = Point::new(Line(5), Column(0));
+            let frame = plan(&mut overlay, &term, 120, 6);
+            assert_eq!(frame.formulas.len(), if prefixed { 2 } else { 1 });
+            let tall = &frame.formulas.last().unwrap().plan;
+            assert!(tall.clip_top >= 32.0, "prefixed={prefixed}, clip_top={}", tall.clip_top);
+            assert!(
+                tall.clip_bottom <= 48.0,
+                "prefixed={prefixed}, clip_bottom={}",
+                tall.clip_bottom
+            );
+        }
     }
 
     #[test]
@@ -726,12 +806,18 @@ mod tests {
 
         let mut all_overlay = MathOverlay::default();
         let all_pending =
-            all_overlay.plan_frame(&term, &size, Rgb::new(0xd6, 0xda, 0xea), 16.0, 1.0);
+            all_overlay.plan_frame(&term, &size, Rgb::new(0xd6, 0xda, 0xea), 16.0, 1.0, |_| true);
         let all = all_overlay.finalize_frame_with(all_pending, |_, _| true);
 
         let mut filtered_overlay = MathOverlay::default();
-        let filtered_pending =
-            filtered_overlay.plan_frame(&term, &size, Rgb::new(0xd6, 0xda, 0xea), 16.0, 1.0);
+        let filtered_pending = filtered_overlay.plan_frame(
+            &term,
+            &size,
+            Rgb::new(0xd6, 0xda, 0xea),
+            16.0,
+            1.0,
+            |_| true,
+        );
         let filtered = filtered_overlay
             .finalize_frame_with(filtered_pending, |source, _| source.as_ref() != "x");
 
@@ -978,7 +1064,8 @@ mod tests {
         for _ in 0..12 {
             let frame = cx.update(|cx| {
                 let pending =
-                    overlay.plan_frame(&term, &size, Rgb::new(0xec, 0xef, 0xf4), 16.0, 1.0);
+                    overlay
+                        .plan_frame(&term, &size, Rgb::new(0xec, 0xef, 0xf4), 16.0, 1.0, |_| true);
                 overlay.finalize_frame(pending, 1.0, cx)
             });
             counts.push(frame.formulas.len());
@@ -1080,8 +1167,14 @@ mod tests {
             let mut frame = super::MathFrame::default();
             for _ in 0..12 {
                 frame = cx.update(|cx| {
-                    let pending =
-                        overlay.plan_frame(&term, &size, Rgb::new(0xec, 0xef, 0xf4), 16.0, 1.0);
+                    let pending = overlay.plan_frame(
+                        &term,
+                        &size,
+                        Rgb::new(0xec, 0xef, 0xf4),
+                        16.0,
+                        1.0,
+                        |_| true,
+                    );
                     overlay.finalize_frame(pending, 1.0, cx)
                 });
                 counts.push(frame.formulas.len());

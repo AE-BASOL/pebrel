@@ -137,11 +137,16 @@ struct TextExtra {
     zerowidth: Vec<char>,
     underline_color: Option<Color>,
     hyperlink: Option<Hyperlink>,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    inline_marker: Option<crate::inline_content::Marker>,
 }
 
 impl TextExtra {
     fn is_empty(&self) -> bool {
-        self.zerowidth.is_empty() && self.underline_color.is_none() && self.hyperlink.is_none()
+        self.zerowidth.is_empty()
+            && self.underline_color.is_none()
+            && self.hyperlink.is_none()
+            && self.inline_marker.is_none()
     }
 }
 
@@ -154,8 +159,12 @@ impl Default for CellExtra {
 impl CellExtra {
     #[inline]
     fn text(&self) -> &TextExtra {
-        static EMPTY: TextExtra =
-            TextExtra { zerowidth: Vec::new(), underline_color: None, hyperlink: None };
+        static EMPTY: TextExtra = TextExtra {
+            zerowidth: Vec::new(),
+            underline_color: None,
+            hyperlink: None,
+            inline_marker: None,
+        };
         match &self.0 {
             Extra::Text(text) => text,
             Extra::Image { text: Some(text), .. } => text,
@@ -221,6 +230,15 @@ impl Default for Cell {
 }
 
 impl Cell {
+    pub fn inline_marker(&self) -> Option<&crate::inline_content::Marker> {
+        self.extra.as_ref()?.text().inline_marker.as_ref()
+    }
+
+    pub(crate) fn set_inline_marker(&mut self, marker: crate::inline_content::Marker) {
+        let extra = self.extra.get_or_insert(Default::default());
+        Arc::make_mut(extra).text_mut().inline_marker = Some(marker);
+    }
+
     /// Additional codepoints sharing this cell, including emoji continuations.
     #[inline]
     pub fn zerowidth(&self) -> Option<&[char]> {
@@ -251,7 +269,9 @@ impl Cell {
         if color.is_none()
             && self.image().is_none()
             && self.extra.as_ref().is_none_or(|extra| {
-                extra.text().zerowidth.is_empty() && extra.text().hyperlink.is_none()
+                extra.text().zerowidth.is_empty()
+                    && extra.text().hyperlink.is_none()
+                    && extra.text().inline_marker.is_none()
             })
         {
             self.extra = None;
@@ -274,7 +294,9 @@ impl Cell {
         let should_drop = hyperlink.is_none()
             && self.image().is_none()
             && self.extra.as_ref().is_none_or(|extra| {
-                extra.text().zerowidth.is_empty() && extra.text().underline_color.is_none()
+                extra.text().zerowidth.is_empty()
+                    && extra.text().underline_color.is_none()
+                    && extra.text().inline_marker.is_none()
             });
 
         if should_drop {
@@ -331,11 +353,19 @@ impl GridCell for Cell {
                 }
             }
         }
+        if self.inline_marker().is_some() {
+            let extra = Arc::make_mut(self.extra.as_mut().unwrap());
+            extra.text_mut().inline_marker = None;
+            if extra.text().is_empty() {
+                self.extra = None;
+            }
+        }
     }
 
     #[inline]
     fn is_empty(&self) -> bool {
         (self.c == ' ' || self.c == '\t')
+            && self.inline_marker().is_none()
             && self.bg == Color::Named(NamedColor::Background)
             && self.fg == Color::Named(NamedColor::Foreground)
             && !self.flags.intersects(
@@ -389,6 +419,7 @@ impl LineLength for grid::Row<Cell> {
 
         for (index, cell) in self[..].iter().rev().enumerate() {
             if cell.c != ' '
+                || cell.inline_marker().is_some_and(|marker| !marker.surface.has_grid_source())
                 || cell.extra.as_ref().map(|extra| extra.text().zerowidth.is_empty()) == Some(false)
             {
                 length = Column(self.len() - index);

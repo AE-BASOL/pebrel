@@ -144,10 +144,8 @@ pub(crate) fn faint_ink(cx: &App) -> Hsla {
     ink(resolved_skin(cx).ink_faint)
 }
 
-/// 侧栏运行 spinner 的两端颜色，逐字复用旧壳 `draw_chrome` 的底色裁定：
-/// hairline / ink_dim 先与该 Tab 行的真实不透明底色合成。环由大量相交小圆
-/// 铺成；若直接交给 GPUI 用半透明 hairline 叠画，交叠处会变深，看起来像
-/// 一圈模糊珠子而不是连续圆环。
+/// 运行态圆环的轨道和旋转弧共用语义色；先与 Tab 行底色合成，
+/// 轨道与弧重叠时不会重复积累透明度，深浅主题都保持中性对比。
 pub(crate) fn sidebar_spinner_colors(cx: &App, active: bool) -> (GpuiRgba, GpuiRgba) {
     let palette = resolved_palette(cx);
     let sk = resolved_skin(cx);
@@ -327,9 +325,8 @@ pub fn card_shadow(cx: &App) -> gpui::BoxShadow {
     }
 }
 
-/// 卡内容层底色 = 当前生效的终端背景。终端 tab 之外的卡内容（设置页）
-/// 也用它，让每个 tab 都读作同一张浮在壳上的圆角卡。带窗口透明度
-/// （与终端元素的默认背景同 alpha，透明窗口下整卡一致）。
+/// 终端卡底色使用当前生效的终端背景，并应用窗口背景不透明度。
+/// 设置页通过 `settings_content_bg` 保留主题面板色，复用同一份 alpha。
 pub fn card_content_bg(cx: &App) -> Hsla {
     let mut bg: Hsla = cx
         .try_global::<crate::gpui_shell::config::Settings>()
@@ -413,7 +410,14 @@ pub fn paint_shell_around_card(
     }
 }
 
-/// 旧壳设置页使用不透明 `Skin.panel`，不让终端壁纸穿透设置内容。
+/// 设置页正文与终端卡共用背景不透明度；背景只由 workspace 卡容器绘制。
+pub(crate) fn settings_content_bg(cx: &App) -> Hsla {
+    let mut bg = settings_panel_bg(cx);
+    bg.a *= crate::gpui_shell::wallpaper::card_surface_opacity(cx);
+    bg
+}
+
+/// 弹窗和控件的实色底，独立于正文不透明度以保持可读性。
 pub fn settings_panel_bg(cx: &App) -> Hsla {
     solid(resolved_skin(cx).panel)
 }

@@ -56,6 +56,9 @@ pub struct Storage<T> {
     /// terminal grids opt out; arbitrary mutable access opts back in forever.
     #[cfg_attr(feature = "serde", serde(skip, default = "transient_content_default"))]
     pub(super) may_have_transient_content: bool,
+
+    #[cfg_attr(feature = "serde", serde(skip, default = "transient_content_default"))]
+    pub(super) may_have_images: bool,
 }
 
 #[cfg(feature = "serde")]
@@ -72,6 +75,7 @@ impl<T: Clone> Clone for Storage<T> {
             len: self.len,
             // A cloned grid can escape the terminal and receive arbitrary cells.
             may_have_transient_content: true,
+            may_have_images: true,
         }
     }
 }
@@ -102,6 +106,7 @@ impl<T> Storage<T> {
             visible_lines,
             len: visible_lines,
             may_have_transient_content: true,
+            may_have_images: true,
         }
     }
 
@@ -417,6 +422,7 @@ mod tests {
         // Setup storage area.
         let mut storage: Storage<char> = Storage {
             may_have_transient_content: true,
+            may_have_images: true,
             inner: vec![filled_row('0'), filled_row('1'), filled_row('-')],
             zero: 0,
             visible_lines: 3,
@@ -429,6 +435,7 @@ mod tests {
         // Make sure the result is correct.
         let mut expected = Storage {
             may_have_transient_content: true,
+            may_have_images: true,
             inner: vec![filled_row('0'), filled_row('1'), filled_row('-')],
             zero: 0,
             visible_lines: 4,
@@ -460,6 +467,7 @@ mod tests {
         // Setup storage area.
         let mut storage: Storage<char> = Storage {
             may_have_transient_content: true,
+            may_have_images: true,
             inner: vec![filled_row('-'), filled_row('0'), filled_row('1')],
             zero: 1,
             visible_lines: 3,
@@ -472,6 +480,7 @@ mod tests {
         // Make sure the result is correct.
         let mut expected = Storage {
             may_have_transient_content: true,
+            may_have_images: true,
             inner: vec![filled_row('0'), filled_row('1'), filled_row('-')],
             zero: 0,
             visible_lines: 4,
@@ -500,6 +509,7 @@ mod tests {
         // Setup storage area.
         let mut storage: Storage<char> = Storage {
             may_have_transient_content: true,
+            may_have_images: true,
             inner: vec![filled_row('2'), filled_row('0'), filled_row('1')],
             zero: 1,
             visible_lines: 3,
@@ -512,6 +522,7 @@ mod tests {
         // Make sure the result is correct.
         let expected = Storage {
             may_have_transient_content: true,
+            may_have_images: true,
             inner: vec![filled_row('2'), filled_row('0'), filled_row('1')],
             zero: 1,
             visible_lines: 2,
@@ -538,6 +549,7 @@ mod tests {
         // Setup storage area.
         let mut storage: Storage<char> = Storage {
             may_have_transient_content: true,
+            may_have_images: true,
             inner: vec![filled_row('0'), filled_row('1'), filled_row('2')],
             zero: 0,
             visible_lines: 3,
@@ -550,6 +562,7 @@ mod tests {
         // Make sure the result is correct.
         let expected = Storage {
             may_have_transient_content: true,
+            may_have_images: true,
             inner: vec![filled_row('0'), filled_row('1'), filled_row('2')],
             zero: 0,
             visible_lines: 2,
@@ -582,6 +595,7 @@ mod tests {
         // Setup storage area.
         let mut storage: Storage<char> = Storage {
             may_have_transient_content: true,
+            may_have_images: true,
             inner: vec![
                 filled_row('4'),
                 filled_row('5'),
@@ -601,6 +615,7 @@ mod tests {
         // Make sure the result is correct.
         let expected = Storage {
             may_have_transient_content: true,
+            may_have_images: true,
             inner: vec![
                 filled_row('4'),
                 filled_row('5'),
@@ -636,6 +651,7 @@ mod tests {
         // Setup storage area.
         let mut storage: Storage<char> = Storage {
             may_have_transient_content: true,
+            may_have_images: true,
             inner: vec![
                 filled_row('4'),
                 filled_row('5'),
@@ -655,6 +671,7 @@ mod tests {
         // Make sure the result is correct.
         let expected = Storage {
             may_have_transient_content: true,
+            may_have_images: true,
             inner: vec![filled_row('0'), filled_row('1')],
             zero: 0,
             visible_lines: 1,
@@ -680,6 +697,7 @@ mod tests {
         // Setup storage area.
         let mut storage: Storage<char> = Storage {
             may_have_transient_content: true,
+            may_have_images: true,
             inner: vec![filled_row('1'), filled_row('2'), filled_row('0')],
             zero: 2,
             visible_lines: 1,
@@ -692,6 +710,7 @@ mod tests {
         // Make sure the result is correct.
         let expected = Storage {
             may_have_transient_content: true,
+            may_have_images: true,
             inner: vec![filled_row('0'), filled_row('1')],
             zero: 0,
             visible_lines: 1,
@@ -732,6 +751,7 @@ mod tests {
         // Setup storage area.
         let mut storage: Storage<char> = Storage {
             may_have_transient_content: true,
+            may_have_images: true,
             inner: vec![
                 filled_row('4'),
                 filled_row('5'),
@@ -751,6 +771,7 @@ mod tests {
         // Make sure the result after shrinking is correct.
         let shrinking_expected = Storage {
             may_have_transient_content: true,
+            may_have_images: true,
             inner: vec![
                 filled_row('4'),
                 filled_row('5'),
@@ -773,6 +794,7 @@ mod tests {
         // Make sure the previously freed elements are reused.
         let growing_expected = Storage {
             may_have_transient_content: true,
+            may_have_images: true,
             inner: vec![
                 filled_row('4'),
                 filled_row('5'),
@@ -796,6 +818,7 @@ mod tests {
         // Setup storage area.
         let mut storage: Storage<char> = Storage {
             may_have_transient_content: true,
+            may_have_images: true,
             inner: vec![
                 filled_row('4'),
                 filled_row('5'),
@@ -826,6 +849,7 @@ mod tests {
         expected_inner.append(&mut vec![filled_row('\0'); expected_init_size]);
         let expected_storage = Storage {
             may_have_transient_content: true,
+            may_have_images: true,
             inner: expected_inner,
             zero: 0,
             visible_lines: 0,
@@ -909,6 +933,7 @@ mod tests {
     fn rotate_wrap_zero() {
         let mut storage: Storage<char> = Storage {
             may_have_transient_content: true,
+            may_have_images: true,
             inner: vec![filled_row('-'), filled_row('-'), filled_row('-')],
             zero: 2,
             visible_lines: 0,

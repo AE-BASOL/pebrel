@@ -228,8 +228,14 @@ impl TerminalView {
                 (Some(session), None)
             },
             Err(err) => {
-                let what = if is_ssh { "SSH 会话启动失败" } else { "PTY 启动失败" };
-                (None, Some(format!("{what}: {err}")))
+                let message = if is_ssh {
+                    crate::i18n::Message::TerminalSshStartFailed
+                } else {
+                    crate::i18n::Message::TerminalPtyStartFailed
+                };
+                let error = crate::gpui_shell::config::ui_language(cx)
+                    .format(message, &[("error", &err.to_string())]);
+                (None, Some(error))
             },
         };
 
@@ -264,6 +270,11 @@ impl TerminalView {
         ];
 
         let mut view = Self {
+            _history_subscription: cx
+                .observe_global::<crate::gpui_shell::completion_history::ClearState>(|view, cx| {
+                    view.invalidate_completion_history(cx);
+                }),
+            native_results: Default::default(),
             pane_id,
             session,
             focus_handle,
@@ -309,6 +320,9 @@ impl TerminalView {
             active_run: None,
             last_run: None,
             agent_activity: Default::default(),
+            program_status: None,
+            program_status_seen: false,
+            pty_failed: false,
             progress: crate::taskbar::TaskProgress::None,
             pending_runtime_submit: None,
             pending_shell_command: None,
@@ -316,6 +330,7 @@ impl TerminalView {
             session_launch,
             inline_images: super::super::inline_image::InlineImageStore::default(),
             image_paste: image_paste::ImagePasteState::default(),
+            native_clipboard: native_clipboard::NativeClipboard::default(),
             path_drop: path_drop::PathDropState::default(),
             ssh_destination,
             port_forwards: Vec::new(),
@@ -323,6 +338,7 @@ impl TerminalView {
             ssh_label: None,
             exec_context,
             ssh_stage: None,
+            ssh_retry_pending: false,
             ssh_connect: None,
             ssh_connect_last_step: std::time::Instant::now(),
             ai_session: None,

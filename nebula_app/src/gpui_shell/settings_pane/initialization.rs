@@ -5,7 +5,10 @@ impl SettingsPane {
         let runtime = RuntimeSettings::load();
         let language = crate::gpui_shell::config::ui_language(cx);
         let mut selects: Vec<(&'static str, SharedSelect, &'static [&'static str])> = Vec::new();
-        let mut subscriptions = Vec::new();
+        let mut subscriptions =
+            vec![cx.observe_global::<crate::gpui_shell::completion_history::ClearState>(
+                |_, cx| cx.notify(),
+            )];
 
         let mut add_select = |key: &'static str,
                               values: &'static [&'static str],
@@ -370,7 +373,13 @@ impl SettingsPane {
             .unwrap_or(0);
         let proxy_protocol_select = cx.new(|cx| {
             SelectState::new(
-                vec![SharedString::from("SOCKS5"), SharedString::from("HTTP")],
+                crate::display::MANUAL_PROXY_PROTOCOL_OPTIONS
+                    .iter()
+                    .copied()
+                    .map(|protocol| {
+                        SharedString::from(crate::display::manual_proxy_protocol_label(protocol))
+                    })
+                    .collect::<Vec<_>>(),
                 Some(IndexPath::default().row(proxy_protocol_ix)),
                 window,
                 cx,
@@ -423,7 +432,7 @@ impl SettingsPane {
             active_provider.model,
         ];
         let provider_placeholders = provider_input_placeholders(language);
-        let provider_inputs = provider_values
+        let provider_inputs: Vec<Entity<InputState>> = provider_values
             .into_iter()
             .zip(provider_placeholders)
             .map(|(value, placeholder)| {
@@ -432,6 +441,9 @@ impl SettingsPane {
                 })
             })
             .collect();
+
+        let provider_ui = super::providers::ProviderUi::new(window, cx);
+        subscriptions.extend(provider_ui.subscribe(&provider_inputs, window, cx));
 
         // 远端备份的非密文槽位输入（容量按最多槽位的协议 S3 = 4）；值在
         // 构造体内按当前协议回填。
@@ -680,6 +692,7 @@ impl SettingsPane {
             proxy_test_seq: 0,
             proxy_test_status: crate::display::ProxyTestStatus::Idle,
             provider_store,
+            provider_ui,
             provider_inputs,
             provider_status: None,
             provider_test_seq: 0,

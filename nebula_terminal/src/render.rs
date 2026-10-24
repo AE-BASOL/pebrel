@@ -269,18 +269,27 @@ pub struct SnapshotConfig {
 
 impl RenderSnapshot {
     pub fn capture<T: EventListener>(term: &Term<T>, cfg: &SnapshotConfig) -> Self {
-        if term.grid().may_have_transient_content() {
-            Self::capture_grid::<T, true>(term, cfg)
+        Self::capture_rows(term, cfg, |_| true)
+    }
+
+    /// A host may replace source rows with inline content without altering the VT grid.
+    pub fn capture_rows<T: EventListener>(
+        term: &Term<T>,
+        cfg: &SnapshotConfig,
+        include: impl Fn(usize) -> bool,
+    ) -> Self {
+        if term.grid().may_have_images() {
+            Self::capture_grid::<T, true>(term, cfg, include)
         } else {
-            Self::capture_grid::<T, false>(term, cfg)
+            Self::capture_grid::<T, false>(term, cfg, include)
         }
     }
 
-    // Select once per snapshot so the no-image loop contains no image lookup
-    // or per-cell guard. Both paths share the same text/selection implementation.
+    // Select once per snapshot; marker-only output keeps the no-image loop.
     fn capture_grid<T: EventListener, const IMAGES: bool>(
         term: &Term<T>,
         cfg: &SnapshotConfig,
+        include: impl Fn(usize) -> bool,
     ) -> Self {
         let rows = cfg.rows as usize;
         let cols = cfg.cols as usize;
@@ -335,7 +344,7 @@ impl RenderSnapshot {
         for indexed in content.display_iter {
             let Some(vp) = point_to_viewport_from(viewport_origin, indexed.point) else { continue };
             let (row, col) = (vp.line, vp.column.0);
-            if row >= rows || col >= cols {
+            if row >= rows || col >= cols || !include(row) {
                 continue;
             }
             let (row, col) = (row as u16, col as u16);
