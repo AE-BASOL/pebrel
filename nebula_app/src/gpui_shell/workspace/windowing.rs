@@ -7,6 +7,7 @@
 mod shutdown;
 pub(crate) use shutdown::{quit_all, quit_for_update, schedule_update};
 mod startup;
+pub(crate) use startup::open_initial_window;
 use startup::{initial_startup, runtime_window_startup};
 #[cfg(all(test, feature = "gpui-test-support"))]
 mod linux_native_tests;
@@ -309,50 +310,6 @@ fn save_after_window_closed(cx: &mut App) {
     }
 }
 
-pub(crate) fn open_initial_window(
-    cx: &mut App,
-    ai_events: std::sync::mpsc::Receiver<crate::ai_hook::AiHookEvent>,
-    shell_events: std::sync::mpsc::Receiver<GpuiShellEvent>,
-    initial_cwd: Option<PathBuf>,
-    initial_command: Option<crate::config::ui_config::Program>,
-    shell_id: Option<String>,
-) {
-    if let Some(sessions) = crate::update_download::handoff::restore_ticket() {
-        if let Err(error) = open_update_windows(sessions, Some(ai_events), Some(shell_events), cx) {
-            log::error!("Could not reopen updated workspace: {}", error.message);
-            assert!(
-                !cx.global::<WindowRegistry>().entries.is_empty(),
-                "failed to reopen updated workspace"
-            );
-        }
-        return;
-    }
-    let startup = if shell_id.is_some() {
-        match runtime_window_startup(initial_cwd, shell_id.as_deref()) {
-            Ok(startup) => startup,
-            Err(error) => {
-                log::error!("Could not resolve requested shell: {error:?}");
-                return;
-            },
-        }
-    } else {
-        initial_startup(
-            initial_cwd,
-            initial_command,
-            crate::platform::elevation::requires_isolation(),
-        )
-    };
-    open_workspace_window(
-        cx,
-        startup,
-        Some(ai_events),
-        Some(shell_events),
-        true,
-        WindowRole::Regular,
-    )
-    .expect("failed to open Pebrel GPUI window");
-}
-
 pub(super) fn open_recipe_window(session: crate::session::Session, cx: &mut App) {
     let result =
         open_workspace_window(cx, WorkspaceStartup::Empty, None, None, true, WindowRole::Regular);
@@ -394,11 +351,20 @@ fn open_workspace_window(
     focus: bool,
     role: WindowRole,
 ) -> gpui::Result<(u64, Entity<NebulaWorkspace>)> {
+    open_workspace_window_with_visibility(cx, startup, ai_events, shell_events, focus, role, false)
+}
+
+fn open_workspace_window_with_visibility(
+    cx: &mut App,
+    startup: WorkspaceStartup,
+    ai_events: Option<std::sync::mpsc::Receiver<crate::ai_hook::AiHookEvent>>,
+    shell_events: Option<std::sync::mpsc::Receiver<GpuiShellEvent>>,
+    focus: bool,
+    role: WindowRole,
+    start_hidden: bool,
+) -> gpui::Result<(u64, Entity<NebulaWorkspace>)> {
     let (runtime_window_id, runtime_hub) = allocate_window(cx);
     let runtime = nebula_settings::RuntimeSettings::load();
-    let start_hidden = shell_events.is_some()
-        && matches!(startup, WorkspaceStartup::RestoreOrDefault)
-        && crate::platform::startup::start_hidden(&runtime);
     startup_geometry::load_restore(runtime_window_id, &startup, role, cx);
     let mut options =
         startup_geometry::options(cx, focus, role, runtime.sidebar_width, runtime_window_id);
