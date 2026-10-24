@@ -47,7 +47,10 @@ this export set it. `PEBREL_HTTP_PROXY` stays out of `WSLENV`.
 
 `socks5h` is its own manual-protocol choice and round-trips as `socks5h://`.
 `socks://` remains an alias of `socks5://`. A typed string that is only a
-recognized scheme stays in the address box and is not persisted.
+recognized scheme stays in the address box and is not persisted. The legacy
+editor keeps this draft separately from its persisted URL mirror and uses the
+same composition rule as GPUI. Clearing, cancelling, switching proxy sources,
+and loading changed settings discard the draft at the owning editor boundary.
 
 The PowerShell adapter still uses `PEBREL_HTTP_PROXY` only. `no_proxy` does
 not change its `WebProxy` bypass list.
@@ -80,7 +83,9 @@ URL.
 round-trip, and a later host-only edit. `ssh_proxy` tests cover the custom
 bypass export, an empty bypass clearing `NO_PROXY`, off mode leaving the
 environment alone, and `WSLENV` listing `no_proxy` without
-`PEBREL_HTTP_PROXY`.
+`PEBREL_HTTP_PROXY`, including case-insensitive flagged entries inherited from
+both explicit and launcher `WSLENV`. The projected-editor regression covers
+scheme drafts, full-URL paste, host-only editing, cancellation and explicit clear.
 
 ## Supersedes
 

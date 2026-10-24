@@ -810,8 +810,18 @@ pub(crate) fn forward_terminal_proxy_to_wsl(
         .map(|(_, value)| value.as_str())
         .or(inherited)
         .unwrap_or_default();
-    let mut entries: Vec<String> =
-        existing.split(':').filter(|entry| !entry.is_empty()).map(str::to_owned).collect();
+    let mut entries: Vec<String> = existing
+        .split(':')
+        .filter(|entry| {
+            !entry.is_empty()
+                && !entry
+                    .split('/')
+                    .next()
+                    .unwrap_or(entry)
+                    .eq_ignore_ascii_case(POWERSHELL_HTTP_PROXY)
+        })
+        .map(str::to_owned)
+        .collect();
     for name in TERMINAL_PROXY_VARIABLES {
         append_wslenv_name(&mut entries, name);
     }
@@ -1604,6 +1614,22 @@ mod tests {
         let mut explicit = HashMap::from([("WSLENV".into(), "http_proxy/u".into())]);
         forward_terminal_proxy_to_wsl(&mut explicit, Some("STALE/p"));
         assert_eq!(explicit["WSLENV"], "http_proxy/u:https_proxy:all_proxy");
+    }
+
+    #[test]
+    fn wsl_forwarding_removes_powershell_marker_from_both_sources() {
+        let entries = "PEBREL_HTTP_PROXY/u:KEEP/p:pebrel_http_proxy:HTTP_PROXY/u:NO_PROXY/lp";
+        for explicit in [false, true] {
+            let mut env = HashMap::from([("no_proxy".to_owned(), "localhost".to_owned())]);
+            if explicit {
+                env.insert("wslenv".to_owned(), entries.to_owned());
+            }
+            forward_terminal_proxy_to_wsl(&mut env, Some(entries));
+            assert_eq!(env["WSLENV"], "KEEP/p:HTTP_PROXY/u:NO_PROXY/lp:https_proxy:all_proxy");
+            assert!(!env.contains_key("wslenv"));
+            forward_terminal_proxy_to_wsl(&mut env, None);
+            assert_eq!(env["WSLENV"], "KEEP/p:HTTP_PROXY/u:NO_PROXY/lp:https_proxy:all_proxy");
+        }
     }
 
     #[test]
