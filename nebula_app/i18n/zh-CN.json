@@ -1854,5 +1854,8 @@
     "backup_passphrase_body": "口令至少 8 个字符。Pebrel 不会保存口令，丢失后无法恢复此备份。"
   },
   "terminal.ssh_disconnected": "连接已断开，按 R 重新连接。",
-  "terminal.ssh_reconnect": "重新连接 (R)"
+  "terminal.ssh_reconnect": "重新连接 (R)",
+  "terminal.ssh_session_stopped": "会话已结束。",
+  "terminal.ssh_session_keys": "按 R 重新连接，按 Enter 关闭此终端。",
+  "terminal.ssh_reconnecting": "正在重新连接…"
 }
