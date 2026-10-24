@@ -1854,5 +1854,8 @@
     "backup_passphrase_body": "Use at least 8 characters. Pebrel does not save the passphrase; the backup cannot be restored if you lose it."
   },
   "terminal.ssh_disconnected": "Connection closed. Press R to reconnect.",
-  "terminal.ssh_reconnect": "Reconnect (R)"
+  "terminal.ssh_reconnect": "Reconnect (R)",
+  "terminal.ssh_session_stopped": "Session stopped.",
+  "terminal.ssh_session_keys": "Press R to reconnect. Press Enter to close this terminal.",
+  "terminal.ssh_reconnecting": "Reconnecting…"
 }
