@@ -109,7 +109,7 @@ impl SettingsPane {
                 cx,
             ))
             .child(self.slider_row(
-                language.text(crate::i18n::Message::SettingsAppearanceTerminalContentOpacity),
+                language.text(crate::i18n::Message::SettingsOpacityTitle),
                 help("opacity", language),
                 &self.opacity_slider,
                 opacity,
