@@ -102,8 +102,13 @@ mod startup_tests {
     #[cfg(feature = "gpui-test-support")]
     #[gpui::test]
     fn launch_visibility_reaches_the_actual_workspace(cx: &mut gpui::TestAppContext) {
+        use crate::gpui_shell::settings_fixture::{SettingsBytesGuard, lock_theme_studio};
         use nebula_settings::{RawSettings, RuntimeSettings};
 
+        let _lock = lock_theme_studio();
+        let _settings_guard = SettingsBytesGuard::capture();
+        nebula_settings::persist_keys(&[("silent_start", "1".into()), ("tray", "1".into())])
+            .expect("persist the launch settings consumed by the workspace");
         cx.update(|cx| {
             gpui_component::init(cx);
             crate::gpui_shell::math_view::register(cx);
@@ -132,6 +137,8 @@ mod startup_tests {
                 )
                 .unwrap()
             });
+            assert_eq!(workspace.read_with(cx, |workspace, _| workspace.window_hidden), hidden);
+            workspace.update(cx, |workspace, cx| workspace.apply_runtime_settings(cx));
             assert_eq!(workspace.read_with(cx, |workspace, _| workspace.window_hidden), hidden);
         }
     }
