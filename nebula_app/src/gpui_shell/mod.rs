@@ -24,6 +24,7 @@ macro_rules! eprintln {
 
 mod assets;
 pub mod code_tab;
+pub(crate) mod completion_history;
 pub mod config;
 pub(crate) mod copy_feedback;
 pub mod doc_tabs;
@@ -100,11 +101,6 @@ pub fn run_shell(
             Ok(false) => {},
         }
     }
-    if crate::platform::CAPABILITIES.self_update_install
-        && crate::update_download::handoff::apply_scheduled()
-    {
-        return;
-    }
     let (shell_tx, shell_rx) = std::sync::mpsc::channel();
     let _elevated_handover = if crate::platform::elevation::is_elevated().is_ok_and(|value| value) {
         use crate::platform::elevation::handover::{Request, Startup, start_or_forward};
@@ -113,9 +109,19 @@ pub fn run_shell(
             cwd: crate::platform::startup::resident_launch_directory(
                 initial_cwd.clone(),
                 &settings,
+                crate::platform::launch_directory::is_wsl(
+                    initial_command
+                        .clone()
+                        .map(Into::into)
+                        .or_else(|| workspace::shell_launch::startup_shell(shell_id.clone()))
+                        .as_ref(),
+                ),
             ),
             command: initial_command.clone(),
             shell_id: shell_id.clone(),
+            update_restore: (initial_command.is_none() && shell_id.is_none())
+                .then(crate::update_download::handoff::pending_restore_path)
+                .flatten(),
         };
         let sender = shell_tx.clone();
         // 在托盘、Hook 和 Runtime 创建前决定唯一管理员拥有者，不复用普通实例的端口。
@@ -133,6 +139,12 @@ pub fn run_shell(
     } else {
         None
     };
+    // 管理员重复启动先交给已有拥有者；不能提前消耗“下次启动安装”的预约。
+    if crate::platform::CAPABILITIES.self_update_install
+        && crate::update_download::handoff::apply_scheduled()
+    {
+        return;
+    }
     let open_urls_tx = shell_tx.clone();
     crate::notify::init_gpui_activation(shell_tx.clone());
     crate::ssh_prompt::install({
@@ -174,7 +186,14 @@ pub fn run_shell(
     {
         // 与另一份进程同时启动时，对方可能已经拿到 owner lock、但尚未来得及
         // 发布 endpoint。短暂等待并交接，避免继续打开一个无控制面的空窗口。
-        let handover_cwd = initial_cwd.clone().or_else(|| std::env::current_dir().ok());
+        let settings = nebula_settings::RuntimeSettings::load();
+        let handover_cwd = crate::platform::startup::resident_launch_directory(
+            initial_cwd.clone(),
+            &settings,
+            crate::platform::launch_directory::is_wsl(
+                workspace::shell_launch::startup_shell(shell_id.clone()).as_ref(),
+            ),
+        );
         for _ in 0..40 {
             let behavior = nebula_settings::RuntimeSettings::load().windowing_behavior;
             let handed_over = match behavior {

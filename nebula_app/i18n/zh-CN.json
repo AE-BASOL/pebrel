@@ -1,4 +1,36 @@
 {
+  "native_result": {
+    "diff_expand": "展开文件差异",
+    "diff_collapse": "折叠文件差异",
+    "diff_invalid": "此差异无法按双列行号显示，已保留原文。",
+    "diff_limit": "此差异超过显示限额，可查看完整保留的原文。",
+    "fold_expand": "已省略 {count} 行 · 展开",
+    "fold_collapse": "收起中间 {count} 行",
+    "view": "视图",
+    "raw": "原文",
+    "copy": "复制原文",
+    "copied": "已复制",
+    "filter": "筛选数据行…",
+    "preparing": "正在整理结果…",
+    "row_count": "{count} 行",
+    "filtered_count": "{visible} / {total} 行",
+    "no_rows": "没有匹配的数据，试试其他关键词。",
+    "receiving": "正在接收输出…",
+    "complete": "已完成",
+    "failed": "命令执行失败",
+    "interrupted": "输出已中断",
+    "limit": "输出超过原生视图限额，保留的原文不完整。",
+    "evicted": "此结果已超出历史保留预算并释放。",
+    "table_limit": "此结果超过显示限额，可查看完整原文。",
+    "file_name": "名称",
+    "file_mode": "权限",
+    "file_links": "链接数",
+    "file_owner": "所有者",
+    "file_group": "组",
+    "file_size": "大小",
+    "file_modified": "修改时间",
+    "table_invalid": "需要 JSON 对象或 NDJSON，已显示原文。"
+  },
   "providers": {
     "saving": "正在保存供应商…",
     "applying": "正在应用 CLI 配置…",
@@ -152,6 +184,15 @@
     },
     "quick_terminal_unavailable": "全局快捷键注册失败：{error}。请启用桌面的 GlobalShortcuts portal，或从托盘打开 Pebrel。",
     "completion": {
+      "history": {
+        "title": "Pebrel 命令历史",
+        "description": "管理 Pebrel 记录并用于补全的命令。",
+        "clear": "清除历史",
+        "clearing": "正在清除…",
+        "confirm": "清除 Pebrel 为本地、WSL 和 SSH 终端记录的全部命令历史？此操作无法撤销。已保存的常用命令和 shell 自身的历史会保留。",
+        "cleared": "已清除 Pebrel 命令历史。",
+        "failed": "部分历史未能清除：{error}"
+      },
       "mode": "补齐模式",
       "cycle": "切换补齐模式",
       "inline": "行内补齐",
@@ -347,6 +388,7 @@
       "not_detected": "未安装",
       "config_detected": "已检测到工具配置",
       "unsupported": "尚未提供 hook 接入",
+      "process_detection": "进程识别",
       "unavailable": "不可用",
       "needs_attention": "需要检查",
       "restart": "更改将在重启 Agent 后生效。这里管理安装在本机的 Agent。",
@@ -1551,5 +1593,7 @@
     "save_failed": "效果列表保存失败，请检查设置目录的写入权限后重试。",
     "advanced": "高级效果",
     "advanced_active": "高级效果 · 终端效果已启用"
-  }
+  },
+  "terminal.ssh_disconnected": "连接已断开，按 R 重新连接。",
+  "terminal.ssh_reconnect": "重新连接 (R)"
 }
