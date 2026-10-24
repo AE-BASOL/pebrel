@@ -1,4 +1,36 @@
 {
+  "native_result": {
+    "diff_expand": "Expand file diff",
+    "diff_collapse": "Collapse file diff",
+    "diff_invalid": "This diff cannot be displayed with paired line numbers. Showing the original source.",
+    "diff_limit": "This diff exceeds the display limit. Full retained source remains available.",
+    "fold_expand": "{count} lines omitted · Expand",
+    "fold_collapse": "Collapse the middle {count} lines",
+    "view": "View",
+    "raw": "Raw",
+    "copy": "Copy source",
+    "copied": "Copied",
+    "filter": "Filter rows…",
+    "preparing": "Preparing results…",
+    "row_count": "{count} rows",
+    "filtered_count": "{visible} / {total} rows",
+    "no_rows": "No matching rows. Try another filter.",
+    "receiving": "Receiving output…",
+    "complete": "Completed",
+    "failed": "Command failed",
+    "interrupted": "Output interrupted",
+    "limit": "Output exceeded the native view limit; retained source is incomplete.",
+    "evicted": "This result was released from the retained output budget.",
+    "table_limit": "This result exceeds the display limit. Full source remains available.",
+    "file_name": "Name",
+    "file_mode": "Mode",
+    "file_links": "Links",
+    "file_owner": "Owner",
+    "file_group": "Group",
+    "file_size": "Size",
+    "file_modified": "Modified",
+    "table_invalid": "Expected JSON objects or NDJSON. Showing the original source."
+  },
   "providers": {
     "saving": "Saving provider…",
     "applying": "Applying CLI configuration…",
@@ -148,6 +180,15 @@
   "settings": {
     "quick_terminal_unavailable": "Global shortcut could not be registered: {error}. Enable a GlobalShortcuts desktop portal or use the tray to show Pebrel.",
     "completion": {
+      "history": {
+        "title": "Pebrel command history",
+        "description": "Manage the commands Pebrel remembers for suggestions.",
+        "clear": "Clear history",
+        "clearing": "Clearing…",
+        "confirm": "Clear all command history recorded by Pebrel for local, WSL and SSH terminals? This cannot be undone. Saved commands and your shells' own history are kept.",
+        "cleared": "Pebrel command history cleared.",
+        "failed": "Some history could not be cleared: {error}"
+      },
       "mode": "Completion mode",
       "cycle": "Cycle completion mode",
       "inline": "Inline",
@@ -343,6 +384,7 @@
       "not_detected": "Not installed",
       "config_detected": "Agent configuration detected",
       "unsupported": "Hook integration not available yet",
+      "process_detection": "Process detection",
       "unavailable": "Unavailable",
       "needs_attention": "Needs attention",
       "restart": "Changes apply when you restart the agent. These controls manage agents installed on this computer.",
@@ -1547,5 +1589,7 @@
     "save_failed": "Could not save the effect list. Check that the settings location is writable, then try again.",
     "advanced": "Advanced effects",
     "advanced_active": "Advanced effects · Terminal effects enabled"
-  }
+  },
+  "terminal.ssh_disconnected": "Connection closed. Press R to reconnect.",
+  "terminal.ssh_reconnect": "Reconnect (R)"
 }
