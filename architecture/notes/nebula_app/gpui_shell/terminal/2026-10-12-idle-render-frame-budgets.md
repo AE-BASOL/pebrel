@@ -35,10 +35,13 @@ floor whenever an agent session sat waiting.
 Each idle cost gets a bounded budget at its own source; no global frame
 throttling:
 
-1. Spinner: one 80 ms timer chain (`SPINNER_TICK`) per visible running
-   badge, phase advanced by real elapsed time (decoupled from display
-   refresh); a latch guarantees at most one chain, and an epoch tears down
-   in-flight chains when the badge disappears or the window hides.
+1. Spinner: ~~one 80 ms timer chain per visible running badge~~ —
+   **withdrawn on 2026-10-24**: upstream landed its own frame-callback
+   spinner architecture with frame-counting and snapshot-reuse tests in
+   the meantime; decoupling the spinner from the frame source must be
+   redesigned against that architecture (and the review had already
+   flagged the stepped spinner as a visible-behavior change needing its
+   own acceptance). This change keeps upstream's per-frame spinner.
 2. Cursor blink: after 8 s of total silence (no input, PTY output, IME or
    mode change) the blink chain stops toggling and stays solid — a
    motionless terminal produces zero render frames. Any input restarts
@@ -60,11 +63,9 @@ throttling:
 
 Review corrections (2026-10-24, maintainer findings):
 
-6. The armed spinner chain rechecks minimization **every tick** using the
-   native window handle captured at arm time (`native_window_minimized`);
-   previously only the render-side offscreen probe could notice, and
-   render stalls while minimized — a visible badge followed by a
-   minimize kept notifying at ~12.5 Hz.
+6. (Withdrawn with the spinner chain — item 1.) The native per-tick
+   minimize recheck lives on in the fork line; the upstream-compatible
+   redesign will need it as part of the new frame architecture.
 7. The watchdog snapshot cache no longer holds its mutex during the
    full-machine enumeration: the fast path locks only for the freshness
    check and pure map reads, misses enumerate **outside** the lock and
@@ -116,9 +117,9 @@ Review corrections (2026-10-24, maintainer findings):
   counts from completion),
   `alternating_pane_screens_keep_their_own_memo_slots` (two panes of one
   agent each hit their own slot).
-- Native minimize/restore/tray-hide/close verification of the spinner
-  chain and visual acceptance of the 8 s cursor steady state remain
-  pending on native platforms, as the review requested.
+- Visual acceptance of the 8 s cursor steady state remains pending on
+  native platforms, as the review requested. Spinner verification moved
+  to the withdrawn redesign.
 
 ## Supersedes
 
