@@ -193,6 +193,7 @@ class NativeSuiteTests(unittest.TestCase):
                           " or test(cjk_dropdown_selection_preserves_the_english_font_chain)"
                           " or test(review_regression_font_fields_align_and_dropdown_toggles_with_search)"
                           " or test(=gpui_shell::workspace::keyboard_bindings::tests::dispatch::hybrid_completion_uses_window_tab_dispatch_in_both_workspace_layouts)"
+                          " or test(=gpui_shell::workspace::windowing::startup::startup_tests::launch_visibility_reaches_the_actual_workspace)"
                           " or test(=gpui_shell::workspace::windowing::elevated_launch::tests::elevated_launch_reuses_window_and_preserves_each_program_and_directory)"
                           " or test(=gpui_shell::workspace::windowing::elevated_launch::tests::elevated_launch_new_window_policy_and_invalid_requests_preserve_existing_tabs)"
                           " or test(=gpui_shell::workspace::windowing::elevated_launch::tests::update_recovery_tracks_its_windows_and_retries_only_missing_slots)"
@@ -238,6 +239,9 @@ class NativeSuiteTests(unittest.TestCase):
             "update_recovery_tracks_its_windows_and_retries_only_missing_slots",
         ):
             self.assertIn(f"fn {name}(", elevated)
+
+        startup = (root / "nebula_app/src/gpui_shell/workspace/windowing/startup.rs").read_text(encoding="utf-8")
+        self.assertIn("fn launch_visibility_reaches_the_actual_workspace(", startup)
 
         bash_input = (root / "nebula_terminal/src/tty/windows/test/bash_input.rs").read_text(encoding="utf-8")
         self.assertIn(
