@@ -14,6 +14,9 @@ mod cwd_report;
 mod editor;
 mod image_paste;
 mod layout;
+mod native_clipboard;
+#[cfg(all(test, feature = "gpui-test-support"))]
+mod native_clipboard_tests;
 #[cfg(all(test, windows, feature = "gpui-test-support"))]
 mod native_cmd_tests;
 mod notifications;
@@ -348,6 +351,7 @@ pub struct TerminalView {
     /// 只用事件携带的绝对行锚定到对应的 scrollback 位置。
     pub(super) inline_images: super::inline_image::InlineImageStore,
     image_paste: image_paste::ImagePasteState,
+    native_clipboard: native_clipboard::NativeClipboard,
     path_drop: path_drop::PathDropState,
     /// SSH 直连目的地（`user@host[:port]`）；本地会话为 None。
     pub ssh_destination: Option<String>,
@@ -692,7 +696,10 @@ impl TerminalView {
                     Err(error) => log::warn!("terminal image dropped: {error}"),
                 }
             },
-            TermEvent::CommandStart => self.on_command_start(cx),
+            TermEvent::CommandStart => {
+                self.native_clipboard.clear();
+                self.on_command_start(cx);
+            },
             // 退出码接到「上一条命令失败」的未读徽章上（⚠ 三角）；`Some(0)` 与
             // `None`（没带退出码的 133;D）都算过关。记在下面那道 barrier 之后：
             // 属于上一轮/初始化的那个边沿不能改写徽章。
@@ -739,6 +746,7 @@ impl TerminalView {
                     self.on_native_cmd_prompt(cx);
                 }
                 self.suggest.completion_shell_report(&name, &value);
+                self.native_clipboard.observe(&name, &value);
                 self.handle_completion_editor_report(&name, &value, cx);
                 cx.notify();
             },
