@@ -178,6 +178,10 @@
     }
   },
   "settings": {
+    "opacity": {
+      "title": "窗口背景不透明度",
+      "description": "同步调整终端和设置页背景；数值越低越透明，文字不变。"
+    },
     "quick_terminal_unavailable": "全局快捷键注册失败：{error}。请启用桌面的 GlobalShortcuts portal，或从托盘打开 Pebrel。",
     "completion": {
       "history": {
