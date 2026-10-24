@@ -152,8 +152,13 @@ async fn upload(
     }
     // A private per-drop directory avoids replacing project files, including a
     // file created by another writer after a KeepBoth conflict check.
-    let directory =
-        format!("{}/.pebrel-drop-{:032x}", parent.trim_end_matches('/'), rand::random::<u128>());
+    let mut random = [0; 16];
+    getrandom::fill(&mut random).map_err(|error| io::Error::other(error.to_string()))?;
+    let directory = format!(
+        "{}/.pebrel-drop-{:032x}",
+        parent.trim_end_matches('/'),
+        u128::from_le_bytes(random)
+    );
     context.check_cancelled()?;
     session.create_dir(&directory).await?;
     let mut uploaded = UploadedPaths {
