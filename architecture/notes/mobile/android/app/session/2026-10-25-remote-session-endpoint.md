@@ -38,6 +38,8 @@ non-ready transport generation. Browsing inventory is not attachment evidence.
 Attachment guards and window/pane selection fall back to the login shell when the
 saved target no longer exists. Configured multiplexer retries use exact session names and
 never `new-session`. A new user-created connection retains existing creation policy.
+The attach command runs inside the recovery wrapper so a target disappearing after
+validation, another attach failure, or intentional detach can still enter the shell.
 
 ## Rejected alternatives
 
@@ -63,6 +65,7 @@ Unsupported/restricted process introspection preserves ordinary shell behavior.
 Unit tests cover named endpoints, quoting, ambiguous ownership, disappearing PTYs,
 transport replacement, and stale callbacks. Real isolated multiplexer tests cover missing
 sessions/panes and reused identity falling back without session creation. A real
+failed-attach case also verifies fallback after successful target validation. A real
 OpenSSH + multiplexer 3.8 fixture checks two independent clients, copy mode, intentional
 detach, window changes, and saved-target restoration. macOS remote discovery and
 physical Android background behavior still require native acceptance.
