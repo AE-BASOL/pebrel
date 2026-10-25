@@ -1184,7 +1184,7 @@ impl TerminalView {
             let result = work.await;
             let _ = this.update(cx, |view, cx| {
                 view.activity_probe_pending = false;
-                view.apply_activity_evidence(observed_started, shell_pid, result, cx);
+                view.apply_activity_evidence(observed_started, shell_pid, primary_pid, result, cx);
             });
         })
         .detach();
@@ -1197,6 +1197,7 @@ impl TerminalView {
         &mut self,
         observed_started: Option<std::time::Instant>,
         observed_shell_pid: u32,
+        observed_primary_pid: Option<u32>,
         evidence: Result<crate::process_tree::ActivityEvidence, String>,
         cx: &mut Context<Self>,
     ) {
@@ -1206,12 +1207,14 @@ impl TerminalView {
         };
         let current_shell_pid =
             self.session.as_ref().map(|session| session.shell_pid).filter(|pid| *pid != 0);
-        if !activity_probe_still_current(
-            observed_started,
-            observed_shell_pid,
-            self.command_started,
-            current_shell_pid,
-        ) {
+        if observed_primary_pid != self.agent_activity.primary_pid()
+            || !activity_probe_still_current(
+                observed_started,
+                observed_shell_pid,
+                self.command_started,
+                current_shell_pid,
+            )
+        {
             return;
         }
         let known_agent =
@@ -1439,3 +1442,6 @@ mod tests {
         assert!(refusal.contains("build@10.0.0.7"), "拒绝理由要指名远端主机：{refusal}");
     }
 }
+
+#[cfg(all(test, feature = "gpui-test-support"))]
+mod activity_probe_tests;
