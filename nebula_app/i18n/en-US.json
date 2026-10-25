@@ -1,5 +1,9 @@
 {
   "native_result": {
+    "json_items": "{count} items",
+    "json_expand": "Expand value",
+    "json_collapse": "Collapse value",
+    "json_invalid": "This output is not valid JSON or NDJSON. Showing the original source.",
     "diff_expand": "Expand file diff",
     "diff_collapse": "Collapse file diff",
     "diff_invalid": "This diff cannot be displayed with paired line numbers. Showing the original source.",
