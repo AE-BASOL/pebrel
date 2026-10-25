@@ -27,6 +27,7 @@ mod pointer;
 mod program_status;
 mod reading;
 mod runtime;
+mod session_failure;
 mod ssh_reconnect;
 mod startup;
 mod startup_command;
@@ -189,6 +190,8 @@ pub enum TerminalViewEvent {
     RequestClose,
     /// 失败后在当前分屏叶原位重建同一 SSH 目标。
     RetrySsh(String),
+    /// A failed local session needs an explicit choice of a working shell.
+    ChooseShell,
     /// Ctrl+滚轮改了终端字号：宿主应对所有 pane 热应用并写盘。
     FontSizeChanged,
     /// BEL（`^G`）。后台 tab 记铃点；本 tab 的闪烁/声音由视图自己处理。
@@ -392,6 +395,7 @@ pub struct TerminalView {
     pub(super) last_ai_session_probe: Option<std::time::Instant>,
     error: Option<String>,
     exited: Option<String>,
+    retain_failed_session: bool,
     /// 滚动条拖拽中：按下时记下的「指针在拇指内的 y 偏移」，拖动全程据此
     /// 反算 `display_offset`，拇指不会在按下那一刻跳到指针中心。
     scrollbar_drag: Option<f32>,
@@ -667,6 +671,7 @@ impl TerminalView {
                 self.write_bytes(formatter(self.window_size).into_bytes());
             },
             TermEvent::ChildExit(code) => {
+                self.retain_failed_session |= !code.success() && self.local_startup_unconfirmed();
                 let message = crate::gpui_shell::config::ui_language(cx).format(
                     crate::i18n::Message::TerminalProcessExited,
                     &[("code", &format!("{code:?}"))],
@@ -675,6 +680,7 @@ impl TerminalView {
             },
             TermEvent::PtyFailure(reason) => {
                 self.pty_failed = true;
+                self.retain_failed_session |= self.ssh_destination.is_none();
                 let message = crate::gpui_shell::config::ui_language(cx)
                     .format(crate::i18n::Message::TerminalPtyFailure, &[("error", &reason)]);
                 self.mark_exited(message, cx);
@@ -1611,7 +1617,9 @@ impl Render for TerminalView {
                     }
                 }
             }
-            if let Some(exited) = &self.exited {
+            if let Some(exited) = &self.exited
+                && !self.local_session_failed()
+            {
                 root = root.child(
                     div()
                         .absolute()
@@ -1625,6 +1633,9 @@ impl Render for TerminalView {
                         .child(exited.clone()),
                 );
             }
+        }
+        if self.local_session_failed() {
+            root = root.child(self.session_failure_banner(cx));
         }
         if self.session.is_some() {
             root = root.child(self.reading_chrome(cx));
