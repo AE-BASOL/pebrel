@@ -2,9 +2,10 @@
 
 ## Status
 
-Accepted on 2026-10-16. The convergence direction (idle screen settles a
-stalled turn) already existed; this change adds the reverse direction so a
-turn that lost its ignition event can be reignited as Working.
+Proposed; under maintainer review. The earlier fork implementation only
+settled stalled turns from idle screens; this change also lets working
+screens recover a turn whose ignition event was lost. Neither direction
+has been merged into main at this review point.
 
 ## Context
 
@@ -71,6 +72,13 @@ Review corrections (2026-10-24, maintainer counterexamples):
    lost, the barrier expires on the first stalled tick (samples reset),
    and the normal two-stable-frames evidence applies in both
    directions.
+8. The waiting period starts at the latest explicit submission or accepted
+   hook, not just the last hook from an earlier turn. Otherwise a new
+   submission after a long idle period is immediately classified as stalled,
+   and the old idle frame can manufacture completion within three samples.
+   `turn_quiet_for` reads this shared clock; plain Enter, screen samples and
+   rejected foreign hooks do not postpone recovery. Each new submission and
+   accepted hook renews the entire waiting period.
 
 ## Rejected alternatives
 
@@ -118,6 +126,10 @@ Review corrections (2026-10-24, maintainer counterexamples):
   `pending_submit_barrier_expires_once_hooks_stay_silent_past_the_stall`
   and `expired_submit_barrier_lets_a_later_idle_screen_settle` (recovery
   boundary in both directions).
+- `fresh_submission_restarts_the_remote_stall_clock_after_an_old_hook`
+  exercises the production timeout decision with an old prior hook, a fresh
+  submission, later barrier expiry, repeated submission, and accepted versus
+  rejected hooks. It reproduced premature timeout before the clock fix.
 
 ## Supersedes
 

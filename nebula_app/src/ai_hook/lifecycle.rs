@@ -50,9 +50,10 @@ pub(crate) struct AgentActivity {
     native_codex: bool,
     turn_id: Option<String>,
     last_remote_sequence: Option<u64>,
-    /// 最近一次被采纳的 hook 事件时刻。远端回合停滞对账的计时基准
+    /// 最近一次明确提交或被采纳的 hook 事件时刻。远端停滞对账必须给
+    /// 每次新提交完整等待期限，不沿用上一回合的空闲时间。
     /// （见 [`AgentActivity::reconcile_stalled_turn`]）。
-    last_hook_at: Option<std::time::Instant>,
+    last_activity_at: Option<std::time::Instant>,
 }
 
 impl Default for AgentActivity {
@@ -73,7 +74,7 @@ impl Default for AgentActivity {
             native_codex: false,
             turn_id: None,
             last_remote_sequence: None,
-            last_hook_at: None,
+            last_activity_at: None,
         }
     }
 }
@@ -131,6 +132,7 @@ impl AgentActivity {
         self.rule = None;
         self.turn_observed = true;
         self.pending_submit = true;
+        self.last_activity_at = Some(std::time::Instant::now());
         self.input_sent();
     }
 
@@ -323,7 +325,7 @@ impl AgentActivity {
             AiHookKind::NeedsAttention => AgentStatus::Blocked,
             AiHookKind::SessionEnd => unreachable!("handled above"),
         };
-        self.last_hook_at = Some(std::time::Instant::now());
+        self.last_activity_at = Some(std::time::Instant::now());
         true
     }
 
@@ -387,10 +389,11 @@ impl AgentActivity {
         true
     }
 
-    /// 距最近一次被采纳的 hook 事件是否已静默超过 `threshold`。无 hook 记录
-    /// 时恒 true——调用方先以 [`Self::hook_seen`] 门控，这里只是防御。
-    pub fn hook_quiet_for(&self, threshold: std::time::Duration) -> bool {
-        self.last_hook_at.is_none_or(|at| at.elapsed() >= threshold)
+    /// Whether the latest explicit submission or accepted hook has been quiet
+    /// for `threshold`. Screen samples, plain Enter and rejected hooks do not
+    /// move this boundary. The caller separately requires hook ownership.
+    pub fn turn_quiet_for(&self, threshold: std::time::Duration) -> bool {
+        self.last_activity_at.is_none_or(|at| at.elapsed() >= threshold)
     }
 
     /// 远端回合停滞对账（双向）：屏幕证据的第二重用途，语义对齐本地进程树对账
@@ -474,10 +477,10 @@ impl AgentActivity {
         true
     }
 
-    /// 测试拨表：把最近一次 hook 时刻倒填，模拟远端事件停滞。
+    /// Backdate the latest submission/hook boundary without sleeping in tests.
     #[cfg(test)]
-    pub(crate) fn backdate_hook_for_test(&mut self, back: std::time::Duration) {
-        if let Some(at) = &mut self.last_hook_at {
+    pub(crate) fn backdate_activity_for_test(&mut self, back: std::time::Duration) {
+        if let Some(at) = &mut self.last_activity_at {
             *at = std::time::Instant::now().checked_sub(back).unwrap_or(std::time::Instant::now());
         }
     }

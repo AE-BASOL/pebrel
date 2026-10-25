@@ -231,7 +231,7 @@ impl TerminalView {
             if reconcile_remote
                 && self.agent_activity.reconcile_stalled_turn(
                     crate::ai_agents::detect(&program, &screen).as_ref(),
-                    self.agent_activity.hook_quiet_for(super::REMOTE_TURN_STALL),
+                    self.agent_activity.turn_quiet_for(super::REMOTE_TURN_STALL),
                 )
             {
                 log::info!(

@@ -314,9 +314,9 @@ fn stalled_turn_reconciliation_needs_two_idle_samples_after_the_stall() {
     let mut activity = AgentActivity::default();
     activity.apply_hook(&event("claude", "stall", "UserPromptSubmit"));
     assert_eq!(activity.status(), AgentStatus::Working);
-    assert!(!activity.hook_quiet_for(std::time::Duration::from_secs(20)));
-    activity.backdate_hook_for_test(std::time::Duration::from_secs(21));
-    assert!(activity.hook_quiet_for(std::time::Duration::from_secs(20)));
+    assert!(!activity.turn_quiet_for(std::time::Duration::from_secs(20)));
+    activity.backdate_activity_for_test(std::time::Duration::from_secs(21));
+    assert!(activity.turn_quiet_for(std::time::Duration::from_secs(20)));
     // 未停滞 / 非 idle 检测 / 不足两拍：全部不动。
     assert!(!activity.reconcile_stalled_turn(screen(AgentStatus::Idle).as_ref(), false));
     assert!(!activity.reconcile_stalled_turn(screen(AgentStatus::Working).as_ref(), true));
@@ -337,13 +337,13 @@ fn stall_reconciliation_yields_to_screen_authority_and_reads_turn_observed() {
     let mut activity = AgentActivity::default();
     // 无 hook：allows_screen() 为真 → 恒 false。
     activity.begin_command(true);
-    activity.backdate_hook_for_test(std::time::Duration::from_secs(60));
+    activity.backdate_activity_for_test(std::time::Duration::from_secs(60));
     assert!(!activity.reconcile_stalled_turn(screen(AgentStatus::Idle).as_ref(), true));
     assert_eq!(activity.status(), AgentStatus::Working);
     // 只有 SessionStart 的会话已经在 Idle 上，没有可完成的回合。
     let mut idle_only = AgentActivity::default();
     idle_only.apply_hook(&event("claude", "fresh", "SessionStart"));
-    idle_only.backdate_hook_for_test(std::time::Duration::from_secs(60));
+    idle_only.backdate_activity_for_test(std::time::Duration::from_secs(60));
     assert!(!idle_only.reconcile_stalled_turn(screen(AgentStatus::Idle).as_ref(), true));
     assert!(!idle_only.reconcile_stalled_turn(screen(AgentStatus::Idle).as_ref(), true));
     assert_eq!(idle_only.status(), AgentStatus::Idle);
@@ -367,6 +367,45 @@ fn stall_reconciliation_honors_the_pending_submit_barrier() {
     assert_eq!(activity.status(), AgentStatus::Working);
 }
 
+#[test]
+fn fresh_submission_restarts_the_remote_stall_clock_after_an_old_hook() {
+    let threshold = std::time::Duration::from_secs(20);
+    let mut activity = AgentActivity::default();
+    activity.apply_hook(&event("claude", "delayed-submit", "UserPromptSubmit"));
+    activity.apply_hook(&event("claude", "delayed-submit", "Stop"));
+    activity.backdate_activity_for_test(threshold * 2);
+    assert!(activity.turn_quiet_for(threshold));
+
+    activity.submitted();
+    for _ in 0..4 {
+        let stalled = activity.turn_quiet_for(threshold);
+        assert!(!stalled, "a new submission gets its own full waiting period");
+        assert!(!activity.reconcile_stalled_turn(screen(AgentStatus::Idle).as_ref(), stalled));
+        assert!(activity.pending_submit);
+        assert_eq!(activity.status(), AgentStatus::Working);
+    }
+
+    // Expiring the new boundary releases only the barrier. Two later matching
+    // frames are still needed when all hooks for this submission were lost.
+    activity.backdate_activity_for_test(threshold * 2);
+    let stalled = activity.turn_quiet_for(threshold);
+    assert!(stalled);
+    assert!(!activity.reconcile_stalled_turn(screen(AgentStatus::Idle).as_ref(), stalled));
+    assert!(!activity.pending_submit);
+    assert!(!activity.reconcile_stalled_turn(screen(AgentStatus::Idle).as_ref(), stalled));
+    assert!(activity.reconcile_stalled_turn(screen(AgentStatus::Idle).as_ref(), stalled));
+    assert_eq!(activity.status(), AgentStatus::Done);
+
+    activity.submitted_text("claude", "next task");
+    assert!(!activity.turn_quiet_for(threshold), "each submission renews the boundary");
+    activity.backdate_activity_for_test(threshold * 2);
+    assert!(activity.apply_hook(&event("claude", "delayed-submit", "UserPromptSubmit")));
+    assert!(!activity.turn_quiet_for(threshold), "accepted hooks also renew the boundary");
+    activity.backdate_activity_for_test(threshold * 2);
+    assert!(!activity.apply_hook(&event("claude", "foreign-session", "UserPromptSubmit")));
+    assert!(activity.turn_quiet_for(threshold), "foreign hooks cannot defer recovery");
+}
+
 /// 提交屏障的恢复边界（评审 3）：提交后 PromptSubmit 与后续 hook 在远端
 /// bridge 上全部丢失时，屏障只活到停滞阈值——过期后屏幕证据恢复话语权，
 /// 收敛/点火仍需连续两拍稳定形态（不会因过期而瞬时定论）。
@@ -374,17 +413,19 @@ fn stall_reconciliation_honors_the_pending_submit_barrier() {
 fn pending_submit_barrier_expires_once_hooks_stay_silent_past_the_stall() {
     let mut activity = AgentActivity::default();
     activity.apply_hook(&event("claude", "lost-submit", "UserPromptSubmit"));
-    activity.backdate_hook_for_test(std::time::Duration::from_secs(21));
     activity.submitted();
+    activity.backdate_activity_for_test(std::time::Duration::from_secs(21));
+    let stalled = activity.turn_quiet_for(std::time::Duration::from_secs(20));
+    assert!(stalled);
     assert_eq!(activity.status(), AgentStatus::Working);
     // 第一拍停滞：屏障过期本拍不定论，两向计数归零。
-    assert!(!activity.reconcile_stalled_turn(screen(AgentStatus::Idle).as_ref(), true));
+    assert!(!activity.reconcile_stalled_turn(screen(AgentStatus::Idle).as_ref(), stalled));
     // 交替形态依旧不积累。
-    assert!(!activity.reconcile_stalled_turn(screen(AgentStatus::Idle).as_ref(), true));
-    assert!(!activity.reconcile_stalled_turn(screen(AgentStatus::Working).as_ref(), true));
+    assert!(!activity.reconcile_stalled_turn(screen(AgentStatus::Idle).as_ref(), stalled));
+    assert!(!activity.reconcile_stalled_turn(screen(AgentStatus::Working).as_ref(), stalled));
     // 连续两拍 idle 收敛：submitted 已记 turn_observed，落 Done 而非 Idle。
-    assert!(!activity.reconcile_stalled_turn(screen(AgentStatus::Idle).as_ref(), true));
-    assert!(activity.reconcile_stalled_turn(screen(AgentStatus::Idle).as_ref(), true));
+    assert!(!activity.reconcile_stalled_turn(screen(AgentStatus::Idle).as_ref(), stalled));
+    assert!(activity.reconcile_stalled_turn(screen(AgentStatus::Idle).as_ref(), stalled));
     assert_eq!(activity.status(), AgentStatus::Done);
     assert_eq!(activity.source(), AgentStatusSource::Screen);
 }
@@ -396,13 +437,15 @@ fn pending_submit_barrier_expires_once_hooks_stay_silent_past_the_stall() {
 fn expired_submit_barrier_lets_a_later_idle_screen_settle() {
     let mut activity = AgentActivity::default();
     activity.apply_hook(&event("claude", "lost-submit-2", "UserPromptSubmit"));
-    activity.backdate_hook_for_test(std::time::Duration::from_secs(21));
     activity.submitted();
-    assert!(!activity.reconcile_stalled_turn(screen(AgentStatus::Working).as_ref(), true));
-    assert!(!activity.reconcile_stalled_turn(screen(AgentStatus::Working).as_ref(), true));
+    activity.backdate_activity_for_test(std::time::Duration::from_secs(21));
+    let stalled = activity.turn_quiet_for(std::time::Duration::from_secs(20));
+    assert!(stalled);
+    assert!(!activity.reconcile_stalled_turn(screen(AgentStatus::Working).as_ref(), stalled));
+    assert!(!activity.reconcile_stalled_turn(screen(AgentStatus::Working).as_ref(), stalled));
     assert_eq!(activity.status(), AgentStatus::Working);
-    assert!(!activity.reconcile_stalled_turn(screen(AgentStatus::Idle).as_ref(), true));
-    assert!(activity.reconcile_stalled_turn(screen(AgentStatus::Idle).as_ref(), true));
+    assert!(!activity.reconcile_stalled_turn(screen(AgentStatus::Idle).as_ref(), stalled));
+    assert!(activity.reconcile_stalled_turn(screen(AgentStatus::Idle).as_ref(), stalled));
     assert_eq!(activity.status(), AgentStatus::Done);
     assert_eq!(activity.source(), AgentStatusSource::Screen);
 }
@@ -414,7 +457,7 @@ fn expired_submit_barrier_lets_a_later_idle_screen_settle() {
 fn late_authoritative_turn_done_supersedes_an_inferred_done() {
     let mut activity = AgentActivity::default();
     activity.apply_hook(&event_with_turn("claude", "t", "UserPromptSubmit", "t-9"));
-    activity.backdate_hook_for_test(std::time::Duration::from_secs(21));
+    activity.backdate_activity_for_test(std::time::Duration::from_secs(21));
     assert!(!activity.reconcile_stalled_turn(screen(AgentStatus::Idle).as_ref(), true));
     assert!(activity.reconcile_stalled_turn(screen(AgentStatus::Idle).as_ref(), true));
     assert_eq!(activity.status(), AgentStatus::Done, "inferred by the screen");
@@ -432,7 +475,7 @@ fn late_authoritative_turn_done_supersedes_an_inferred_done() {
 fn late_failed_turn_done_supersedes_an_inferred_done() {
     let mut activity = AgentActivity::default();
     activity.apply_hook(&event_with_turn("claude", "f", "UserPromptSubmit", "f-1"));
-    activity.backdate_hook_for_test(std::time::Duration::from_secs(21));
+    activity.backdate_activity_for_test(std::time::Duration::from_secs(21));
     assert!(!activity.reconcile_stalled_turn(screen(AgentStatus::Idle).as_ref(), true));
     assert!(activity.reconcile_stalled_turn(screen(AgentStatus::Idle).as_ref(), true));
     assert_eq!(activity.status(), AgentStatus::Done);
@@ -452,7 +495,7 @@ fn stalled_turn_reconciliation_reignites_a_lost_prompt_submit() {
     activity.apply_hook(&event("claude", "lost", "UserPromptSubmit"));
     activity.apply_hook(&event("claude", "lost", "Stop"));
     assert_eq!(activity.status(), AgentStatus::Done);
-    activity.backdate_hook_for_test(std::time::Duration::from_secs(21));
+    activity.backdate_activity_for_test(std::time::Duration::from_secs(21));
     // 一拍转圈不点火；中途一拍 idle 归零 working 计数，证据重新攒。
     assert!(!activity.reconcile_stalled_turn(screen(AgentStatus::Working).as_ref(), true));
     assert_eq!(activity.status(), AgentStatus::Done);
@@ -477,7 +520,7 @@ fn stalled_turn_reconciliation_reignites_a_blocked_turn_after_the_answer() {
     activity.apply_hook(&event("claude", "blocked", "UserPromptSubmit"));
     activity.apply_hook(&event("claude", "blocked", "PermissionRequest"));
     assert_eq!(activity.status(), AgentStatus::Blocked);
-    activity.backdate_hook_for_test(std::time::Duration::from_secs(21));
+    activity.backdate_activity_for_test(std::time::Duration::from_secs(21));
     assert!(!activity.reconcile_stalled_turn(screen(AgentStatus::Blocked).as_ref(), true));
     assert!(!activity.reconcile_stalled_turn(screen(AgentStatus::Working).as_ref(), true));
     assert!(activity.reconcile_stalled_turn(screen(AgentStatus::Working).as_ref(), true));

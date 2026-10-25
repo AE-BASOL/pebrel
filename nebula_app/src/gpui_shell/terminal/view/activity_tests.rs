@@ -435,8 +435,9 @@ fn remote_lost_stop_is_reconciled_by_stalled_idle_screen(cx: &mut TestAppContext
             "a live hook timeline outranks the idle screen"
         );
         // 停滞超阈值：连续两拍 idle 屏收敛为 Done；CLI 还活着，身份不动。
-        view.agent_activity
-            .backdate_hook_for_test(super::REMOTE_TURN_STALL + std::time::Duration::from_secs(1));
+        view.agent_activity.backdate_activity_for_test(
+            super::REMOTE_TURN_STALL + std::time::Duration::from_secs(1),
+        );
         view.refresh_agent_screen_state(cx);
         assert_eq!(view.agent_activity.status(), AgentStatus::Working, "one sample is not enough");
         view.refresh_agent_screen_state(cx);
@@ -456,8 +457,9 @@ fn a_working_screen_resets_the_stall_reconciliation_samples(cx: &mut TestAppCont
         view.suggest.suggest_env =
             crate::display::SuggestEnv::Ssh { destination: "build@example.test".into() };
         view.handle_ai_hook(&hook("working-screen", "UserPromptSubmit", 1), cx);
-        view.agent_activity
-            .backdate_hook_for_test(super::REMOTE_TURN_STALL + std::time::Duration::from_secs(1));
+        view.agent_activity.backdate_activity_for_test(
+            super::REMOTE_TURN_STALL + std::time::Duration::from_secs(1),
+        );
         screen(view, CLAUDE_IDLE_SCREEN);
         view.refresh_agent_screen_state(cx);
         // 攒到第 2 拍之前屏幕翻回转圈：计数归零，回合继续。
@@ -484,7 +486,7 @@ fn local_hook_authority_is_never_eroded_by_stall_reconciliation(cx: &mut TestApp
     view.update(window, |view, cx| {
         view.suggest.suggest_env = crate::display::SuggestEnv::Local;
         view.handle_ai_hook(&hook("local-authority", "UserPromptSubmit", 1), cx);
-        view.agent_activity.backdate_hook_for_test(super::REMOTE_TURN_STALL * 2);
+        view.agent_activity.backdate_activity_for_test(super::REMOTE_TURN_STALL * 2);
         screen(view, CLAUDE_IDLE_SCREEN);
         for _ in 0..4 {
             view.refresh_agent_screen_state(cx);
@@ -524,8 +526,9 @@ fn remote_lost_prompt_submit_is_reignited_by_stalled_working_screen(cx: &mut Tes
             "a live hook timeline outranks the working screen"
         );
         // 停滞超阈值：连续两拍转圈重新点火 Running；CLI 还活着，身份不动。
-        view.agent_activity
-            .backdate_hook_for_test(super::REMOTE_TURN_STALL + std::time::Duration::from_secs(1));
+        view.agent_activity.backdate_activity_for_test(
+            super::REMOTE_TURN_STALL + std::time::Duration::from_secs(1),
+        );
         view.refresh_agent_screen_state(cx);
         assert_eq!(view.agent_activity.status(), AgentStatus::Done, "one sample is not enough");
         view.refresh_agent_screen_state(cx);
