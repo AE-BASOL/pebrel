@@ -17,22 +17,10 @@ fn draw_controls(cx: &mut VisualTestContext) {
     });
 }
 
-fn exit_status(code: u32) -> std::process::ExitStatus {
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::ExitStatusExt as _;
-        std::process::ExitStatus::from_raw((code as i32) << 8)
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::ExitStatusExt as _;
-        std::process::ExitStatus::from_raw(code)
-    }
-}
-
 fn exit(view: &Entity<TerminalView>, code: u32, cx: &mut VisualTestContext) {
     view.update(cx, |view, cx| {
-        view.remote_files_test_event(Event::ChildExit(exit_status(code)), cx);
+        let status = crate::platform::process::test_exit_status(code);
+        view.remote_files_test_event(Event::ChildExit(status), cx);
         view.remote_files_test_event(Event::Exit, cx);
     });
     draw(cx);
