@@ -147,7 +147,7 @@ fn current_at(agent: AgentHook, path: &Path, helper: &str) -> io::Result<bool> {
     match agent {
         AgentHook::Cursor => cursor::current(&raw, helper),
         AgentHook::Qoder | AgentHook::CodeBuddy | AgentHook::Qwen | AgentHook::Droid => {
-            claude_style::current(agent, &raw, helper)
+            claude_style::current(agent, path, &raw, helper)
         },
         AgentHook::Antigravity => antigravity::current(&raw, helper),
         AgentHook::Kimi => Ok(kimi::inspect(&raw, Path::new(helper))?.1),
@@ -263,7 +263,12 @@ pub(super) fn apply(agent: AgentHook, enabled: bool) -> io::Result<()> {
                 .ok_or_else(|| io::Error::other("Cursor configuration unavailable"))?;
             cursor::apply_at(&path, &helper_command().unwrap_or_default(), enabled)?;
         },
-        (AgentHook::Qoder | AgentHook::CodeBuddy | AgentHook::Qwen | AgentHook::Droid, _) => {
+        (AgentHook::Droid, _) => {
+            let dir = claude_style::directory(agent)
+                .ok_or_else(|| io::Error::other("Agent configuration unavailable"))?;
+            claude_style::apply_droid_at(&dir, &helper_command().unwrap_or_default(), enabled)?;
+        },
+        (AgentHook::Qoder | AgentHook::CodeBuddy | AgentHook::Qwen, _) => {
             let path = claude_style::path(agent)
                 .ok_or_else(|| io::Error::other("Agent configuration unavailable"))?;
             claude_style::apply_at(agent, &path, &helper_command().unwrap_or_default(), enabled)?;

@@ -41,7 +41,29 @@ pub(super) fn directory(agent: AgentHook) -> Option<PathBuf> {
 }
 
 pub(super) fn path(agent: AgentHook) -> Option<PathBuf> {
-    Some(directory(agent)?.join("settings.json"))
+    let dir = directory(agent)?;
+    Some(if agent == AgentHook::Droid { droid_path(&dir) } else { dir.join("settings.json") })
+}
+
+/// Follow Droid's effective user configuration without masking legacy user hooks.
+fn droid_path(dir: &Path) -> PathBuf {
+    ["hooks.json", "hooks/hooks.json", "settings.json"]
+        .into_iter()
+        .map(|name| dir.join(name))
+        .find(|path| path.exists())
+        .unwrap_or_else(|| dir.join("hooks.json"))
+}
+
+pub(super) fn apply_droid_at(dir: &Path, helper: &str, enabled: bool) -> io::Result<()> {
+    if enabled {
+        return apply_at(AgentHook::Droid, &droid_path(dir), helper, true);
+    }
+    // Remove inactive fallback entries too: deleting a native file must not
+    // resurrect a hook the user explicitly disabled.
+    for name in ["hooks.json", "hooks/hooks.json", "settings.json"] {
+        apply_at(AgentHook::Droid, &dir.join(name), helper, false)?;
+    }
+    Ok(())
 }
 
 fn invalid(message: &str) -> io::Error {
@@ -52,6 +74,7 @@ fn invalid(message: &str) -> io::Error {
 fn edit(
     agent: AgentHook,
     raw: &str,
+    standalone: bool,
     helper: &str,
     enabled: bool,
 ) -> io::Result<(String, bool, bool)> {
@@ -60,12 +83,18 @@ fn edit(
     let root = doc.as_object_mut().ok_or_else(|| invalid("Expected a JSON object"))?;
     let mut changed = false;
     let mut installed = false;
-    if !root.contains_key("hooks") && enabled {
+    if !standalone && !root.contains_key("hooks") && enabled {
         root.insert("hooks".into(), json!({}));
         changed = true;
     }
-    if let Some(hooks) = root.get_mut("hooks") {
-        let hooks = hooks.as_object_mut().ok_or_else(|| invalid("Expected a hooks object"))?;
+    let hooks = if standalone {
+        Some(root)
+    } else {
+        root.get_mut("hooks")
+            .map(|hooks| hooks.as_object_mut().ok_or_else(|| invalid("Expected a hooks object")))
+            .transpose()?
+    };
+    if let Some(hooks) = hooks {
         let desired =
             json!({"type": "command", "command": command_for(helper, source), "timeout": 10});
         let is_owned = |entry: &Value| {
@@ -118,14 +147,18 @@ fn edit(
 
 pub(super) fn installed_at(agent: AgentHook, path: &Path) -> io::Result<bool> {
     match std::fs::read_to_string(path) {
-        Ok(raw) => Ok(edit(agent, &raw, "", false)?.1),
+        Ok(raw) => Ok(edit(agent, &raw, standalone(agent, path), "", false)?.1),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(error),
     }
 }
 
-pub(super) fn current(agent: AgentHook, raw: &str, helper: &str) -> io::Result<bool> {
-    Ok(!edit(agent, raw, helper, true)?.2)
+fn standalone(agent: AgentHook, path: &Path) -> bool {
+    agent == AgentHook::Droid && path.file_name().is_some_and(|name| name == "hooks.json")
+}
+
+pub(super) fn current(agent: AgentHook, path: &Path, raw: &str, helper: &str) -> io::Result<bool> {
+    Ok(!edit(agent, raw, standalone(agent, path), helper, true)?.2)
 }
 
 pub(super) fn apply_at(
@@ -147,7 +180,7 @@ pub(super) fn apply_at(
         Err(error) if error.kind() == io::ErrorKind::NotFound => "{}".into(),
         Err(error) => return Err(error),
     };
-    let (updated, _, changed) = edit(agent, &raw, helper, enabled)?;
+    let (updated, _, changed) = edit(agent, &raw, standalone(agent, path), helper, enabled)?;
     if changed {
         crate::atomic_file::write(path, updated.as_bytes())?;
     }
@@ -171,10 +204,12 @@ mod tests {
             std::fs::write(&path, original).unwrap();
             apply_at(agent, &path, "C:/old/nebula-hook.exe", true).unwrap();
             assert!(installed_at(agent, &path).unwrap());
-            assert!(!current(agent, &std::fs::read_to_string(&path).unwrap(), HELPER).unwrap());
+            assert!(
+                !current(agent, &path, &std::fs::read_to_string(&path).unwrap(), HELPER).unwrap()
+            );
             apply_at(agent, &path, HELPER, true).unwrap();
             let installed = std::fs::read_to_string(&path).unwrap();
-            assert!(current(agent, &installed, HELPER).unwrap());
+            assert!(current(agent, &path, &installed, HELPER).unwrap());
             let parsed: Value = serde_json::from_str(&installed).unwrap();
             let (source, _, events) = provider(agent).unwrap();
             assert_eq!(parsed["hooks"].as_object().unwrap().len(), events.len());
@@ -204,7 +239,7 @@ mod tests {
 
     #[test]
     fn droid_never_subscribes_to_events_it_does_not_document() {
-        let text = edit(AgentHook::Droid, "{}", HELPER, true).unwrap().0;
+        let text = edit(AgentHook::Droid, "{}", false, HELPER, true).unwrap().0;
         let hooks: Value = serde_json::from_str(&text).unwrap();
         for event in ["PermissionRequest", "StopFailure", "PostToolUseFailure", "PreToolUse"] {
             assert!(hooks["hooks"].get(event).is_none(), "{event}");
@@ -240,5 +275,55 @@ mod tests {
             json!({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": qoder}]}]}});
         std::fs::write(&path, foreign.to_string()).unwrap();
         assert!(!installed_at(AgentHook::Qwen, &path).unwrap());
+    }
+}
+
+#[cfg(test)]
+mod droid_tests {
+    use super::*;
+
+    #[test]
+    fn native_droid_file_takes_precedence_and_uses_flat_events() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = dir.path().join("settings.json");
+        apply_at(AgentHook::Droid, &settings, "/old/pebrel-hook", true).unwrap();
+        let native = dir.path().join("hooks.json");
+        std::fs::write(&native, r#"{"Stop":[{"hooks":[{"command":"user-hook"}]}]}"#).unwrap();
+        assert_eq!(droid_path(dir.path()), native);
+        apply_droid_at(dir.path(), "/new/pebrel-hook", true).unwrap();
+        let raw = std::fs::read_to_string(&native).unwrap();
+        let doc: Value = serde_json::from_str(&raw).unwrap();
+        assert!(doc.get("hooks").is_none());
+        assert!(doc["SessionStart"].is_array());
+        assert_eq!(doc["Stop"][0]["hooks"][0]["command"], "user-hook");
+        assert!(current(AgentHook::Droid, &native, &raw, "/new/pebrel-hook").unwrap());
+        apply_droid_at(dir.path(), "/new/pebrel-hook", true).unwrap();
+        assert_eq!(std::fs::read_to_string(&native).unwrap(), raw);
+        apply_droid_at(dir.path(), "", false).unwrap();
+        for path in [&native, &settings] {
+            assert!(!installed_at(AgentHook::Droid, path).unwrap());
+        }
+        let doc: Value = serde_json::from_str(&std::fs::read_to_string(native).unwrap()).unwrap();
+        assert_eq!(doc["Stop"][0]["hooks"][0]["command"], "user-hook");
+    }
+
+    #[test]
+    fn droid_preserves_effective_legacy_or_settings_configuration() {
+        for name in ["hooks/hooks.json", "settings.json", "hooks.json"] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, "{}").unwrap();
+            assert_eq!(droid_path(dir.path()), path);
+            apply_droid_at(dir.path(), "/tools/pebrel-hook", true).unwrap();
+            assert!(installed_at(AgentHook::Droid, &path).unwrap());
+            let raw = std::fs::read_to_string(&path).unwrap();
+            assert!(current(AgentHook::Droid, &path, &raw, "/tools/pebrel-hook").unwrap());
+            if name != "hooks.json" {
+                assert!(!dir.path().join("hooks.json").exists());
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(droid_path(dir.path()), dir.path().join("hooks.json"));
     }
 }

@@ -75,3 +75,5 @@ None.
 A provider changes its hook schema or event names, documents reading another agent's
 configuration, or ships an exec form that works on Windows; or when Crush or Junie add a
 turn-end event.
+
+Droid path selection superseded by [effective configuration](2026-10-25-droid-effective-hooks.md).
