@@ -205,6 +205,15 @@ mod tests {
             assert_eq!(event.active_background_tasks(), u32::from(!idle));
             assert!(activity.apply_hook(&event));
             assert_eq!(activity.status(), expected);
+            assert_eq!(
+                crate::notify::Notification::from_ai_hook(&event, None, false).is_some(),
+                idle
+            );
         }
+        let event = parse_envelope(
+            b"nebula-hook/1 source=antigravity event=done\n{\"terminationReason\":\"model_stop\"}",
+        )
+        .unwrap();
+        assert!(crate::notify::Notification::from_ai_hook(&event, None, false).is_none());
     }
 }
