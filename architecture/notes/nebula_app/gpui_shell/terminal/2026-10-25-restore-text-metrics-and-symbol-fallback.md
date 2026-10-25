@@ -2,6 +2,8 @@
 
 ## Status
 
+Row spacing is superseded by [independent glyphs and proportional grids](2026-10-25-independent-glyphs-and-proportional-grids.md). Symbol font ownership remains in force.
+
 Implemented; desktop visual and memory acceptance remain separate from compile
 and focused regression checks.
 

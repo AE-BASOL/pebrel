@@ -361,8 +361,8 @@ impl Settings {
 }
 
 fn default_font_offset() -> RawDelta {
-    // 恢复 Windows 原有的正文留白；字符画不能决定所有字体的默认行距。
-    RawDelta { x: 0, y: if cfg!(windows) { 4 } else { 0 } }
+    // 正文通过独立基线放置，平台补偿不再隐式改变字符网格的比例。
+    RawDelta { x: 0, y: 0 }
 }
 
 fn runtime_background(
@@ -863,9 +863,9 @@ mod tests {
     }
 
     #[test]
-    fn font_offset_restores_platform_padding_and_preserves_explicit_values() {
+    fn font_offset_has_no_implicit_platform_padding_and_preserves_explicit_values() {
         for (input, expected) in [
-            ("", (0, if cfg!(windows) { 4 } else { 0 })),
+            ("", (0, 0)),
             ("[font.offset]\nx = 2\ny = 4", (2, 4)),
             ("[font.offset]\ny = -2", (0, -2)),
         ] {

@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 fn fixture() -> String {
     let mut vt = String::from("\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H");
-    // Braille 点距应跨格连续；默认行高尊重字体，圆的纵横比随用户网格改变。
+    // 默认网格的横纵点距必须相等；正文仍保持指定字号。
     // 右侧同时保留正文和接缝样例，避免只验收字符画而忽视阅读效果。
     for row in 0..17 {
         vt.push_str(&format!("\x1b[{};1H", row + 1));
@@ -59,6 +59,11 @@ fn native_character_grid_preserves_art_text_and_viewport() {
         Some(output.join("config"))
     );
     assert!(!output.join("metrics.json").exists(), "use a fresh fixture");
+    let vt = if output.join("input.vt").is_file() {
+        std::fs::read_to_string(output.join("input.vt")).unwrap()
+    } else {
+        fixture()
+    };
     let success = Arc::new(Mutex::new(false));
     let result = success.clone();
     gpui_platform::application().with_assets(crate::gpui_shell::assets::NebulaAssets).run(move |cx| {
@@ -66,12 +71,28 @@ fn native_character_grid_preserves_art_text_and_viewport() {
         gpui_component::init(cx);
         crate::gpui_shell::scientific_render::init(cx);
         let mut settings = Settings::load(nebula_settings::ThemeName::Nord);
-        settings.font_size_px = 14.0;
-        settings.base_font_size_px = 14.0;
+        let font_size = std::env::var("PEBREL_GRID_QA_FONT_SIZE")
+            .map(|value| value.parse::<f32>().expect("finite fixture font size"))
+            .unwrap_or(14.0);
+        assert!(font_size.is_finite() && (10.0..=24.0).contains(&font_size));
+        settings.font_size_px = font_size;
+        settings.base_font_size_px = font_size;
         assert_eq!(
             (settings.font_offset_x, settings.font_offset_y),
-            (0.0, if cfg!(windows) { 4.0 } else { 0.0 })
+            (0.0, 0.0)
         );
+        // A/B 只改行框，证明正文轮廓不因网格策略改变；不写入用户配置。
+        let natural_rows = std::env::var_os("PEBREL_GRID_QA_NATURAL_ROWS").is_some();
+        if natural_rows {
+            crate::gpui_shell::font_loading::ensure_family(&settings.font_family, cx);
+            let text = gpui::WindowTextSystem::new(cx.text_system().clone());
+            let sample = text.shape_line("M".into(), px(font_size), &[gpui::TextRun {
+                len: 1, font: super::mono_font(&settings.font_family, FontWeight::NORMAL, FontStyle::Normal, false),
+                color: gpui::white(), background_color: None, underline: None, strikethrough: None,
+            }], None);
+            settings.theme_line_height = Some((sample.ascent + sample.descent).as_f32() / font_size);
+            settings.font_offset_y = if cfg!(windows) { 4.0 } else { 0.0 };
+        }
         cx.set_global(settings);
         crate::gpui_shell::theme::apply_chrome_theme(cx);
         let mut terminal = None;
@@ -90,7 +111,7 @@ fn native_character_grid_preserves_art_text_and_viewport() {
             }, window, cx));
             receiver = Some(view.update(cx, |view, _| {
                 let receiver = view.install_completion_test_session();
-                startup_tests::feed(view, fixture().as_bytes());
+                startup_tests::feed(view, vt.as_bytes());
                 receiver
             }));
             terminal = Some(view.clone());
@@ -126,6 +147,7 @@ fn native_character_grid_preserves_art_text_and_viewport() {
                 let view = terminal.read(cx);
                 let (w, h) = super::cell_metrics(window, cx);
                 assert_eq!((view.cell_width, view.line_height), (w, h));
+                if !natural_rows { assert!((h.as_f32() - 2.0 * w.as_f32()).abs() < 1e-5); }
                 let term = view.session.as_ref().unwrap().term.lock();
                 assert_eq!((term.columns(), term.screen_lines()), (view.cols, view.rows));
                 let font_id = cx.text_system().resolve_font(&view.font);
@@ -133,12 +155,21 @@ fn native_character_grid_preserves_art_text_and_viewport() {
                     &[gpui::TextRun { len: 1, font: view.font.clone(), color: gpui::white(),
                         background_color: None, underline: None, strikethrough: None }], None);
                 assert_eq!(shaped.runs[0].font_id, font_id);
+                let text_probes = ["M", "gypq", "中文", "ÅÉêǺé"].into_iter().map(|text| {
+                    let line = window.text_system().shape_line(text.into(), view.font_size,
+                        &[gpui::TextRun { len: text.len(), font: view.font.clone(), color: gpui::white(),
+                            background_color: None, underline: None, strikethrough: None }], None);
+                    assert_eq!(line.font_size, view.font_size);
+                    serde_json::json!({"text": text, "font_size": line.font_size.as_f32(),
+                        "width": line.width.as_f32(), "ascent": line.ascent.as_f32(), "descent": line.descent.as_f32(),
+                        "fonts": line.runs.iter().map(|run| format!("{:?}",run.font_id)).collect::<Vec<_>>()})
+                }).collect::<Vec<_>>();
                 serde_json::json!({"scale": window.scale_factor(), "font": view.font.family.as_ref(),
                     "font_id": format!("{font_id:?}"), "font_size": view.font_size.as_f32(),
                     "ascent": shaped.ascent.as_f32(), "descent": shaped.descent.as_f32(),
                     "cell": [w.as_f32(), h.as_f32()], "grid": [view.cols, view.rows],
                     "origin": [view.origin.x.as_f32(), view.origin.y.as_f32()],
-                    "draw_cpu_ms": costs})
+                    "text_probes": text_probes, "natural_rows": natural_rows, "draw_cpu_ms": costs})
             }).unwrap();
             std::fs::write(output.join("metrics.json"), serde_json::to_vec_pretty(&metrics).unwrap()).unwrap();
             for _ in 0..100 {
