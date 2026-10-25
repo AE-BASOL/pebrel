@@ -33,6 +33,9 @@ class TmuxRecoveryCommandTest {
             }
             fallback(target.copy(session = target.session.copy(identity = "0:0")))
             fallback(target.copy(window = target.window!!.copy(pane = "%999999")))
+            // The guard succeeds, but attachment has no PTY here and fails. Failure after
+            // validation (including a concurrently removed target) must still open a shell.
+            fallback(target)
             assertEquals(0, run("tmux", "-S", socket, "has-session", "-t", "original").first)
             run("tmux", "-S", socket, "kill-server")
             fallback(target)

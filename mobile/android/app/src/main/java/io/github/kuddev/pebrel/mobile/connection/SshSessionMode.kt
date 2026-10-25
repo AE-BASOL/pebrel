@@ -21,7 +21,7 @@ internal fun HostProfile.reconnectCommand(): String? = when (sessionMode) {
     SshSessionMode.TMUX -> {
         require(validRemoteSessionName(sessionMode, sessionName))
         RemoteSessions.posixWithPath("if tmux has-session -t '=${sessionName.ifEmpty { "pebrel" }}' 2>/dev/null; then " +
-            "exec tmux attach-session -t '=${sessionName.ifEmpty { "pebrel" }}'; fi; exec \"${'$'}{SHELL:-/bin/sh}\" -l")
+            "tmux attach-session -t '=${sessionName.ifEmpty { "pebrel" }}'; fi; exec \"${'$'}{SHELL:-/bin/sh}\" -l")
     }
     SshSessionMode.HERDR -> {
         require(sessionName.isNotEmpty() && validRemoteSessionName(sessionMode, sessionName))

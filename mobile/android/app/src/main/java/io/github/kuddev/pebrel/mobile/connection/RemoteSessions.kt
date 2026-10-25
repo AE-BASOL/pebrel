@@ -169,7 +169,7 @@ object RemoteSessions {
                 }.orEmpty()
                 // 不按可重命名的标题匹配；服务器重启后不能误接到复用的 session ID。
                 "if [ \"${'$'}($clientCommand display-message -p -t ${quote(session.id)} '#{session_created}:#{pid}' 2>/dev/null)\" = ${quote(session.identity)} ] && " +
-                    selected + "true; then exec $clientCommand attach-session -t ${quote(session.id)}; fi; " +
+                    selected + "true; then $clientCommand attach-session -t ${quote(session.id)}; fi; " +
                     "exec \"${'$'}{SHELL:-/bin/sh}\" -l"
             }
             "herdr" -> {
