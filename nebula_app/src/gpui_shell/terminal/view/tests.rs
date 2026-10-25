@@ -283,29 +283,30 @@ fn explicit_line_height_offset_is_still_measured_in_device_pixels() {
 }
 
 #[test]
-fn default_character_art_grid_stays_near_two_to_one_across_dpi_and_zoom() {
+fn default_line_height_preserves_font_metrics_across_dpi_and_zoom() {
     for font_size in [12.0, 14.0, 15.0, 18.0, 24.0] {
         for scale in [1.0, 1.5, 2.0] {
-            let width = typography::effective_cell_width(
-                font_size * 0.6,
-                nebula_settings::CellWidthModeName::Compact,
-                scale,
-                0.0,
-            );
-            let height = typography::effective_line_height_with_theme(font_size, None, 0.0, scale);
-            // Independent width/height flooring may differ by one device px.
-            assert!(((height - width * 2.0).as_f32() * scale).abs() <= 1.001);
+            for metric_ratio in [1.2, 1.32, 1.6] {
+                for offset in [0.0, 4.0] {
+                    let natural = font_size * metric_ratio;
+                    let height = typography::effective_line_height_with_theme(
+                        natural, font_size, None, offset, scale,
+                    );
+                    assert_eq!(height, typography::effective_line_height(natural, offset, scale));
+                }
+            }
         }
     }
-    let height = typography::effective_line_height_with_theme(14.0, None, 0.0, 1.5);
-    assert!((height.as_f32() * 1.5 - 25.0).abs() < 1e-4);
+    let height = typography::effective_line_height_with_theme(14.0 * 1.32, 14.0, None, 4.0, 1.5);
+    assert!((height.as_f32() * 1.5 - 31.0).abs() < 1e-4);
 }
 
 #[test]
 fn theme_line_height_uses_font_size_and_keeps_device_pixel_flooring() {
     // 15px * 1.5 = 22.5 logical px; at 150% DPI with a 4px device offset,
     // floor(22.5 * 1.5 + 4) = 37 device px, or 37 / 1.5 logical px.
-    let height = typography::effective_line_height_with_theme(15.0, Some(1.5), 4.0, 1.5);
+    let height =
+        typography::effective_line_height_with_theme(15.0 * 1.32, 15.0, Some(1.5), 4.0, 1.5);
 
     assert!((f32::from(height) - 37.0 / 1.5).abs() < f32::EPSILON);
 }

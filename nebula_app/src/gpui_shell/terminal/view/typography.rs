@@ -60,19 +60,18 @@ pub(super) fn effective_line_height(height: f32, offset_y: f32, scale: f32) -> P
     px(((height * scale + offset_y).floor().max(1.0)) / scale)
 }
 
-/// A terminal row defaults to 1.2em, independently of a fallback font's hhea
-/// padding. With the bundled 0.6em monospace advance this gives a 1:2 grid
-/// before pixel rounding, as expected by block and Braille character art.
-/// This changes row spacing, not font size or glyph outlines. Text keeps its
-/// shaped ascent/descent for baseline placement and is not clipped per cell.
-/// Explicit theme line height and font.offset remain authoritative.
+/// 默认尊重所选字体的自然行高，避免为字符画比例压缩整段正文。
+/// 显式主题行高仍以字号为基准；设备像素偏移沿用原有取整规则。
 pub(super) fn effective_line_height_with_theme(
+    natural_height: f32,
     font_size: f32,
     line_height_multiplier: Option<f32>,
     offset_y: f32,
     scale: f32,
 ) -> Pixels {
-    let target = (font_size * line_height_multiplier.unwrap_or(1.2)).max(1.0);
+    let target = line_height_multiplier
+        .map(|multiplier| (font_size * multiplier).max(1.0))
+        .unwrap_or(natural_height);
     effective_line_height(target, offset_y, scale)
 }
 
@@ -103,6 +102,7 @@ fn measure_cell_metrics(
     (
         effective_cell_width(sample.width.as_f32(), mode, scale, offset_x),
         effective_line_height_with_theme(
+            sample.ascent.as_f32() + sample.descent.as_f32(),
             font_size.as_f32(),
             line_height_multiplier,
             offset_y,

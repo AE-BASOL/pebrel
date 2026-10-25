@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 
 fn fixture() -> String {
     let mut vt = String::from("\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H");
-    // 65 × 65 pixels encoded as Braille: a circle must stay round, with no
-    // banding every fourth dot row. Right-hand controls exercise text and joins.
+    // Braille 点距应跨格连续；默认行高尊重字体，圆的纵横比随用户网格改变。
+    // 右侧同时保留正文和接缝样例，避免只验收字符画而忽视阅读效果。
     for row in 0..17 {
         vt.push_str(&format!("\x1b[{};1H", row + 1));
         for col in 0..33 {
@@ -68,7 +68,10 @@ fn native_character_grid_preserves_art_text_and_viewport() {
         let mut settings = Settings::load(nebula_settings::ThemeName::Nord);
         settings.font_size_px = 14.0;
         settings.base_font_size_px = 14.0;
-        assert_eq!((settings.font_offset_x, settings.font_offset_y), (0.0, 0.0));
+        assert_eq!(
+            (settings.font_offset_x, settings.font_offset_y),
+            (0.0, if cfg!(windows) { 4.0 } else { 0.0 })
+        );
         cx.set_global(settings);
         crate::gpui_shell::theme::apply_chrome_theme(cx);
         let mut terminal = None;

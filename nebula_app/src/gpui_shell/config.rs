@@ -312,11 +312,8 @@ impl Settings {
             cjk_bold_regular: runtime.cjk_bold_regular,
             shell_id: runtime.shell.clone(),
             font_family: normal_family,
-            font_cjk: Some({
-                let family = runtime
-                    .font_family_cjk
-                    .as_deref()
-                    .unwrap_or(crate::font_install::REQUIRED_FONT_FAMILY);
+            // 未指定中文字体时沿用主字体及平台缺字回退，不隐式指定完整 Maple。
+            font_cjk: runtime.font_family_cjk.as_deref().map(|family| {
                 use gpui::{FontStyle, FontWeight};
                 [
                     (FontWeight::NORMAL, FontStyle::Normal),
@@ -364,7 +361,8 @@ impl Settings {
 }
 
 fn default_font_offset() -> RawDelta {
-    RawDelta { x: 0, y: 0 }
+    // 恢复 Windows 原有的正文留白；字符画不能决定所有字体的默认行距。
+    RawDelta { x: 0, y: if cfg!(windows) { 4 } else { 0 } }
 }
 
 fn runtime_background(
@@ -865,9 +863,9 @@ mod tests {
     }
 
     #[test]
-    fn font_offset_has_no_platform_padding_and_preserves_explicit_values() {
+    fn font_offset_restores_platform_padding_and_preserves_explicit_values() {
         for (input, expected) in [
-            ("", (0, 0)),
+            ("", (0, if cfg!(windows) { 4 } else { 0 })),
             ("[font.offset]\nx = 2\ny = 4", (2, 4)),
             ("[font.offset]\ny = -2", (0, -2)),
         ] {
