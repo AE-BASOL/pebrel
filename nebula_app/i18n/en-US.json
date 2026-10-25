@@ -1842,6 +1842,11 @@
     "pty_failure": "PTY failure: {error}",
     "session_ended": "Session ended",
     "ssh_start_failed": "Could not start the SSH session: {error}",
+    "serial_test_hint": "Save this serial connection, then open it from the host list to test it.",
+    "serial_ssh_options": "Serial connections do not use SSH proxies or jump hosts; reset the advanced options.",
+    "serial_read_failed": "Serial port stopped: {error}",
+    "serial_write_failed": "Serial write failed: {error}",
+    "serial_start_failed": "Could not open serial port: {error}",
     "pty_start_failed": "Could not start the PTY: {error}"
   },
   "confirmation": {
