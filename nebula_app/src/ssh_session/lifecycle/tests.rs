@@ -79,6 +79,9 @@ enum Mode {
     CompletionMetadata,
     Integration,
     RejectIntegration,
+    RejectSftp,
+    HangSftp,
+    AcceptSftp,
 }
 
 struct Loopback {
@@ -171,10 +174,39 @@ impl server::Handler for Loopback {
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         self.channels.retain(|value| value.id() != channel);
-        if matches!(self.mode, Mode::ExecEof | Mode::ExecHang | Mode::CompletionMetadata) {
+        if matches!(
+            self.mode,
+            Mode::ExecEof
+                | Mode::ExecHang
+                | Mode::CompletionMetadata
+                | Mode::RejectSftp
+                | Mode::HangSftp
+                | Mode::AcceptSftp
+        ) {
             let _ = self.data.send(b"closed".to_vec());
         }
         Ok(())
+    }
+
+    async fn subsystem_request(
+        &mut self,
+        channel: ChannelId,
+        name: &str,
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        assert_eq!(name, "sftp");
+        let _ = self.data.send(b"sftp-request".to_vec());
+        match self.mode {
+            Mode::HangSftp => Ok(()),
+            Mode::AcceptSftp => {
+                session.channel_success(channel)?;
+                let index = self.channels.iter().position(|c| c.id() == channel).unwrap();
+                let stream = self.channels.remove(index).into_stream();
+                tokio::spawn(russh_sftp::server::run(stream, sftp::Peer));
+                Ok(())
+            },
+            _ => session.channel_failure(channel),
+        }
     }
 
     async fn channel_open_session(
@@ -1284,3 +1316,5 @@ fn ssh_echo_keeps_draining_while_a_large_input_waits_for_window_space() {
         fixture.forget(&acquired.session).await;
     });
 }
+
+mod sftp;
