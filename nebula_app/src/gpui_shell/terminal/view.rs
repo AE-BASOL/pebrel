@@ -266,6 +266,9 @@ pub enum TerminalLaunch {
         cwd: Option<String>,
         resume_target: Option<crate::ssh_session::ResumeTarget>,
     },
+    Serial {
+        destination: String,
+    },
 }
 
 pub(crate) fn last_path_component(path: &str) -> Option<String> {

@@ -102,7 +102,9 @@ impl TerminalView {
             TerminalLaunch::Ssh { destination, cwd, .. } => {
                 cwd.clone().unwrap_or_else(|| destination.clone())
             },
+            TerminalLaunch::Serial { .. } => String::new(),
         };
+        let is_serial = matches!(launch, TerminalLaunch::Serial { .. });
         // 启动目录已经是 PTY 的输入事实，不能等第一次 OSC 上报才交给补全。
         // WSL 的启动目录属于宿主，必须保持空值，直到来宾自己报告 cwd。
         let mut completion_cwd = String::new();
@@ -191,6 +193,17 @@ impl TerminalView {
                 crate::session::LaunchSession::Ssh { host: destination.clone() },
                 session::spawn_ssh(destination, cwd, resume_target, initial, term_config),
             ),
+            TerminalLaunch::Serial { destination } => (
+                None,
+                crate::serial_session::display_name(&destination).to_owned(),
+                None,
+                crate::display::SuggestEnv::Shell {
+                    scope: crate::nebula_history::HistoryScope::Ssh(destination.clone()),
+                },
+                None,
+                crate::session::LaunchSession::Serial { destination: destination.clone() },
+                session::spawn_serial(&destination, initial, term_config),
+            ),
         };
         let is_ssh = ssh_destination.is_some();
         let (session, error) = match spawned {
@@ -230,6 +243,8 @@ impl TerminalView {
             Err(err) => {
                 let message = if is_ssh {
                     crate::i18n::Message::TerminalSshStartFailed
+                } else if is_serial {
+                    crate::i18n::Message::TerminalSerialStartFailed
                 } else {
                     crate::i18n::Message::TerminalPtyStartFailed
                 };

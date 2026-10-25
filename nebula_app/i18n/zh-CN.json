@@ -1838,6 +1838,11 @@
     "pty_failure": "PTY 故障：{error}",
     "session_ended": "会话已结束",
     "ssh_start_failed": "SSH 会话启动失败: {error}",
+    "serial_test_hint": "请先保存串口连接，再从主机列表打开进行测试。",
+    "serial_ssh_options": "串口连接不使用 SSH 代理或跳板，请重置高级选项。",
+    "serial_read_failed": "串口已停止：{error}",
+    "serial_write_failed": "串口写入失败：{error}",
+    "serial_start_failed": "串口打开失败：{error}",
     "pty_start_failed": "PTY 启动失败: {error}"
   },
   "confirmation": {
