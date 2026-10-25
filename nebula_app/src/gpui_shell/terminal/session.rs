@@ -251,7 +251,12 @@ pub fn spawn_serial(
     let term_config = crate::ssh_session::terminal_config(term_config);
     let (tx, rx) = super::event_mailbox::channel();
     let (stage_tx, stage_rx) = unbounded();
-    let proxy = EventProxy { events: tx, stages: stage_tx, remote_reader: Default::default() };
+    let proxy = EventProxy {
+        events: tx,
+        stages: stage_tx,
+        remote_connection: Default::default(),
+        resume_target: Default::default(),
+    };
 
     let grid = GridSize {
         columns: window_size.num_cols as usize,
@@ -259,7 +264,7 @@ pub fn spawn_serial(
     };
     let term = Arc::new(FairMutex::new(Term::new(term_config, &grid, proxy.clone())));
     let native_prompt = proxy.events.native_prompt.clone();
-    let remote_reader = proxy.remote_reader.clone();
+    let remote_connection = proxy.remote_connection.clone();
     let sender = crate::serial_session::spawn_session(destination, Arc::clone(&term), proxy)?;
 
     Ok((
@@ -268,7 +273,8 @@ pub fn spawn_serial(
             notifier: Notifier(sender),
             native_prompt,
             shell_pid: 0,
-            remote_reader,
+            remote_connection,
+            resume_target: Default::default(),
         },
         rx,
         stage_rx,

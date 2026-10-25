@@ -3,7 +3,8 @@
 //! 与 SSH 窗格一样不创建伪终端：字节流经 `StreamProcessor` 进入 grid，
 //! 输入、缩放和关闭沿用统一的 `Msg` 协议。
 
-use std::io::{self, Read, Write};
+use std::collections::VecDeque;
+use std::io;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
@@ -45,8 +46,12 @@ impl FromStr for SerialConfig {
             .ok_or_else(|| invalid(format!("not a serial destination: {destination}")))?;
         let mut parts = rest.split(',');
         let port = parts.next().unwrap_or_default();
-        if port.is_empty() {
-            return Err(invalid("serial port name is empty".into()));
+        if port.is_empty()
+            || port
+                .chars()
+                .any(|ch| ch.is_whitespace() || ch.is_control() || ";&|<>\"'`@".contains(ch))
+        {
+            return Err(invalid("invalid serial port name".into()));
         }
         let mut config = Self {
             port: port.into(),
@@ -102,6 +107,9 @@ where
     H: EventListener + Clone + Send + Sync + 'static,
 {
     let config: SerialConfig = destination.parse()?;
+    let language =
+        crate::i18n::LanguagePreference::from(nebula_settings::RuntimeSettings::load().language)
+            .resolved();
     let mut writer = crate::platform::serial_port::open(&config)?;
     let mut reader = writer.try_clone()?;
     let (sender, receiver) = EventLoopSender::standalone()?;
@@ -115,7 +123,7 @@ where
     std::thread::Builder::new().name("serial-read".into()).spawn(move || {
         let mut buf = [0u8; 4096];
         while !read_stopped.load(Ordering::Acquire) {
-            match reader.read(&mut buf) {
+            match crate::platform::serial_port::read(&mut reader, &mut buf) {
                 // 读超时：借机结束超时的同步更新，保持与 SSH 路径一致。
                 Ok(0) => {
                     let mut stream = read_stream.lock().unwrap();
@@ -132,7 +140,10 @@ where
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => {},
                 Err(error) => {
                     if !read_stopped.swap(true, Ordering::AcqRel) {
-                        let message = format!("Serial port stopped: {error}");
+                        let message = language.format(
+                            crate::i18n::Message::TerminalSerialReadFailed,
+                            &[("error", &error.to_string())],
+                        );
                         render_error(&read_terminal, &read_proxy, &message);
                         read_terminal.lock().exit();
                     }
@@ -142,29 +153,60 @@ where
         }
     })?;
 
+    // Construct before spawning: failed thread creation also stops the reader.
+    let stop_guard = StopOnDrop(Arc::clone(&stopped));
     std::thread::Builder::new().name("serial-write".into()).spawn(move || {
+        let _stop_guard = stop_guard;
+        let mut pending = VecDeque::new();
+        let mut offset = 0;
         while !stopped.load(Ordering::Acquire) {
-            match receiver.recv_timeout(Duration::from_millis(100)) {
-                Ok(Msg::Input(bytes)) => {
-                    if let Err(error) = writer.write_all(&bytes).and_then(|()| writer.flush()) {
-                        if !stopped.swap(true, Ordering::AcqRel) {
-                            let message = format!("Serial write failed: {error}");
-                            render_error(&terminal, &event_proxy, &message);
-                            terminal.lock().exit();
-                        }
-                        return;
-                    }
-                },
+            let timeout =
+                if pending.is_empty() { Duration::from_millis(100) } else { Duration::ZERO };
+            match receiver.recv_timeout(timeout) {
+                Ok(Msg::Input(bytes)) if !bytes.is_empty() => pending.push_back(bytes),
+                Ok(Msg::Input(_)) => {},
                 Ok(Msg::Resize(size) | Msg::ResizeGrid(size)) => {
                     resize(&terminal, &stream, &event_proxy, size);
                 },
                 Ok(Msg::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
-                Ok(_) | Err(RecvTimeoutError::Timeout) => {},
+                Err(RecvTimeoutError::Timeout) => {},
+            }
+            let Some(bytes) = pending.front() else { continue };
+            // Return to the command queue after every bounded write, including
+            // partial progress or backpressure, so Shutdown cannot queue behind it.
+            let end = (offset + 4096).min(bytes.len());
+            match crate::platform::serial_port::write(&mut writer, &bytes[offset..end]) {
+                Ok(n) => {
+                    offset += n;
+                    if offset == bytes.len() {
+                        pending.pop_front();
+                        offset = 0;
+                    }
+                },
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {},
+                Err(error) => {
+                    if !stopped.swap(true, Ordering::AcqRel) {
+                        let message = language.format(
+                            crate::i18n::Message::TerminalSerialWriteFailed,
+                            &[("error", &error.to_string())],
+                        );
+                        render_error(&terminal, &event_proxy, &message);
+                        terminal.lock().exit();
+                    }
+                    return;
+                },
             }
         }
-        stopped.store(true, Ordering::Release);
     })?;
     Ok(sender)
+}
+
+struct StopOnDrop(Arc<AtomicBool>);
+
+impl Drop for StopOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Release);
+    }
 }
 
 fn resize<H: EventListener>(

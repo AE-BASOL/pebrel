@@ -1,4 +1,5 @@
-//! 打开并配置串口。读操作最多阻塞约 100 ms（Windows 为 20 ms，同步句柄上的挂起读会阻塞写）后返回 0 字节，供读线程检查停止标志。
+//! Native serial configuration and bounded I/O. Unix handles remain nonblocking;
+//! Windows drivers receive finite read/write timeouts so shutdown can be consumed.
 
 use std::fs::{File, OpenOptions};
 use std::io;
@@ -45,11 +46,6 @@ pub(crate) fn open(config: &SerialConfig) -> io::Result<File> {
     termios.c_cc[libc::VMIN] = 0;
     termios.c_cc[libc::VTIME] = 1;
     check(unsafe { libc::tcsetattr(fd, libc::TCSANOW, &termios) })?;
-    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-    if flags < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    check(unsafe { libc::fcntl(fd, libc::F_SETFL, flags & !libc::O_NONBLOCK) })?;
     Ok(file)
 }
 
@@ -110,8 +106,62 @@ pub(crate) fn open(config: &SerialConfig) -> io::Result<File> {
         ReadTotalTimeoutMultiplier: 0,
         ReadTotalTimeoutConstant: 20,
         WriteTotalTimeoutMultiplier: 0,
-        WriteTotalTimeoutConstant: 5000,
+        WriteTotalTimeoutConstant: 100,
     };
     check(unsafe { SetCommTimeouts(handle, &timeouts) })?;
     Ok(file)
+}
+
+#[cfg(unix)]
+fn ready(file: &File, events: libc::c_short) -> io::Result<bool> {
+    use std::os::fd::AsRawFd;
+    let mut fd = libc::pollfd { fd: file.as_raw_fd(), events, revents: 0 };
+    let status = unsafe { libc::poll(&mut fd, 1, 20) };
+    if status < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if fd.revents & events != 0 {
+        return Ok(true);
+    }
+    if fd.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
+        return Err(io::Error::new(io::ErrorKind::BrokenPipe, "serial port disconnected"));
+    }
+    Ok(false)
+}
+
+#[cfg(unix)]
+pub(crate) fn read(file: &mut File, buf: &mut [u8]) -> io::Result<usize> {
+    use std::io::Read;
+    if !ready(file, libc::POLLIN)? {
+        return Ok(0);
+    }
+    match file.read(buf) {
+        Ok(0) => Err(io::Error::new(io::ErrorKind::UnexpectedEof, "serial port disconnected")),
+        Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(0),
+        result => result,
+    }
+}
+
+#[cfg(windows)]
+pub(crate) fn read(file: &mut File, buf: &mut [u8]) -> io::Result<usize> {
+    use std::io::Read;
+    file.read(buf)
+}
+
+#[cfg(unix)]
+pub(crate) fn write(file: &mut File, bytes: &[u8]) -> io::Result<usize> {
+    use std::io::Write;
+    if !ready(file, libc::POLLOUT)? {
+        return Ok(0);
+    }
+    match file.write(bytes) {
+        Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(0),
+        result => result,
+    }
+}
+
+#[cfg(windows)]
+pub(crate) fn write(file: &mut File, bytes: &[u8]) -> io::Result<usize> {
+    use std::io::Write;
+    file.write(bytes)
 }
