@@ -79,6 +79,12 @@ Review corrections (2026-10-24, maintainer counterexamples):
    `turn_quiet_for` reads this shared clock; plain Enter, screen samples and
    rejected foreign hooks do not postpone recovery. Each new submission and
    accepted hook renews the entire waiting period.
+9. Integration with the screen-attention expiry fix exposed two running Claude
+   layouts with custom footers and no interrupt hint. A generic six-row prompt
+   search misclassified both as idle. Preserve the four-row generic rule and
+   recognize the captured extended footer only with its mode-switch control.
+   The custom layouts remain unclassified, retaining the shared owner's stronger
+   working evidence; the captured extended idle and interrupt layouts still match.
 
 ## Rejected alternatives
 

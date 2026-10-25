@@ -1064,6 +1064,17 @@ mod tests {
                       \x20 ⏵⏵ auto mode on (shift+tab to cycle)";
         let detection = detect("claude", screen).unwrap();
         assert_eq!(detection.status, AgentStatus::Idle, "rule={}", detection.rule_id);
+        assert_eq!(detection.rule_id, "prompt_idle_extended_footer");
+    }
+
+    #[test]
+    fn claude_custom_running_footer_without_interrupt_hint_is_not_idle() {
+        for screen in [
+            "* Ideating… (2m · 123 tokens)\n────────\n❯\n────────\n版本 2.1.301\n上下文 25%\n状态 运行中\n/project",
+            "* Ideating… (1m 20s · 2.3k tokens)\n\n❯ \n\n状态 运行中\n模型 Claude Sonnet\n目录 /project\n上下文 12%",
+        ] {
+            assert!(detect("claude", screen).is_none(), "custom footer must not invent idle");
+        }
     }
 
     /// 同款 2.x 加宽 chrome 的工作中屏幕：❯ 与中断提示同屏，prompt_idle 的

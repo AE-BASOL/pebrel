@@ -31,17 +31,11 @@ priority = 400
 region = "bottom_non_empty_lines(8)"
 contains = ["esc to interrupt"]
 
-# 2026-10-12：CLI 2.x 底部 chrome 长到 5 个非空行（分隔线、⚠ 提示、
-# footer×2、mode 行），❯ 落在自底向上第 6 行——窗口 4 装不下它，
-# prompt_idle 恒不命中，会话启动即 Working 永远等不到 idle 样本（Fleet
-# 分叉实捕 v2.1.286 定位，回归见 real_claude_footer_heavy_idle_screen）。
-# 回合进行中的误判由下面的 not 段与 spinner_working 的更高优先级兜住，
-# 1.x 旧屏幕（❯ 在底部第 3 行）在加宽窗口下判定不变。
 [[rules]]
 id = "prompt_idle"
 state = "idle"
 priority = 100
-region = "bottom_non_empty_lines(6)"
+region = "bottom_non_empty_lines(4)"
 line_regex = ['^\s*❯(?:\s|$)']
 not = [
   { contains = ["esc to cancel"] },
@@ -49,5 +43,22 @@ not = [
   # 输入框在回合进行中同样可见（Claude Code 允许排队输入），所以「看见 ❯」
   # 本身不等于空闲。底栏离输入框足够近时这条 not 直接兜住；离得远时由
   # spinner_working 的更高优先级取胜。
+  { contains = ["esc to interrupt"] },
+]
+
+# The captured CLI 2.x footer places the prompt six non-empty rows from the
+# bottom. Extend recognition only when its mode control is present. Arbitrary
+# custom footer lines can occur during work without an interrupt hint; widening
+# the generic prompt rule would turn those unclassified frames into false idle.
+[[rules]]
+id = "prompt_idle_extended_footer"
+state = "idle"
+priority = 100
+region = "bottom_non_empty_lines(6)"
+contains = ["(shift+tab to cycle)"]
+line_regex = ['^\s*❯(?:\s|$)']
+not = [
+  { contains = ["esc to cancel"] },
+  { contains = ["enter to select"] },
   { contains = ["esc to interrupt"] },
 ]
