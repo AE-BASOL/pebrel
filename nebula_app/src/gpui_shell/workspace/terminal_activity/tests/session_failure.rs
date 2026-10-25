@@ -75,7 +75,13 @@ fn failed_startup_keeps_last_tab_diagnostics_and_shell_choice(cx: &mut TestAppCo
     });
     window.simulate_keystrokes("escape");
     workspace.read_with(&window, |workspace, _| assert!(!workspace.command_palette_open));
-    window.simulate_keystrokes("ctrl-k");
+    // macOS keeps Ctrl+K for the terminal; its application shortcut is Cmd+K.
+    let shortcut = if crate::platform::Platform::current() == crate::platform::Platform::MacOS {
+        "cmd-k"
+    } else {
+        "ctrl-k"
+    };
+    window.simulate_keystrokes(shortcut);
     workspace.read_with(&window, |workspace, _| {
         assert!(workspace.shell_picker_open && workspace.command_palette_open);
     });
