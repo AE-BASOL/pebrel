@@ -2,7 +2,9 @@
 
 ## Status
 
-Proposed; implemented locally and verified on Windows. Cross-platform native CI completed successfully.
+Under review as split PR #316, after the grid-ownership prerequisite #749.
+The Windows and native-CI evidence below describes the historical revisions
+identified in this note. It does not replace current-head checks for the split PR.
 
 ## Context
 
