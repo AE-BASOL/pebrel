@@ -409,12 +409,12 @@ impl Render for NebulaWorkspace {
             .children(self.pane_drag_overlay(cx))
             .children(self.split_drag_visual(cx))
             .children(self.render_left_sidebar_resize_overlay(cx))
-            .when(self.tab_drag.is_some(), |root| {
+            .when(self.pointer_drag_active(), |root| {
                 // 拖拽期间挂窗口级裸监听（canvas 在 paint 期注册）：指针移出
                 // 本窗口后的事件坐标在 viewport 之外，hover 门控的监听器全部
                 // 不触发——跨窗合并与「拖出窗口外撕出」都在那里松手，靠它
-                // 兜底。详见 render_tab_drag_global_capture 的注释。
-                root.child(self.render_tab_drag_global_capture(cx))
+                // 兜底。详见 render_pointer_drag_capture 的注释。
+                root.child(self.render_pointer_drag_capture(cx))
             })
             .when_some(
                 self.split_drag.as_ref().map(|drag| drag.direction),
