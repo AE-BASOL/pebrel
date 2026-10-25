@@ -499,10 +499,6 @@ fn next_manifest_generation() -> u64 {
     MANIFEST_GENERATION.fetch_add(1, Ordering::Relaxed)
 }
 
-fn manifest_generation() -> u64 {
-    cache().read().map(|guard| guard.generation).unwrap_or(0)
-}
-
 /// Skeleton rules merged into every manifest below (and into user overrides).
 const SHARED: &str = include_str!("agent_detection/_shared.toml");
 
@@ -622,15 +618,8 @@ fn refresh_overrides_if_needed() {
     }
 }
 
-/// identify/detect 的单槽结果记忆：看门狗每秒对**静止屏幕**重复问同一份
-/// 文本，纯函数结论不变，直接复用——省掉的是 gate 正则与小写拷贝，**调用
-/// 节奏一分不减**：observe_screen 的逐秒样本累积（Working→Idle 需连续两拍）
-/// 必须照常发生。缓存绝不能上移到 `refresh_agent_screen_state` 整段——Fleet
-/// （Pebrel 的 GPUI 壳分叉）2026-10-12 的回归教训：第一版整段短路导致 agent
-/// 进入后永远显示 Running。键带 manifest 世代，override 变更后整批失效；
-/// 单槽即可（同屏多 pane 各自命中自己的槽位交替，静止场景全是同一键）。
-/// 记忆槽上限：同屏并存的 agent 程序数远小于此；超限（异常形态）整表
-/// 清空重建，不做逐条逐出——宁可少命中，不做错键。
+/// Bound cached pure detection results without changing lifecycle sampling cadence.
+/// Each key includes program/screen identity; a manifest reload invalidates all slots.
 const MEMO_SLOTS: usize = 8;
 
 /// 按 `(program, screen)` 键的检测记忆（评审 3：单槽在多 pane 交替时互相
@@ -651,7 +640,10 @@ static DETECT_MEMO_HITS: std::sync::atomic::AtomicUsize = std::sync::atomic::Ato
 pub fn detect(program: &str, screen: &str) -> Option<Detection> {
     let agent = AgentKind::parse(program)?;
     refresh_overrides_if_needed();
-    let generation = manifest_generation();
+    // Hold one manifest snapshot through lookup, computation and publication.
+    // A concurrent override must not label an old result with a new generation.
+    let manifests = cache().read().ok()?;
+    let generation = manifests.generation;
     {
         let mut memo = DETECT_MEMO.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if memo.0 != generation {
@@ -663,7 +655,7 @@ pub fn detect(program: &str, screen: &str) -> Option<Detection> {
             return hit.clone();
         }
     }
-    let result = detect_from_manifests(agent, screen);
+    let result = detect_from_manifests(&manifests.manifests, agent, screen);
     let mut memo = DETECT_MEMO.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     if memo.1.len() >= MEMO_SLOTS {
         memo.1.clear();
@@ -673,9 +665,12 @@ pub fn detect(program: &str, screen: &str) -> Option<Detection> {
 }
 
 /// [`detect`] 的未缓存内核（单测直接打到这里的都是行为断言，不经过记忆）。
-fn detect_from_manifests(agent: AgentKind, screen: &str) -> Option<Detection> {
-    let guard = cache().read().ok()?;
-    let loaded = guard.manifests.get(&agent)?;
+fn detect_from_manifests(
+    manifests: &HashMap<AgentKind, CompiledManifest>,
+    agent: AgentKind,
+    screen: &str,
+) -> Option<Detection> {
+    let loaded = manifests.get(&agent)?;
     let attention_screen = screen_context::attention_region(agent, screen);
     let live_input = screen_context::has_live_input_controls(attention_screen);
     let mut best: Option<(&Rule, &CompiledGate)> = None;
@@ -704,7 +699,10 @@ fn detect_from_manifests(agent: AgentKind, screen: &str) -> Option<Detection> {
 /// where Toolhelp can see `wsl.exe` but not the Linux `codex` process behind it.
 pub fn identify(screen: &str) -> Option<AgentKind> {
     refresh_overrides_if_needed();
-    let generation = manifest_generation();
+    // Hold one manifest snapshot through lookup, computation and publication.
+    // A concurrent override must not label an old result with a new generation.
+    let manifests = cache().read().ok()?;
+    let generation = manifests.generation;
     {
         let mut memo = IDENTIFY_MEMO.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if memo.0 != generation {
@@ -714,7 +712,7 @@ pub fn identify(screen: &str) -> Option<AgentKind> {
             return *hit;
         }
     }
-    let result = identify_from_manifests(screen);
+    let result = identify_from_manifests(&manifests.manifests, screen);
     let mut memo = IDENTIFY_MEMO.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     if memo.1.len() >= MEMO_SLOTS {
         memo.1.clear();
@@ -724,10 +722,12 @@ pub fn identify(screen: &str) -> Option<AgentKind> {
 }
 
 /// [`identify`] 的未缓存内核。
-fn identify_from_manifests(screen: &str) -> Option<AgentKind> {
-    let guard = cache().read().ok()?;
+fn identify_from_manifests(
+    manifests: &HashMap<AgentKind, CompiledManifest>,
+    screen: &str,
+) -> Option<AgentKind> {
     let mut found = None;
-    for (agent, loaded) in &guard.manifests {
+    for (agent, loaded) in manifests {
         if !loaded.identity.iter().any(|gate| gate.matches(screen)) {
             continue;
         }
