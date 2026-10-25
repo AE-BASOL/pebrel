@@ -281,7 +281,10 @@ fn native_result_mount_preserves_grid_and_isolates_pointer(cx: &mut TestAppConte
     draw(&mut cx);
     let selected = cx.update(|window, cx| window.selected_text(cx));
     assert!(selected.contains("Heading"), "Markdown drag selection: {selected:?}");
-    cx.simulate_keystrokes(if cfg!(target_os = "macos") { "cmd-c" } else { "ctrl-c" });
+    cx.simulate_keystrokes(match crate::platform::Platform::current() {
+        crate::platform::Platform::MacOS => "cmd-c",
+        _ => "ctrl-c",
+    });
     assert_eq!(clipboard(&mut cx).as_deref(), Some(selected.trim()));
     assert!(input(&receiver).is_empty());
     assert!(!view.read_with(&cx, |view, _| view.selecting));
@@ -890,7 +893,10 @@ fn native_result_json_tree_folds_filters_and_selects_without_pty_input(cx: &mut 
     assert!(selected.contains("province"), "JSON drag selection: {selected:?}");
     assert!(selected.contains("广东  省 <&>"), "JSON whitespace and escaping: {selected:?}");
     assert!(selected.contains("city"), "JSON selection crosses text rows: {selected:?}");
-    cx.simulate_keystrokes(if cfg!(target_os = "macos") { "cmd-c" } else { "ctrl-c" });
+    cx.simulate_keystrokes(match crate::platform::Platform::current() {
+        crate::platform::Platform::MacOS => "cmd-c",
+        _ => "ctrl-c",
+    });
     assert_eq!(clipboard(&mut cx).as_deref(), Some(selected.trim()));
     let bounds = cx.debug_bounds("native-result").unwrap();
     cx.simulate_mouse_move(bounds.origin + point(px(5.0), px(5.0)), None, Modifiers::default());

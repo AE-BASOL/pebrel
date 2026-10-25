@@ -374,7 +374,10 @@ mod tests {
                 pane.read(cx).ui_font_family_input.read(cx).focus_handle(cx).focus(window, cx);
                 let _ = window.draw(cx);
             });
-            cx.simulate_keystrokes(if cfg!(target_os = "macos") { "cmd-a" } else { "ctrl-a" });
+            cx.simulate_keystrokes(match crate::platform::Platform::current() {
+                crate::platform::Platform::MacOS => "cmd-a",
+                _ => "ctrl-a",
+            });
             cx.simulate_input(value);
             if value.is_empty() {
                 cx.simulate_keystrokes("backspace");

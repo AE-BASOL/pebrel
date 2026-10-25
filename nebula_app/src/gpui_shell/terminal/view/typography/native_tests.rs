@@ -91,7 +91,10 @@ fn native_character_grid_preserves_art_text_and_viewport() {
                 color: gpui::white(), background_color: None, underline: None, strikethrough: None,
             }], None);
             settings.theme_line_height = Some((sample.ascent + sample.descent).as_f32() / font_size);
-            settings.font_offset_y = if cfg!(windows) { 4.0 } else { 0.0 };
+            settings.font_offset_y = match crate::platform::Platform::current() {
+                crate::platform::Platform::Windows => 4.0,
+                _ => 0.0,
+            };
         }
         cx.set_global(settings);
         crate::gpui_shell::theme::apply_chrome_theme(cx);

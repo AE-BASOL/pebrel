@@ -6,13 +6,8 @@ pub const REQUIRED_FONT_FAMILY: &str = "Maple Mono Normal NF CN";
 pub const SYMBOL_FONT_FAMILY: &str = "Pebrel Symbols";
 pub static SYMBOL_FONT_BYTES: &[u8] =
     include_bytes!("../../assets/fonts/PebrelSymbols-Regular.ttf");
-pub const SYSTEM_MONO_FONT_FAMILY: &str = if cfg!(windows) {
-    "Consolas"
-} else if cfg!(target_os = "macos") {
-    "Menlo"
-} else {
-    "monospace"
-};
+#[cfg(feature = "gpui-shell")]
+pub use crate::platform::fonts::SYSTEM_MONO_FONT_FAMILY;
 
 /// The bundled face is shared by the legacy rasterizer and the GPUI text
 /// system. Keeping one static byte slice avoids letting the two shells drift
