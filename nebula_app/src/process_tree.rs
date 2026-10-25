@@ -383,16 +383,6 @@ fn reset_snapshot_cache_for_test() {
     *SNAPSHOT_CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
 }
 
-/// 测试：当前缓存表自发布戳起已过多久（None = 无缓存）。
-#[cfg(test)]
-fn snapshot_cache_age_for_test() -> Option<std::time::Duration> {
-    SNAPSHOT_CACHE
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .as_ref()
-        .map(|(taken, _)| taken.elapsed())
-}
-
 fn with_cached_snapshot<T>(read: impl FnOnce(&ProcessSnapshotMap) -> T) -> Option<T> {
     // 快路径：锁只覆盖新鲜度判定与纯读闭包（微秒级）。全机枚举绝不在这把
     // 锁内发生——hook 路由校验（`is_within_tree`）与看门狗共用这把锁，
@@ -589,25 +579,40 @@ mod tests {
     #[test]
     fn slow_snapshot_does_not_serialize_concurrent_readers() {
         let _guard = cache_test_state().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        static GATE: (std::sync::Mutex<(usize, bool)>, std::sync::Condvar) =
+            (std::sync::Mutex::new((0, false)), std::sync::Condvar::new());
         fn slow_fake() -> Result<std::collections::HashMap<u32, (u32, String)>, String> {
-            std::thread::sleep(std::time::Duration::from_millis(150));
+            let mut state = GATE.0.lock().unwrap();
+            state.0 += 1;
+            GATE.1.notify_all();
+            drop(GATE.1.wait_while(state, |(_, released)| !*released).unwrap());
             Ok(fake_snapshot_map())
         }
+        *GATE.0.lock().unwrap() = (0, false);
         super::set_test_snapshot_hook(Some(slow_fake));
         super::reset_snapshot_cache_for_test();
-        let started = std::time::Instant::now();
         let a = std::thread::spawn(|| super::with_cached_snapshot(|processes| processes.len()));
         let b = std::thread::spawn(|| super::with_cached_snapshot(|processes| processes.len()));
+        // Both enumerators must enter before either can finish. The timeout only
+        // bounds a lock regression; scheduler latency is not the assertion.
+        let (mut state, _) = GATE
+            .1
+            .wait_timeout_while(
+                GATE.0.lock().unwrap(),
+                std::time::Duration::from_secs(10),
+                |(entered, _)| *entered < 2,
+            )
+            .unwrap();
+        let overlapped = state.0 == 2;
+        state.1 = true;
+        GATE.1.notify_all();
+        drop(state);
         let (ra, rb) = (a.join().unwrap(), b.join().unwrap());
-        let elapsed = started.elapsed();
         let enumerations = super::TEST_ENUMERATION_CALLS.load(std::sync::atomic::Ordering::SeqCst);
         super::set_test_snapshot_hook(None);
         assert_eq!((ra, rb), (Some(1), Some(1)), "both readers see the snapshot");
+        assert!(overlapped, "both cache misses must enumerate before either publishes");
         assert_eq!(enumerations, 2, "each miss enumerates on its own");
-        assert!(
-            elapsed < std::time::Duration::from_millis(290),
-            "two 150 ms enumerations must overlap instead of queueing on the cache lock (took {elapsed:?})"
-        );
     }
 
     /// 评审 2：发布时间戳在枚举完成后取——缓存表的「年龄」从枚举结束起算，
@@ -615,12 +620,12 @@ mod tests {
     #[test]
     fn snapshot_timestamp_is_taken_after_enumeration_completes() {
         let _guard = cache_test_state().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        static FAKE_STARTED: std::sync::LazyLock<std::sync::Mutex<Option<std::time::Instant>>> =
+        static FAKE_COMPLETED: std::sync::LazyLock<std::sync::Mutex<Option<std::time::Instant>>> =
             std::sync::LazyLock::new(|| std::sync::Mutex::new(None));
         fn timed_fake() -> Result<std::collections::HashMap<u32, (u32, String)>, String> {
-            *FAKE_STARTED.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) =
-                Some(std::time::Instant::now());
             std::thread::sleep(std::time::Duration::from_millis(120));
+            *FAKE_COMPLETED.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                Some(std::time::Instant::now());
             Ok(fake_snapshot_map())
         }
         super::set_test_snapshot_hook(Some(timed_fake));
@@ -628,13 +633,15 @@ mod tests {
         let seen = super::with_cached_snapshot(|processes| processes.len());
         super::set_test_snapshot_hook(None);
         assert_eq!(seen, Some(1));
-        let started =
-            FAKE_STARTED.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).expect("fake ran");
-        let age = super::snapshot_cache_age_for_test().expect("cache published");
-        // 旧实现：age ≈ 枚举耗时 + ε（≈120ms+）；新实现：age 从枚举结束起算。
+        let completed = FAKE_COMPLETED
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .expect("fake ran");
+        let cache = super::SNAPSHOT_CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (published, _) = cache.as_ref().expect("cache published");
         assert!(
-            age < std::time::Duration::from_millis(60),
-            "cache age must count from enumeration completion, not start (age {age:?}, enumeration 120 ms, started {started:?})"
+            *published >= completed,
+            "cache timestamp must follow enumeration completion, not its start"
         );
     }
 
