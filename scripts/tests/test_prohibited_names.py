@@ -21,6 +21,30 @@ def run_git(repository: Path, *args: str) -> None:
 
 
 class ProhibitedNamesTests(unittest.TestCase):
+    def test_desktop_endpoint_protocol_references_do_not_allow_prose(self) -> None:
+        cases = (
+            ("resume.rs", 'Self { executable: "tmux".into(), socket: String::new() }'),
+            ("resume/identity.rs", 'command == "tmux" || command == "tmux:" || command.ends_with("/tmux")'),
+            ("resume/discover.sh", r'$3 == "tmux" || $3 == "tmux:" || $3 ~ /\/tmux$/'),
+            ("resume/discover.sh", r"sed -n 's/^n\(.*\/tmux\)$/\1/p'"),
+            ("resume/tests.rs", r'identity.has_client("42 pts/3 bash\n43 pts/3 tmux: client\n")'),
+        )
+        for suffix, text in cases:
+            path = "nebula_app/src/ssh_session/" + suffix
+            with self.subTest(path=path, text=text):
+                self.assertFalse(check_prohibited_names.prohibited_source_line(path, text))
+                self.assertTrue(check_prohibited_names.prohibited_source_line("README.md", text))
+                self.assertTrue(check_prohibited_names.prohibited_source_line(path, text + " // use tmux"))
+                self.assertTrue(check_prohibited_names.prohibited_source_line(path, text + " // use Ghostty"))
+        for path, text in (
+            ("resume.rs", 'let description = "tmux";'),
+            ("resume/identity.rs", '// use tmux for everything'),
+            ("resume/discover.sh", "tmux unknown-command"),
+            ("resume/tests.rs", 'println!("tmux");'),
+            ("other.rs", 'Self { executable: "tmux".into(), socket: String::new() }'),
+        ):
+            self.assertTrue(check_prohibited_names.prohibited_source_line("nebula_app/src/ssh_session/" + path, text))
+
     def test_truncated_unicode_hunk_context_preserves_added_source_checks(self) -> None:
         context = "managed generation 改变时，旧回调".encode("utf-8")[:-1]
         sample = "++" + check_prohibited_names.PROHIBITED_EXAMPLES[0]

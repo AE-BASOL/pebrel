@@ -238,6 +238,18 @@ def source_without_allowed_occurrences(path: str, text: str) -> str:
             text = pattern.sub("", text)
     for pattern in PROTOCOL_COMPATIBILITY_PATTERNS:
         text = pattern.sub("", text)
+    # The desktop SSH adapter owns the same typed endpoint contract as mobile.
+    # Strip exact interface fragments only; the remainder still goes through the gate.
+    if path == "nebula_app/src/ssh_session/resume.rs":
+        text = text.replace('executable: "tmux".into()', "")
+    if path == "nebula_app/src/ssh_session/resume/identity.rs":
+        text = re.sub(r'\bcommand == "(?:tmux|tmux:)"', "", text)
+        text = text.replace('command.ends_with("/tmux")', "")
+    if path == "nebula_app/src/ssh_session/resume/discover.sh":
+        text = re.sub(r'\$3 == "(?:tmux|tmux:)"', "", text)
+        text = text.replace(r"/\/tmux$/", "").replace(r"\/tmux\)$/", "")
+    if path == "nebula_app/src/ssh_session/resume/tests.rs":
+        text = re.sub(r'(?<=\\n)[0-9]+ pts/[0-9]+ tmux: client(?=\\n)', "", text)
     return mobile_reference_remainder(path, text)
 
 
