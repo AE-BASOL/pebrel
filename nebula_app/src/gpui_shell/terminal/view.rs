@@ -27,6 +27,7 @@ mod pointer;
 mod program_status;
 mod reading;
 mod runtime;
+mod session_failure;
 mod ssh_reconnect;
 mod startup;
 mod startup_command;
@@ -87,6 +88,16 @@ const SELECTION_SCROLL_STEP: f32 = 20.0;
 /// 「刚成功」的对勾停留多久再沉降为圆点。看门狗按 1Hz 复核，所以实际停留是
 /// 这个值到 +1s；取 1.2s 是为了让它至少跨过一个复核点，不会一闪就没。
 pub(super) const COMPLETION_FLASH: std::time::Duration = std::time::Duration::from_millis(1200);
+
+/// 远端回合停滞对账的阈值：hook 权威在场的回合静默这么久、且屏幕连续两拍是
+/// agent 自家的同一形态，才允许双向对账（见
+/// `ai_hook::lifecycle::AgentActivity::reconcile_stalled_turn`）：两拍 idle
+/// 提示符把回合收敛为结束；两拍转圈把丢了点火事件（UserPromptSubmit/权限
+/// 答复在远端 bridge 丢失）的回合从 Done/Blocked 拉回 Working。这是远端的
+/// 第二重证据——本地有进程树对账，SSH/WSL 没有进程可见性，hook 一旦在远端
+/// bridge 丢失，回合会钉死在丢失前的状态。权限等待屏是 Blocked 检测、不参与
+/// 对账；真正的防线是「稳定的屏幕形态」而非纯计时。
+pub(super) const REMOTE_TURN_STALL: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// 一次自动回滚该滚几行：指针在网格上方为正（往回滚历史）、下方为负，网格
 /// 内为 0。贴边即 1 行，之后每远离 `SELECTION_SCROLL_STEP` 像素加一档。
@@ -212,6 +223,8 @@ pub enum TerminalViewEvent {
     RequestClose,
     /// 失败后在当前分屏叶原位重建同一 SSH 目标。
     RetrySsh(String),
+    /// A failed local session needs an explicit choice of a working shell.
+    ChooseShell,
     /// Ctrl+滚轮改了终端字号：宿主应对所有 pane 热应用并写盘。
     FontSizeChanged,
     /// BEL（`^G`）。后台 tab 记铃点；本 tab 的闪烁/声音由视图自己处理。
@@ -251,6 +264,7 @@ pub enum TerminalLaunch {
         /// Remote cwd inherited by duplicate-tab. `None` starts in the
         /// account's ordinary login directory.
         cwd: Option<String>,
+        resume_target: Option<crate::ssh_session::ResumeTarget>,
     },
 }
 
@@ -417,6 +431,7 @@ pub struct TerminalView {
     pub(super) last_ai_session_probe: Option<std::time::Instant>,
     error: Option<String>,
     exited: Option<String>,
+    retain_failed_session: bool,
     /// 滚动条拖拽中：按下时记下的「指针在拇指内的 y 偏移」，拖动全程据此
     /// 反算 `display_offset`，拇指不会在按下那一刻跳到指针中心。
     scrollbar_drag: Option<f32>,
@@ -539,11 +554,10 @@ impl TerminalView {
         typography::effective_cell_width(raw_width, self.cell_width_mode, scale, self.font_offset_x)
     }
 
-    pub(super) fn line_height_for_metrics(&self, natural_height: f32, scale: f32) -> Pixels {
-        typography::line_height_for_view(
-            self.font_size,
+    pub(super) fn line_height_at_scale(&self, scale: f32) -> Pixels {
+        typography::effective_line_height_with_theme(
+            self.font_size.as_f32(),
             self.line_height_multiplier,
-            natural_height,
             self.font_offset_y,
             scale,
         )
@@ -715,6 +729,7 @@ impl TerminalView {
                 self.write_bytes(formatter(self.window_size).into_bytes());
             },
             TermEvent::ChildExit(code) => {
+                self.retain_failed_session |= !code.success() && self.local_startup_unconfirmed();
                 let message = crate::gpui_shell::config::ui_language(cx).format(
                     crate::i18n::Message::TerminalProcessExited,
                     &[("code", &format!("{code:?}"))],
@@ -723,6 +738,7 @@ impl TerminalView {
             },
             TermEvent::PtyFailure(reason) => {
                 self.pty_failed = true;
+                self.retain_failed_session |= self.ssh_destination.is_none();
                 let message = crate::gpui_shell::config::ui_language(cx)
                     .format(crate::i18n::Message::TerminalPtyFailure, &[("error", &reason)]);
                 self.mark_exited(message, cx);
@@ -745,11 +761,25 @@ impl TerminalView {
                     cx.emit(TerminalViewEvent::TitleChanged);
                     cx.notify();
                 }
+                // 无集成的嵌套交互 shell（Cygwin fish、MSYS bash…）没有
+                // 133;D 完成边：Enter 提交靠弱推断标记运行中。OSC 7 随这类
+                // shell 的每次提示符渲染到达，是「回到提示符」的候选证据——
+                // 但 OSC 7 本身只是 cwd 信号，运行中的命令同样能发它
+                // （`bash -c 'printf OSC7; sleep 60'`）。清运行态必须等进程树
+                // 证据：pane 进程树里只剩交互 shell（无命令子进程）才算回到
+                // 提示符；证据在途期间维持运行态。带集成的 shell 先收到
+                // 133;D，这条弱边只是兜底；hook 拥有的 agent 会话不走它。
+                // SSH pane 的进程树在远端，本地看不见命令子进程——该形态
+                // 维持提示符渲染推断（远端进程可见性是已知边界，见 note）。
+                if self.command_running
+                    && !self.command_running_disproved
+                    && !self.agent_activity.hook_seen()
+                {
+                    self.probe_osc7_prompt_evidence(cx);
+                }
             },
-            TermEvent::InlineImage { data, abs_line, width, height } => {
-                let cell_height = f32::from(self.window_size.cell_height.max(1));
-                let row_span = (height / cell_height).ceil().max(1.0) as usize;
-                match self.inline_images.enqueue(data, abs_line, width, height, row_span) {
+            TermEvent::InlineImage { data, placement } => {
+                match self.inline_images.enqueue(data, placement) {
                     Ok(()) => self.drive_inline_image_decode(cx),
                     Err(error) => log::warn!("terminal image dropped: {error}"),
                 }
@@ -1691,7 +1721,9 @@ impl Render for TerminalView {
                     }
                 }
             }
-            if let Some(exited) = &self.exited {
+            if let Some(exited) = &self.exited
+                && !self.local_session_failed()
+            {
                 root = root.child(
                     div()
                         .absolute()
@@ -1705,6 +1737,9 @@ impl Render for TerminalView {
                         .child(exited.clone()),
                 );
             }
+        }
+        if self.local_session_failed() {
+            root = root.child(self.session_failure_banner(cx));
         }
         if self.session.is_some() {
             root = root.child(self.reading_chrome(cx));
