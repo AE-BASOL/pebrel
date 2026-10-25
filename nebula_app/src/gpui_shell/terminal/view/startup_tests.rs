@@ -1023,6 +1023,36 @@ fn review_regression_saved_identity_without_a_resume_command_is_not_live(cx: &mu
 }
 
 #[gpui::test]
+fn structural_layout_during_startup_commits_without_the_window_grace(cx: &mut TestAppContext) {
+    let (view, window, receiver) = open(cx);
+    window.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            view.mark_structural_resize();
+            view.set_layout(
+                point(px(0.0), px(0.0)),
+                px(10.0),
+                px(20.0),
+                size(px(1200.0), px(700.0)),
+                1.0,
+                cx,
+            );
+        });
+    });
+    let sizes: Vec<_> = receiver
+        .try_iter()
+        .filter_map(|message| match message {
+            Msg::Resize(size) => Some((size.num_cols, size.num_lines)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sizes, [(120, 35)], "explicit layout precedes the next input immediately");
+    window.run_until_parked();
+    window.executor().advance_clock(TerminalView::STARTUP_GRID_GRACE);
+    window.run_until_parked();
+    assert!(!receiver.try_iter().any(|message| matches!(message, Msg::Resize(_))));
+}
+
+#[gpui::test]
 fn review_regression_quiet_startup_and_maximize_deliver_the_latest_pty_size(
     cx: &mut TestAppContext,
 ) {
