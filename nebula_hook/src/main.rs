@@ -196,9 +196,14 @@ fn main() {
     {
         let _ = std::io::stdout().lock().write_all(b"{\"continue\":true}\n");
     }
-    // Antigravity parses a hook's stdout as its decision; an empty object decides nothing.
+    // Stop requires a decision; observing completion must never restart the agent.
     if args.first().is_some_and(|source| source == "antigravity") {
-        let _ = std::io::stdout().lock().write_all(b"{}\n");
+        let response: &[u8] = if native_event(&args) == Some("done") {
+            b"{\"decision\":\"stop\"}\n"
+        } else {
+            b"{}\n"
+        };
+        let _ = std::io::stdout().lock().write_all(response);
     }
 }
 

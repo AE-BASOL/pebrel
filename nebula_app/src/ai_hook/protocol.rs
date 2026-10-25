@@ -113,7 +113,15 @@ pub(super) fn parse_envelope(bytes: &[u8]) -> Option<AiHookEvent> {
     );
     let occurred_at_ms =
         context_u64(&payload, &["occurred_at_ms", "occurredAtMs", "occurred_at", "timestamp"]);
-    let background_tasks = background_task_summary(&payload);
+    let background_tasks = if source == "antigravity" {
+        // fullyIdle is a presence signal, not an exact background-task count.
+        payload.get("fullyIdle").and_then(Value::as_bool).map(|idle| super::AiBackgroundTasks {
+            active: u32::from(!idle),
+            total: u32::from(!idle),
+        })
+    } else {
+        background_task_summary(&payload)
+    };
     let permission_mode = context_string(&payload, &["permission_mode", "permissionMode"])
         .as_deref()
         .and_then(AiPermissionMode::parse);

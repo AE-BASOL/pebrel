@@ -117,7 +117,7 @@ pub fn capabilities_for(source: &str) -> AiHookCapabilities {
             lifecycle: true,
             attention_events: false,
             attention_context: false,
-            background_tasks: false,
+            background_tasks: source == "antigravity",
             bridge_sequence: false,
             serialized_delivery: false,
         },

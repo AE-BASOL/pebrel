@@ -58,13 +58,17 @@ pub(super) fn outcome(source: &str, event: &str, payload: &Value) -> AiTurnOutco
     }
 }
 
-/// The reference does not enumerate `terminationReason`; these values come from captures.
+/// Current documented reasons plus the older captured `NO_TOOL_CALL` spelling.
 fn antigravity_outcome(payload: &Value) -> AiTurnOutcome {
     if payload.get("error").and_then(Value::as_str).is_some_and(|error| !error.is_empty()) {
         return AiTurnOutcome::Failed;
     }
     match payload.get("terminationReason").and_then(Value::as_str) {
-        Some("NO_TOOL_CALL" | "model_stop") => AiTurnOutcome::Succeeded,
+        Some("NO_TOOL_CALL" | "model_stop")
+            if payload.get("fullyIdle").and_then(Value::as_bool).is_some() =>
+        {
+            AiTurnOutcome::Succeeded
+        },
         Some("max_steps_exceeded") => AiTurnOutcome::Incomplete,
         Some("error") => AiTurnOutcome::Failed,
         _ => AiTurnOutcome::Unknown,
@@ -178,12 +182,29 @@ mod tests {
         assert_eq!(foreign.session_id, None);
         for (body, outcome) in [
             (r#"{"terminationReason":"NO_TOOL_CALL","fullyIdle":true}"#, AiTurnOutcome::Succeeded),
-            (r#"{"terminationReason":"model_stop"}"#, AiTurnOutcome::Succeeded),
+            (r#"{"terminationReason":"model_stop","fullyIdle":true}"#, AiTurnOutcome::Succeeded),
+            (r#"{"terminationReason":"model_stop"}"#, AiTurnOutcome::Unknown),
             (r#"{"terminationReason":"max_steps_exceeded"}"#, AiTurnOutcome::Incomplete),
             (r#"{"terminationReason":"model_stop","error":"quota"}"#, AiTurnOutcome::Failed),
             (r#"{"terminationReason":"user_cancelled"}"#, AiTurnOutcome::Unknown),
         ] {
             assert_eq!(parse("done", body).unwrap().turn_outcome, outcome, "{body}");
+        }
+    }
+    #[test]
+    fn antigravity_background_work_defers_completion_until_fully_idle() {
+        use crate::ai_agents::AgentStatus;
+        use crate::ai_hook::lifecycle::AgentActivity;
+        let mut activity = AgentActivity::default();
+        for (idle, expected) in [(false, AgentStatus::Working), (true, AgentStatus::Done)] {
+            let wire = format!(
+                "nebula-hook/1 source=antigravity pane=5 event=done\n{{\"conversationId\":\"conv-1\",\"terminationReason\":\"model_stop\",\"fullyIdle\":{idle}}}"
+            );
+            let event = parse_envelope(wire.as_bytes()).unwrap();
+            assert!(event.capabilities().background_tasks);
+            assert_eq!(event.active_background_tasks(), u32::from(!idle));
+            assert!(activity.apply_hook(&event));
+            assert_eq!(activity.status(), expected);
         }
     }
 }

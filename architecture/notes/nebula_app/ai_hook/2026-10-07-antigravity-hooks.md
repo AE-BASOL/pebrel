@@ -67,3 +67,5 @@ None.
 
 Antigravity documents `terminationReason`, a permission event or session end; fires tool
 events; or changes the global hook path or group schema.
+
+Idle evidence and Stop output superseded by [background work](2026-10-25-antigravity-background-work.md).
