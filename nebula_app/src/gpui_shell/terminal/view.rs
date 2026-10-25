@@ -221,6 +221,7 @@ pub enum TerminalLaunch {
         /// Remote cwd inherited by duplicate-tab. `None` starts in the
         /// account's ordinary login directory.
         cwd: Option<String>,
+        resume_target: Option<crate::ssh_session::ResumeTarget>,
     },
 }
 

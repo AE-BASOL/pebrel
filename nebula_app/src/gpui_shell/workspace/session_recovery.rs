@@ -160,6 +160,7 @@ impl NebulaWorkspace {
                     crate::gpui_shell::terminal::view::TerminalLaunch::Ssh {
                         destination: host.clone(),
                         cwd: (!cwd.is_empty()).then(|| cwd.clone()),
+                        resume_target: None,
                     }
                 },
                 _ => Self::terminal_launch_from_session(&launch_session, local_cwd),

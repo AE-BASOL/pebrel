@@ -99,7 +99,7 @@ impl TerminalView {
             TerminalLaunch::Local { cwd, .. } => {
                 cwd.as_ref().map(|path| path.to_string_lossy().into_owned()).unwrap_or_default()
             },
-            TerminalLaunch::Ssh { destination, cwd } => {
+            TerminalLaunch::Ssh { destination, cwd, .. } => {
                 cwd.clone().unwrap_or_else(|| destination.clone())
             },
         };
@@ -182,14 +182,14 @@ impl TerminalView {
                     spawned,
                 )
             },
-            TerminalLaunch::Ssh { destination, cwd } => (
+            TerminalLaunch::Ssh { destination, cwd, resume_target } => (
                 Some(destination.clone()),
                 destination.clone(),
                 None,
                 crate::display::SuggestEnv::Ssh { destination: destination.clone() },
                 None,
                 crate::session::LaunchSession::Ssh { host: destination.clone() },
-                session::spawn_ssh(destination, cwd, initial, term_config),
+                session::spawn_ssh(destination, cwd, resume_target, initial, term_config),
             ),
         };
         let is_ssh = ssh_destination.is_some();
