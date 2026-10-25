@@ -237,6 +237,7 @@ pub enum RuntimeTaskState {
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeAgentStateSource {
     Hook,
+    Osc7501,
     Screen,
     Process,
 }
@@ -842,6 +843,7 @@ pub enum RuntimeCommand {
         lines: i16,
         column: u16,
         row: u16,
+        application_only: bool,
     },
     Procs {
         window_id: Option<u64>,
@@ -922,6 +924,11 @@ pub struct RuntimeDispatch {
 }
 
 impl RuntimeDispatch {
+    #[cfg(all(test, feature = "gpui-test-support"))]
+    pub(crate) fn test(command: RuntimeCommand) -> (Arc<Self>, Receiver<Result<Value, ApiError>>) {
+        Self::new(command)
+    }
+
     fn new(command: RuntimeCommand) -> (Arc<Self>, Receiver<Result<Value, ApiError>>) {
         let (reply, receiver) = mpsc::sync_channel(1);
         (Arc::new(Self { command, reply }), receiver)

@@ -6,10 +6,12 @@ use std::sync::mpsc::Receiver;
 
 // Keep the terminal entity off the layout tree so tests control each viewport
 // and PTY event explicitly, while using real GPUI tasks and terminal parsing.
-struct Surface;
+struct Surface {
+    focus: FocusHandle,
+}
 impl Render for Surface {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div().size_full()
+        div().id("terminal-test-surface").size_full().track_focus(&self.focus)
     }
 }
 
@@ -20,6 +22,7 @@ impl TerminalView {
         self.session = Some(session);
         self.error = None;
         self.exited = None;
+        self.retain_failed_session = false;
         self.exec_context = None;
         self.suggest.suggest_env = crate::display::SuggestEnv::Wsl { distro: "Debian".into() };
         receiver
@@ -89,8 +92,11 @@ fn open_at(
             )
         });
         let receiver = view.update(cx, |view, _| view.install_completion_test_session());
+        // 测试直接发送按键前也需聚焦终端；只挂接焦点，不让真实布局改变手动设置的网格。
+        let focus = view.read(cx).focus_handle.clone();
+        window.focus(&focus, cx);
         result = Some((view, receiver));
-        Root::new(cx.new(|_| Surface), window, cx)
+        Root::new(cx.new(|_| Surface { focus }), window, cx)
     });
     let (view, receiver) = result.unwrap();
     (view, window, receiver)
@@ -114,10 +120,51 @@ fn refresh_completion_from_grid(view: &mut TerminalView, cx: &mut Context<Termin
             &view.suggest.line_buf,
             &view.suggest.suggest_env,
         )
+        .or_else(|| {
+            view.suggest
+                .completion_popup_requested
+                .then(|| view.suggest.completion_prefix_from_raw_grid(&term, cursor))
+                .flatten()
+        })
         .map(|line| line.input);
         (line, Some((cursor.line.0 as usize, cursor.column.0)))
     };
     view.refresh_suggestion_from_snapshot(line, anchor, cx);
+}
+
+#[gpui::test]
+fn command_history_clear_invalidates_other_windows_and_cancels_pending_results(
+    cx: &mut TestAppContext,
+) {
+    use crate::gpui_shell::completion_history::ClearState;
+    let (first, window, _first_input) = open(cx);
+    window.run_until_parked();
+    first.update(window, |view, _| {
+        view.suggest.begin_completion_query("old query".into(), false);
+        view.suggest.suggestion = "old recorded command".into();
+        view.suggest.completion_popup_requested = true;
+    });
+    let (second, window, _second_input) = open(cx);
+    window.run_until_parked();
+    let cancellation = second.update(window, |view, cx| {
+        view.ghost_enabled = true;
+        view.completion_style = crate::display::CompletionStyle::Hybrid;
+        view.refresh_suggestion_from_snapshot(Some("systemc".into()), Some((0, 7)), cx);
+        let cancellation = view.suggestion_task.as_ref().unwrap().cancellation();
+        cx.set_global(ClearState::Finished(Ok(())));
+        cancellation
+    });
+    window.run_until_parked();
+    assert!(cancellation.is_cancelled());
+    for view in [first, second] {
+        view.read_with(window, |view, _| {
+            assert!(view.suggestion_task.is_none());
+            assert!(view.suggest.suggestion.is_empty());
+            assert!(!view.suggest.completion_query_matches("old query"));
+            assert!(view.suggest.completion_items.is_empty());
+            assert!(!view.suggest.completion_popup_requested);
+        });
+    }
 }
 
 #[gpui::test]
@@ -543,6 +590,138 @@ fn issue_358_history_popup_matches_a_command_prefix_without_a_trailing_space(
 }
 
 #[gpui::test]
+fn hybrid_tab_opens_history_behind_native_prediction_without_writing(cx: &mut TestAppContext) {
+    let (view, window, receiver) = open(cx);
+    view.update(window, |view, cx| {
+        let scope = crate::nebula_history::HistoryScope::Wsl("issue358-prediction".into());
+        view.suggest.suggest_env = crate::display::SuggestEnv::Shell { scope };
+        for command in ["cls;calc", "cls;notepad"] {
+            feed(view, format!("\x1b[2J\x1b[H❯ {command}").as_bytes());
+            view.commit_line(cx);
+            view.process_event(Event::CommandStart, cx);
+            view.process_event(Event::CommandDone { exit_code: Some(0) }, cx);
+        }
+        view.ghost_enabled = true;
+        view.completion_style = crate::display::CompletionStyle::Hybrid;
+        feed(view, "\x1b[2J\x1b[H❯ ".as_bytes());
+        refresh_completion_from_grid(view, cx);
+        crate::display::nebula_input_text(&mut view.suggest, "cls");
+        feed(view, b"cls\x1b[90m;notepad\x1b[0m\x1b[8D");
+        refresh_completion_from_grid(view, cx);
+        assert!(view.suggest.screen_line.is_empty(), "normal capture rejects shell prediction");
+    });
+    window.update(|window, cx| {
+        view.update(cx, |view, cx| view.on_terminal_tab(&TerminalTab, window, cx));
+    });
+    window.run_until_parked();
+    view.update(window, |view, cx| {
+        assert_eq!(view.suggest.screen_line, "cls");
+        assert_eq!(view.suggest.completion_items.len(), 2);
+        assert!(receiver.try_iter().all(|message| !matches!(message, Msg::Input(_))));
+        refresh_completion_from_grid(view, cx);
+        assert!(view.suggest.completion_popup_requested, "the next frame keeps the list open");
+    });
+    window.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.on_key_down(
+                &KeyDownEvent {
+                    keystroke: gpui::Keystroke::parse("enter").unwrap(),
+                    is_held: false,
+                    prefer_character_input: false,
+                },
+                window,
+                cx,
+            );
+        });
+    });
+    let input: Vec<u8> = receiver
+        .try_iter()
+        .filter_map(|message| match message {
+            Msg::Input(bytes) => Some(bytes.into_owned()),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    assert_eq!(input, b";notepad", "acceptance excludes the prediction and never submits");
+}
+
+#[gpui::test]
+fn hybrid_tab_with_a_native_editor_queries_it_instead_of_the_mirror(cx: &mut TestAppContext) {
+    let (view, window, receiver) = open(cx);
+    view.update(window, |view, cx| {
+        view.ghost_enabled = true;
+        view.completion_style = crate::display::CompletionStyle::Hybrid;
+        view.completion_editor.advertise("fixture");
+        feed(view, "❯ ".as_bytes());
+        view.session.as_ref().unwrap().term.lock().nebula_add_prompt_mark();
+        refresh_completion_from_grid(view, cx);
+        crate::display::nebula_input_text(&mut view.suggest, "cls");
+        feed(view, b"cls\x1b[90m;notepad\x1b[0m\x1b[8D");
+        refresh_completion_from_grid(view, cx);
+        {
+            let term = view.session.as_ref().unwrap().term.lock();
+            let cursor = term.grid().cursor.point;
+            assert!(view.suggest.completion_prefix_from_raw_grid(&term, cursor).is_some());
+        }
+    });
+    window.update(|window, cx| {
+        view.update(cx, |view, cx| view.on_terminal_tab(&TerminalTab, window, cx));
+    });
+    view.update(window, |view, _| {
+        assert!(view.completion_editor.is_querying());
+        assert!(view.suggest.screen_line.is_empty(), "the mirror does not answer first");
+        assert_eq!(
+            receiver.try_iter().filter(|message| matches!(message, Msg::Input(_))).count(),
+            1,
+            "only the native editor query reaches the PTY"
+        );
+    });
+    window.update(|window, cx| {
+        view.update(cx, |view, cx| view.on_terminal_tab(&TerminalTab, window, cx));
+    });
+    view.update(window, |view, _| {
+        assert!(view.completion_editor.is_querying());
+        assert!(receiver.try_iter().all(|message| !matches!(message, Msg::Input(_))));
+    });
+}
+
+#[gpui::test]
+fn hybrid_tab_yields_after_cursor_edit_or_history_even_when_typed_prefix_matches(
+    cx: &mut TestAppContext,
+) {
+    for key in ["home", "up", "ctrl-r"] {
+        let (view, window, receiver) = open(cx);
+        window.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.ghost_enabled = true;
+                view.completion_style = crate::display::CompletionStyle::Hybrid;
+                crate::display::nebula_input_text(&mut view.suggest, "existing");
+                feed(view, "❯ existing".as_bytes());
+                refresh_completion_from_grid(view, cx);
+                view.on_key_down(
+                    &KeyDownEvent {
+                        keystroke: gpui::Keystroke::parse(key).unwrap(),
+                        is_held: false,
+                        prefer_character_input: false,
+                    },
+                    window,
+                    cx,
+                );
+                receiver.try_iter().for_each(drop);
+                // A frame before the control key echoes must not restore trust.
+                refresh_completion_from_grid(view, cx);
+                crate::display::nebula_input_text(&mut view.suggest, "cls");
+                feed(view, "\x1b[2J\x1b[H❯ clsexisting\x1b[8D".as_bytes());
+                refresh_completion_from_grid(view, cx);
+                view.on_terminal_tab(&TerminalTab, window, cx);
+                assert!(!view.suggest.completion_popup_requested, "{key} invalidates mirror trust");
+                assert!(receiver.try_iter().any(|message| matches!(message, Msg::Input(_))));
+            });
+        });
+    }
+}
+
+#[gpui::test]
 fn native_shell_suggestion_and_zellij_alternate_screen_keep_their_input(cx: &mut TestAppContext) {
     let (view, window, receiver) = open(cx);
     window.update(|window, cx| {
@@ -841,6 +1020,36 @@ fn review_regression_saved_identity_without_a_resume_command_is_not_live(cx: &mu
             assert!(view.running_program.is_none());
         })
     });
+}
+
+#[gpui::test]
+fn structural_layout_during_startup_commits_without_the_window_grace(cx: &mut TestAppContext) {
+    let (view, window, receiver) = open(cx);
+    window.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            view.mark_structural_resize();
+            view.set_layout(
+                point(px(0.0), px(0.0)),
+                px(10.0),
+                px(20.0),
+                size(px(1200.0), px(700.0)),
+                1.0,
+                cx,
+            );
+        });
+    });
+    let sizes: Vec<_> = receiver
+        .try_iter()
+        .filter_map(|message| match message {
+            Msg::Resize(size) => Some((size.num_cols, size.num_lines)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sizes, [(120, 35)], "explicit layout precedes the next input immediately");
+    window.run_until_parked();
+    window.executor().advance_clock(TerminalView::STARTUP_GRID_GRACE);
+    window.run_until_parked();
+    assert!(!receiver.try_iter().any(|message| matches!(message, Msg::Resize(_))));
 }
 
 #[gpui::test]
@@ -1315,7 +1524,7 @@ fn remote_scroll_reuses_mouse_alternate_screen_and_history_routing(cx: &mut Test
                 b"\x1b[?1000h\x1b[?1006h",
             );
             receiver.try_iter().for_each(drop);
-            view.runtime_scroll(2, 3, 4, window, cx).unwrap();
+            view.runtime_scroll(2, 3, 4, false, window, cx).unwrap();
             let bytes: Vec<u8> = receiver
                 .try_iter()
                 .filter_map(|m| match m {
@@ -1329,7 +1538,7 @@ fn remote_scroll_reuses_mouse_alternate_screen_and_history_routing(cx: &mut Test
                 &mut *view.session.as_ref().unwrap().term.lock(),
                 b"\x1b[?1000l\x1b[?1006l\x1b[?1049h\x1b[?1007h",
             );
-            view.runtime_scroll(-2, 3, 4, window, cx).unwrap();
+            view.runtime_scroll(-2, 3, 4, true, window, cx).unwrap();
             let bytes: Vec<u8> = receiver
                 .try_iter()
                 .filter_map(|m| match m {
@@ -1343,10 +1552,17 @@ fn remote_scroll_reuses_mouse_alternate_screen_and_history_routing(cx: &mut Test
             for _ in 0..40 {
                 parser.advance(&mut *view.session.as_ref().unwrap().term.lock(), b"history\r\n");
             }
-            view.runtime_scroll(3, 3, 4, window, cx).unwrap();
+            // 排队中的手机滚轮遇到应用已退出备用屏，不能移动 PC 历史。
+            view.runtime_scroll(3, 3, 4, true, window, cx).unwrap();
+            assert_eq!(view.session.as_ref().unwrap().term.lock().grid().display_offset(), 0);
+            parser.advance(&mut *view.session.as_ref().unwrap().term.lock(), b"\x1b[?1000h");
+            view.runtime_scroll(3, 3, 4, true, window, cx).unwrap();
+            assert!(receiver.try_iter().all(|m| !matches!(m, Msg::Input(_))));
+            parser.advance(&mut *view.session.as_ref().unwrap().term.lock(), b"\x1b[?1000l");
+            view.runtime_scroll(3, 3, 4, false, window, cx).unwrap();
             assert_eq!(view.session.as_ref().unwrap().term.lock().grid().display_offset(), 3);
             assert!(receiver.try_iter().all(|m| !matches!(m, Msg::Input(_))));
-            assert!(view.runtime_scroll(1, 400, 0, window, cx).is_err());
+            assert!(view.runtime_scroll(1, 400, 0, false, window, cx).is_err());
         });
     });
 }

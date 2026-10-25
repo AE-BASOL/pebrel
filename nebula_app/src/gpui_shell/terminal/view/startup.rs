@@ -95,11 +95,11 @@ impl TerminalView {
             cell_width: (cell_w.as_f32() * scale).round().max(1.0) as u16,
             cell_height: (line_h.as_f32() * scale).round().max(1.0) as u16,
         };
-        let initial_cwd = match &launch {
+        let mut initial_cwd = match &launch {
             TerminalLaunch::Local { cwd, .. } => {
                 cwd.as_ref().map(|path| path.to_string_lossy().into_owned()).unwrap_or_default()
             },
-            TerminalLaunch::Ssh { destination, cwd } => {
+            TerminalLaunch::Ssh { destination, cwd, .. } => {
                 cwd.clone().unwrap_or_else(|| destination.clone())
             },
             TerminalLaunch::Serial { .. } => String::new(),
@@ -152,6 +152,9 @@ impl TerminalView {
                     },
                 );
                 let options = session::local_options(spawn_shell, pane_id, cwd);
+                if let Some(cwd) = &options.working_directory {
+                    initial_cwd = cwd.to_string_lossy().into_owned();
+                }
                 let history_cwd = startup_history_directory(&options, &suggest_env);
                 completion_cwd = history_cwd
                     .as_ref()
@@ -181,14 +184,14 @@ impl TerminalView {
                     spawned,
                 )
             },
-            TerminalLaunch::Ssh { destination, cwd } => (
+            TerminalLaunch::Ssh { destination, cwd, resume_target } => (
                 Some(destination.clone()),
                 destination.clone(),
                 None,
                 crate::display::SuggestEnv::Ssh { destination: destination.clone() },
                 None,
                 crate::session::LaunchSession::Ssh { host: destination.clone() },
-                session::spawn_ssh(destination, cwd, initial, term_config),
+                session::spawn_ssh(destination, cwd, resume_target, initial, term_config),
             ),
             TerminalLaunch::Serial { destination } => (
                 None,
@@ -238,14 +241,16 @@ impl TerminalView {
                 (Some(session), None)
             },
             Err(err) => {
-                let what = if is_ssh {
-                    "SSH 会话启动失败"
+                let message = if is_ssh {
+                    crate::i18n::Message::TerminalSshStartFailed
                 } else if is_serial {
-                    "串口打开失败"
+                    crate::i18n::Message::TerminalSerialStartFailed
                 } else {
-                    "PTY 启动失败"
+                    crate::i18n::Message::TerminalPtyStartFailed
                 };
-                (None, Some(format!("{what}: {err}")))
+                let error = crate::gpui_shell::config::ui_language(cx)
+                    .format(message, &[("error", &err.to_string())]);
+                (None, Some(error))
             },
         };
 
@@ -272,6 +277,7 @@ impl TerminalView {
                 }
             }),
             cx.on_focus_out(&focus_handle, window, |view, _event, _window, cx| {
+                view.path_drop.invalidate();
                 if view.cursor_pane_focused {
                     view.cursor_pane_focused = false;
                     view.restart_cursor_blink(cx);
@@ -280,6 +286,11 @@ impl TerminalView {
         ];
 
         let mut view = Self {
+            _history_subscription: cx
+                .observe_global::<crate::gpui_shell::completion_history::ClearState>(|view, cx| {
+                    view.invalidate_completion_history(cx);
+                }),
+            native_results: Default::default(),
             pane_id,
             session,
             focus_handle,
@@ -288,6 +299,7 @@ impl TerminalView {
             effect: None,
             answers: crate::assistant_answer::AnswerInbox::default(),
             answer_reader: None,
+            reading: super::super::reading::ReadingState::default(),
             confirmation: super::super::confirmation::ConfirmationState::default(),
             font: mono_font(&families[0], FontWeight::NORMAL, FontStyle::Normal, ligatures),
             font_bold: mono_font(&families[1], FontWeight::BOLD, FontStyle::Normal, ligatures),
@@ -316,6 +328,7 @@ impl TerminalView {
             command_running_disproved: false,
             command_started: None,
             last_process_probe: None,
+            activity_probe_pending: false,
             prompt_process_probe: None,
             prompt_input_epoch: 0,
             native_prompt_seen: false,
@@ -324,6 +337,9 @@ impl TerminalView {
             active_run: None,
             last_run: None,
             agent_activity: Default::default(),
+            program_status: None,
+            program_status_seen: false,
+            pty_failed: false,
             progress: crate::taskbar::TaskProgress::None,
             pending_runtime_submit: None,
             pending_shell_command: None,
@@ -331,6 +347,7 @@ impl TerminalView {
             session_launch,
             inline_images: super::super::inline_image::InlineImageStore::default(),
             image_paste: image_paste::ImagePasteState::default(),
+            native_clipboard: native_clipboard::NativeClipboard::default(),
             path_drop: path_drop::PathDropState::default(),
             ssh_destination,
             port_forwards: Vec::new(),
@@ -338,6 +355,7 @@ impl TerminalView {
             ssh_label: None,
             exec_context,
             ssh_stage: None,
+            ssh_retry_pending: false,
             ssh_connect: None,
             ssh_connect_last_step: std::time::Instant::now(),
             ai_session: None,
@@ -347,6 +365,7 @@ impl TerminalView {
             last_ai_session_probe: None,
             error,
             exited: None,
+            retain_failed_session: false,
             scrollbar_drag: None,
             scrollbar_hovered: false,
             scrollbar_visibility: cx
@@ -377,9 +396,13 @@ impl TerminalView {
             cursor_visible: true,
             cursor_animation: Default::default(),
             cursor_blink_epoch: 0,
+            cursor_blink_last_activity: std::time::Instant::now(),
+            cursor_blink_paused: false,
             cursor_window_active,
             cursor_pane_focused,
             output_visible: true,
+            last_output_frame: None,
+            output_trailing_frame: None,
             _cursor_blink_subscriptions: cursor_blink_subscriptions,
             default_cursor_style,
             suggest: {
