@@ -34,6 +34,8 @@ pub(crate) struct AgentActivity {
     coverage: HookCoverage,
     owner: Option<Owner>,
     idle_samples: u8,
+    attention_absences: u8,
+    working_before_attention: Option<(AgentStatusSource, Option<String>)>,
     turn_observed: bool,
     pending_submit: bool,
     /// A completion-only hook latches its result until an idle screen or an
@@ -54,6 +56,8 @@ impl Default for AgentActivity {
             coverage: HookCoverage::None,
             owner: None,
             idle_samples: 0,
+            attention_absences: 0,
+            working_before_attention: None,
             turn_observed: false,
             pending_submit: false,
             screen_armed: true,
@@ -113,6 +117,7 @@ impl AgentActivity {
     /// A concrete runtime submission or accepted confirmation starts work. The
     /// previous input frame must not manufacture a completion before work starts.
     pub fn submitted(&mut self) {
+        self.working_before_attention = None;
         self.status = AgentStatus::Working;
         self.source = AgentStatusSource::Process;
         self.rule = None;
@@ -136,6 +141,7 @@ impl AgentActivity {
     pub fn input_sent(&mut self) {
         self.screen_armed = true;
         self.idle_samples = 0;
+        self.attention_absences = 0;
     }
 
     /// Check ownership before the ordering gate records this event. An ignored
@@ -267,6 +273,8 @@ impl AgentActivity {
         self.source = AgentStatusSource::Hook;
         self.rule = None;
         self.idle_samples = 0;
+        self.attention_absences = 0;
+        self.working_before_attention = None;
         if event.kind != AiHookKind::SessionStart {
             self.pending_submit = false;
         }
@@ -309,11 +317,35 @@ impl AgentActivity {
         true
     }
 
-    /// No match resets consecutive-idle evidence. Full lifecycle hooks never
-    /// consult screen rules, even if the current frame contains a real old form.
+    /// Only screen-owned attention expires when its form disappears. No match
+    /// cannot complete a turn or retract a hook-owned permission request.
     pub fn observe_screen(&mut self, detection: Option<Detection>) -> bool {
         if !self.allows_screen() {
             return false;
+        }
+        if self.status == AgentStatus::Blocked && self.source == AgentStatusSource::Screen {
+            if detection.as_ref().is_some_and(|value| value.status == AgentStatus::Blocked) {
+                self.attention_absences = 0;
+            } else {
+                self.attention_absences = self.attention_absences.saturating_add(1);
+                let usable_working = detection.as_ref().is_some_and(|value| {
+                    value.status == AgentStatus::Working && self.coverage != HookCoverage::Turns
+                });
+                if self.attention_absences >= 3 && !usable_working {
+                    self.idle_samples = 0;
+                    self.attention_absences = 0;
+                    if let Some((source, rule)) = self.working_before_attention.take() {
+                        self.status = AgentStatus::Working;
+                        self.source = source;
+                        self.rule = rule;
+                    } else {
+                        self.status = AgentStatus::Unknown;
+                        self.source = AgentStatusSource::Unknown;
+                        self.rule = None;
+                    }
+                    return true;
+                }
+            }
         }
         let Some(detection) = detection else {
             self.idle_samples = 0;
@@ -363,6 +395,10 @@ impl AgentActivity {
         if next == self.status {
             return false;
         }
+        self.attention_absences = 0;
+        self.working_before_attention = (next == AgentStatus::Blocked
+            && self.status == AgentStatus::Working)
+            .then(|| (self.source, self.rule.clone()));
         self.status = next;
         self.source = AgentStatusSource::Screen;
         self.rule = Some(detection.rule_id);
