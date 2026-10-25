@@ -119,6 +119,10 @@ impl NebulaWorkspace {
         active
     }
 
+    pub(super) fn pointer_drag_active(&self) -> bool {
+        self.tab_drag.is_some() || self.sidebar_resizing.is_some() || self.details_panel_resizing()
+    }
+
     /// 窗口级裸释放/移动监听（canvas 作为 paint 钩子注册 `Window::on_mouse_event`）：
     /// Windows 拖拽期间源窗口持有 OS capture，指针移到其它窗口后事件坐标落在
     /// viewport 之外，而根 capture 与罩层 on_mouse_up 都带 `hitbox.is_hovered`
@@ -126,17 +130,14 @@ impl NebulaWorkspace {
     /// 松手（#572 真机 trace 的「activated 后无任何 release 行」即此形状）。
     /// 裸监听不进门控：窗外 move 继续喂状态机（跨窗 dock 预览、Alt 锁存），
     /// Left mouse-up 一律交给 release_tab_drag_at——状态已被门控路径结算时
-    /// 为空操作，谁先到谁结算。
-    pub(super) fn render_tab_drag_global_capture(
-        &self,
-        cx: &Context<Self>,
-    ) -> impl gpui::IntoElement {
+    /// 为空操作，谁先到谁结算。侧栏宽度拖拽复用同一监听，窗外松手同样提交。
+    pub(super) fn render_pointer_drag_capture(&self, cx: &Context<Self>) -> impl gpui::IntoElement {
         let entity = cx.entity().downgrade();
         gpui::canvas(
             |_, _, _| (),
             move |_, _, window, cx| {
                 let Some(workspace) = entity.upgrade() else { return };
-                if workspace.read(cx).tab_drag.is_none() {
+                if !workspace.read(cx).pointer_drag_active() {
                     return;
                 }
                 let moves = entity.clone();
@@ -153,7 +154,11 @@ impl NebulaWorkspace {
                         return;
                     }
                     let Some(workspace) = moves.upgrade() else { return };
-                    workspace.update(cx, |this, cx| this.update_tab_drag(event, window, cx));
+                    workspace.update(cx, |this, cx| {
+                        this.update_left_sidebar_resize(event, window, cx);
+                        this.update_details_panel_resize(event, window, cx);
+                        this.update_tab_drag(event, window, cx);
+                    });
                 });
                 let ups = entity.clone();
                 window.on_mouse_event(move |event: &gpui::MouseUpEvent, phase, window, cx| {
@@ -164,7 +169,10 @@ impl NebulaWorkspace {
                     }
                     let Some(workspace) = ups.upgrade() else { return };
                     workspace.update(cx, |this, cx| {
-                        if this.tab_drag.is_none() {
+                        if this.finish_left_sidebar_resize(cx)
+                            | this.finish_details_panel_resize(cx)
+                        {
+                            cx.stop_propagation();
                             return;
                         }
                         if this.release_tab_drag_at(event.position, event.modifiers.alt, window, cx)
