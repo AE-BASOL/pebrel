@@ -2,7 +2,7 @@
 
 ## Status
 
-Implemented; native Canvas tests passed. Full emulator acceptance is pending.
+Implemented; native Canvas and full emulator acceptance passed.
 
 ## Context
 
@@ -60,8 +60,11 @@ passed 25 of 26 cases; its pause-emoji color test still inferred row boundaries
 from natural font height and sampled the following colored row. That test now
 measures the actual rendered row boundary using a distant background cell, while
 retaining all color, text-presentation, adjacent-letter and size assertions.
-The updated instrumentation test compiles locally; the full emulator rerun must
-pass before merging. Physical-device visual acceptance remains unverified.
+The corrected test and full emulator rerun passed in Actions run 40152856561:
+247 JVM tests and 26 device-instrumented tests, with no skips or failures. The
+verified universal Preview APK contains both arm64-v8a and x86_64 native payloads.
+This closes the sampling error without removing or relaxing any color assertion.
+Physical-device visual acceptance remains unverified.
 
 ## Supersedes
 
