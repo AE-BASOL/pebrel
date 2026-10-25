@@ -136,6 +136,124 @@ fn fallback_requires_consecutive_idle_and_work_before_a_completion() {
 }
 
 #[test]
+fn vanished_screen_form_restores_work_without_emitting_completion() {
+    let mut activity = AgentActivity::default();
+    activity.begin_command(true);
+    activity.observe_screen(screen(AgentStatus::Working));
+    let previous = (activity.source(), activity.rule().map(str::to_owned));
+    assert!(activity.observe_screen(screen(AgentStatus::Blocked)));
+    for _ in 0..2 {
+        assert!(!activity.observe_screen(None));
+        assert_eq!(activity.status(), AgentStatus::Blocked);
+    }
+    assert!(activity.observe_screen(None));
+    assert_eq!(activity.status(), AgentStatus::Working);
+    assert_eq!((activity.source(), activity.rule().map(str::to_owned)), previous);
+    assert_eq!(screen_notification(AgentStatus::Blocked, activity.status(), false), None);
+    assert!(!activity.observe_screen(None));
+    // Completion still needs its own consecutive idle evidence.
+    assert!(!activity.observe_screen(screen(AgentStatus::Idle)));
+    assert!(activity.observe_screen(screen(AgentStatus::Idle)));
+    assert_eq!(activity.status(), AgentStatus::Done);
+}
+
+#[test]
+fn claude_statusline_layout_cannot_latch_an_old_permission_form() {
+    let form = "Do you want to proceed?\n❯ 1. Yes\n2. No\nEsc to cancel · Tab to amend";
+    let working = "* Ideating… (12s · 2.3k tokens)\n────────\n❯\n────────\nproject status\ncontext status\nmodel status\naccount status";
+    let mut activity = AgentActivity::default();
+    activity.begin_command(true);
+    assert!(activity.observe_screen(crate::ai_agents::detect("claude", form)));
+    assert_eq!(activity.status(), AgentStatus::Blocked);
+    // A custom four-line footer can hide the prompt from the current idle rule.
+    assert!(crate::ai_agents::detect("claude", working).is_none());
+    for _ in 0..3 {
+        activity.observe_screen(crate::ai_agents::detect("claude", working));
+    }
+    assert_eq!(activity.status(), AgentStatus::Working);
+    assert_eq!(activity.source(), AgentStatusSource::Process);
+}
+
+#[test]
+fn renewed_form_evidence_restarts_attention_expiry() {
+    let mut activity = AgentActivity::default();
+    activity.begin_command(true);
+    activity.observe_screen(screen(AgentStatus::Blocked));
+    for _ in 0..5 {
+        activity.observe_screen(None);
+        activity.observe_screen(None);
+        assert!(!activity.observe_screen(screen(AgentStatus::Blocked)));
+        assert_eq!(activity.status(), AgentStatus::Blocked);
+    }
+    activity.observe_screen(None);
+    activity.observe_screen(None);
+    assert!(activity.observe_screen(None));
+    assert_eq!(activity.status(), AgentStatus::Working);
+    assert_eq!(activity.source(), AgentStatusSource::Process);
+    assert!(!activity.turn_observed, "starting a CLI did not finish a task");
+}
+
+#[test]
+fn positive_working_evidence_wins_over_expiry_on_the_same_sample() {
+    let mut activity = AgentActivity::default();
+    activity.observe_screen(screen(AgentStatus::Blocked));
+    activity.observe_screen(None);
+    activity.observe_screen(None);
+    assert!(activity.observe_screen(screen(AgentStatus::Working)));
+    assert_eq!(activity.status(), AgentStatus::Working);
+    assert!(activity.turn_observed);
+}
+
+#[test]
+fn screen_attention_without_prior_work_does_not_invent_a_turn_or_repeat_completion() {
+    for completed in [false, true] {
+        let mut activity = AgentActivity::default();
+        if completed {
+            activity.apply_hook(&event("codex", "thread", "notify"));
+            activity.input_sent();
+        }
+        activity.observe_screen(screen(AgentStatus::Blocked));
+        for _ in 0..3 {
+            activity.observe_screen(None);
+        }
+        assert_eq!(activity.status(), AgentStatus::Unknown);
+        assert_eq!(activity.source(), AgentStatusSource::Unknown);
+        assert_eq!(activity.rule(), None);
+        assert_eq!(screen_notification(AgentStatus::Blocked, activity.status(), completed), None);
+    }
+}
+
+#[test]
+fn attention_expiry_preserves_hook_ownership_and_turn_hook_completion() {
+    let mut activity = AgentActivity::default();
+    for name in ["UserPromptSubmit", "PermissionRequest", "Stop"] {
+        activity.apply_hook(&event("claude", "primary", name));
+        let expected = activity.status();
+        for _ in 0..10 {
+            assert!(!activity.observe_screen(None));
+        }
+        assert_eq!(activity.status(), expected);
+        assert_eq!(activity.source(), AgentStatusSource::Hook);
+    }
+    activity.reset();
+    activity.apply_hook(&event("pi", "primary", "UserPromptSubmit"));
+    activity.observe_screen(screen(AgentStatus::Blocked));
+    for _ in 0..3 {
+        activity.observe_screen(screen(AgentStatus::Idle));
+    }
+    assert_eq!(activity.status(), AgentStatus::Working);
+    assert_eq!(activity.source(), AgentStatusSource::Hook);
+    activity.observe_screen(screen(AgentStatus::Blocked));
+    activity.observe_screen(None);
+    activity.apply_hook(&event("pi", "primary", "Stop"));
+    for _ in 0..10 {
+        activity.observe_screen(None);
+    }
+    assert_eq!(activity.status(), AgentStatus::Done);
+    assert_eq!(activity.source(), AgentStatusSource::Hook);
+}
+
+#[test]
 fn runtime_submission_does_not_finish_on_the_previous_idle_frame() {
     let mut activity = AgentActivity::default();
     activity.submitted();
