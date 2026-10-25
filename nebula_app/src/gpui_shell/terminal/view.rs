@@ -14,6 +14,9 @@ mod cwd_report;
 mod editor;
 mod image_paste;
 mod layout;
+mod native_clipboard;
+#[cfg(all(test, feature = "gpui-test-support"))]
+mod native_clipboard_tests;
 #[cfg(all(test, windows, feature = "gpui-test-support"))]
 mod native_cmd_tests;
 mod notifications;
@@ -351,6 +354,7 @@ pub struct TerminalView {
     /// 只用事件携带的绝对行锚定到对应的 scrollback 位置。
     pub(super) inline_images: super::inline_image::InlineImageStore,
     image_paste: image_paste::ImagePasteState,
+    native_clipboard: native_clipboard::NativeClipboard,
     path_drop: path_drop::PathDropState,
     /// SSH 直连目的地（`user@host[:port]`）；本地会话为 None。
     pub ssh_destination: Option<String>,
@@ -492,11 +496,10 @@ impl TerminalView {
         typography::effective_cell_width(raw_width, self.cell_width_mode, scale, self.font_offset_x)
     }
 
-    pub(super) fn line_height_for_metrics(&self, natural_height: f32, scale: f32) -> Pixels {
-        typography::line_height_for_view(
-            self.font_size,
+    pub(super) fn line_height_at_scale(&self, scale: f32) -> Pixels {
+        typography::effective_line_height_with_theme(
+            self.font_size.as_f32(),
             self.line_height_multiplier,
-            natural_height,
             self.font_offset_y,
             scale,
         )
@@ -658,15 +661,24 @@ impl TerminalView {
             },
             TermEvent::ChildExit(code) => {
                 self.retain_failed_session |= !code.success() && self.local_startup_unconfirmed();
-                self.mark_exited(format!("进程已退出（{code:?}）"), cx);
+                let message = crate::gpui_shell::config::ui_language(cx).format(
+                    crate::i18n::Message::TerminalProcessExited,
+                    &[("code", &format!("{code:?}"))],
+                );
+                self.mark_exited(message, cx);
             },
             TermEvent::PtyFailure(reason) => {
                 self.pty_failed = true;
                 self.retain_failed_session |= self.ssh_destination.is_none();
-                self.mark_exited(format!("PTY 故障：{reason}"), cx);
+                let message = crate::gpui_shell::config::ui_language(cx)
+                    .format(crate::i18n::Message::TerminalPtyFailure, &[("error", &reason)]);
+                self.mark_exited(message, cx);
             },
             TermEvent::Exit => {
-                self.mark_exited(String::from("会话已结束"), cx);
+                let message = crate::gpui_shell::config::ui_language(cx)
+                    .text(crate::i18n::Message::TerminalSessionEnded)
+                    .to_owned();
+                self.mark_exited(message, cx);
             },
             TermEvent::CwdReport(_) => {
                 // 标准 OSC 7 / 9;9 的目录上报。只动 cwd，`NEBULA|` 标题带来的
@@ -689,7 +701,10 @@ impl TerminalView {
                     Err(error) => log::warn!("terminal image dropped: {error}"),
                 }
             },
-            TermEvent::CommandStart => self.on_command_start(cx),
+            TermEvent::CommandStart => {
+                self.native_clipboard.clear();
+                self.on_command_start(cx);
+            },
             // 退出码接到「上一条命令失败」的未读徽章上（⚠ 三角）；`Some(0)` 与
             // `None`（没带退出码的 133;D）都算过关。记在下面那道 barrier 之后：
             // 属于上一轮/初始化的那个边沿不能改写徽章。
@@ -736,6 +751,7 @@ impl TerminalView {
                     self.on_native_cmd_prompt(cx);
                 }
                 self.suggest.completion_shell_report(&name, &value);
+                self.native_clipboard.observe(&name, &value);
                 self.handle_completion_editor_report(&name, &value, cx);
                 cx.notify();
             },
@@ -807,7 +823,7 @@ impl TerminalView {
         self.editor_query_task = None;
         self.cursor_animation.note_input(&bytes);
         self.prompt_input_epoch = self.prompt_input_epoch.wrapping_add(1);
-        self.path_drop.invalidate();
+        self.path_drop.observe_input(&bytes);
         self.image_paste.observe_input(&bytes);
         self.confirmation.observe_input(&bytes);
         self.awaiting_input = false;
@@ -1525,7 +1541,11 @@ impl Render for TerminalView {
                  window: &mut Window,
                  cx| {
                     cx.stop_propagation();
-                    this.paste_dropped_paths(&[drag.path_text.clone()], window, cx);
+                    if this.ssh_destination.is_some() {
+                        this.drop_external_paths(std::slice::from_ref(&drag.local_path), window, cx);
+                    } else {
+                        this.paste_dropped_paths(&[drag.path_text.clone()], window, cx);
+                    }
                 },
             ))
             .on_hover(cx.listener(|this, hovered: &bool, window, cx| {
@@ -1545,9 +1565,10 @@ impl Render for TerminalView {
             root = root.child(div().p_4().text_color(gpui::red()).child(error.clone()));
         } else {
             root = root.child(TerminalElement::new(cx.entity()));
+            root = root.children(self.file_upload_indicator(cx));
             root = root.children(self.native_result_elements(window, cx));
             if self.ssh_disconnected() {
-                root = root.child(self.ssh_disconnect_banner(cx));
+                root = root.child(self.ssh_disconnect_notice(cx));
             }
             // SSH 连接卡片（旧壳 `display::ssh_connect` 的 GPUI 形态）：
             // 状态机/文案/常量直接复用，卡片遮罩盖住空 grid。350ms 显示

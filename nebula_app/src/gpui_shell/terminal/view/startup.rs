@@ -228,8 +228,14 @@ impl TerminalView {
                 (Some(session), None)
             },
             Err(err) => {
-                let what = if is_ssh { "SSH 会话启动失败" } else { "PTY 启动失败" };
-                (None, Some(format!("{what}: {err}")))
+                let message = if is_ssh {
+                    crate::i18n::Message::TerminalSshStartFailed
+                } else {
+                    crate::i18n::Message::TerminalPtyStartFailed
+                };
+                let error = crate::gpui_shell::config::ui_language(cx)
+                    .format(message, &[("error", &err.to_string())]);
+                (None, Some(error))
             },
         };
 
@@ -256,6 +262,7 @@ impl TerminalView {
                 }
             }),
             cx.on_focus_out(&focus_handle, window, |view, _event, _window, cx| {
+                view.path_drop.invalidate();
                 if view.cursor_pane_focused {
                     view.cursor_pane_focused = false;
                     view.restart_cursor_blink(cx);
@@ -324,6 +331,7 @@ impl TerminalView {
             session_launch,
             inline_images: super::super::inline_image::InlineImageStore::default(),
             image_paste: image_paste::ImagePasteState::default(),
+            native_clipboard: native_clipboard::NativeClipboard::default(),
             path_drop: path_drop::PathDropState::default(),
             ssh_destination,
             port_forwards: Vec::new(),
