@@ -34,6 +34,9 @@ pub(crate) struct AgentActivity {
     coverage: HookCoverage,
     owner: Option<Owner>,
     idle_samples: u8,
+    unmatched_samples: u8,
+    /// Only a preceding Working state may survive a screen form's expiry.
+    screen_blocked_fallback: Option<(AgentStatusSource, Option<String>)>,
     turn_observed: bool,
     pending_submit: bool,
     /// A completion-only hook latches its result until an idle screen or an
@@ -54,6 +57,8 @@ impl Default for AgentActivity {
             coverage: HookCoverage::None,
             owner: None,
             idle_samples: 0,
+            unmatched_samples: 0,
+            screen_blocked_fallback: None,
             turn_observed: false,
             pending_submit: false,
             screen_armed: true,
@@ -116,6 +121,7 @@ impl AgentActivity {
         self.status = AgentStatus::Working;
         self.source = AgentStatusSource::Process;
         self.rule = None;
+        self.screen_blocked_fallback = None;
         self.turn_observed = true;
         self.pending_submit = true;
         self.input_sent();
@@ -135,7 +141,14 @@ impl AgentActivity {
     /// new turn; it is not itself a successful submission or a completion.
     pub fn input_sent(&mut self) {
         self.screen_armed = true;
+        self.reset_screen_samples();
+    }
+
+    /// An unavailable or unidentified snapshot interrupts consecutive evidence
+    /// without revoking a state. Only a known agent's real snapshot can do that.
+    pub fn reset_screen_samples(&mut self) {
         self.idle_samples = 0;
+        self.unmatched_samples = 0;
     }
 
     /// Check ownership before the ordering gate records this event. An ignored
@@ -266,7 +279,8 @@ impl AgentActivity {
         self.coverage = coverage;
         self.source = AgentStatusSource::Hook;
         self.rule = None;
-        self.idle_samples = 0;
+        self.screen_blocked_fallback = None;
+        self.reset_screen_samples();
         if event.kind != AiHookKind::SessionStart {
             self.pending_submit = false;
         }
@@ -309,16 +323,35 @@ impl AgentActivity {
         true
     }
 
-    /// No match resets consecutive-idle evidence. Full lifecycle hooks never
-    /// consult screen rules, even if the current frame contains a real old form.
+    /// Observe a real snapshot of a known agent. No match can revoke stale
+    /// screen attention, but cannot establish idle or completion. Full lifecycle
+    /// hooks never consult screen rules, even if a frame contains an old form.
     pub fn observe_screen(&mut self, detection: Option<Detection>) -> bool {
         if !self.allows_screen() {
             return false;
         }
         let Some(detection) = detection else {
             self.idle_samples = 0;
-            return false;
+            if self.source != AgentStatusSource::Screen || self.status != AgentStatus::Blocked {
+                return false;
+            }
+            self.unmatched_samples = self.unmatched_samples.saturating_add(1);
+            if self.unmatched_samples < 2 {
+                return false;
+            }
+            self.unmatched_samples = 0;
+            if let Some((source, rule)) = self.screen_blocked_fallback.take() {
+                self.status = AgentStatus::Working;
+                self.source = source;
+                self.rule = rule;
+            } else {
+                self.status = AgentStatus::Unknown;
+                self.source = AgentStatusSource::Unknown;
+                self.rule = None;
+            }
+            return true;
         };
+        self.unmatched_samples = 0;
         let next = match detection.status {
             AgentStatus::Idle => {
                 if self.pending_submit {
@@ -363,6 +396,12 @@ impl AgentActivity {
         if next == self.status {
             return false;
         }
+        self.screen_blocked_fallback =
+            if next == AgentStatus::Blocked && self.status == AgentStatus::Working {
+                Some((self.source, self.rule.take()))
+            } else {
+                None
+            };
         self.status = next;
         self.source = AgentStatusSource::Screen;
         self.rule = Some(detection.rule_id);

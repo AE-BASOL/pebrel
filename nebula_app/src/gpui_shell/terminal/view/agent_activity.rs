@@ -142,7 +142,8 @@ impl TerminalView {
     }
 
     /// Check shell boundaries first; only an integration lacking lifecycle
-    /// authority may then consume a screen observation. Silence has no meaning.
+    /// authority may then consume a screen observation. Missing matches cannot
+    /// establish completion.
     pub fn refresh_agent_screen_state(&mut self, cx: &mut Context<Self>) {
         if self.exited.is_some()
             || matches!(self.ssh_stage, Some(crate::ssh_session::SshStage::Failed(_)))
@@ -200,7 +201,7 @@ impl TerminalView {
         let Some(program) =
             notifications::screen_program(self.running_program.as_deref(), detected)
         else {
-            self.agent_activity.observe_screen(None);
+            self.agent_activity.reset_screen_samples();
             return;
         };
         if self.running_program.as_deref() != Some(program.as_str()) {

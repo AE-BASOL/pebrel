@@ -96,6 +96,48 @@ fn hook_lifecycle_cannot_be_rewritten_by_screen_words_or_idle_samples(cx: &mut T
 }
 
 #[gpui::test]
+fn vanished_claude_form_restores_running_with_a_custom_status_footer(cx: &mut TestAppContext) {
+    use crate::runtime_api::RuntimeTaskState;
+
+    let (view, window, _) = open(cx);
+    view.update(window, |view, cx| {
+        view.running_program = Some("claude".into());
+        view.agent_activity.begin_command(true);
+        view.agent_activity.submitted();
+        assert_eq!(view.runtime_task_state(), RuntimeTaskState::Running);
+
+        screen(view, "Do you want to proceed?\n❯ 1. Yes\n2. No\nEsc to cancel · Tab to amend");
+        for _ in 0..6 {
+            view.refresh_agent_screen_state(cx);
+            assert_eq!(view.agent_activity.status(), AgentStatus::Blocked);
+            assert_eq!(view.agent_activity.source(), AgentStatusSource::Screen);
+            assert_eq!(view.agent_activity.rule(), Some("live_form_blocked"));
+            assert_eq!(view.sidebar_activity(), SidebarActivity::Attention);
+            assert_eq!(view.runtime_task_state(), RuntimeTaskState::Attention);
+        }
+
+        // This running layout has no interrupt hint, and its four custom footer
+        // lines push the input prompt outside prompt_idle's observation region.
+        let running = "* Ideating… (1m 20s · 2.3k tokens)\n\n❯ \n\n状态 运行中\n模型 Claude Sonnet\n目录 /project\n上下文 12%";
+        assert!(crate::ai_agents::detect("claude", running).is_none());
+        screen(view, running);
+        view.refresh_agent_screen_state(cx);
+        assert_eq!(view.agent_activity.status(), AgentStatus::Blocked);
+        assert_eq!(view.sidebar_activity(), SidebarActivity::Attention);
+        assert_eq!(view.runtime_task_state(), RuntimeTaskState::Attention);
+
+        for _ in 0..8 {
+            view.refresh_agent_screen_state(cx);
+            assert_eq!(view.agent_activity.status(), AgentStatus::Working);
+            assert_eq!(view.agent_activity.source(), AgentStatusSource::Process);
+            assert_eq!(view.agent_activity.rule(), None);
+            assert_eq!(view.sidebar_activity(), SidebarActivity::Running);
+            assert_eq!(view.runtime_task_state(), RuntimeTaskState::Running);
+        }
+    });
+}
+
+#[gpui::test]
 fn nested_agent_hooks_do_not_finish_or_replace_the_primary_turn(cx: &mut TestAppContext) {
     let (view, window, _) = open(cx);
     view.update(window, |view, cx| {
