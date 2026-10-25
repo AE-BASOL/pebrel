@@ -2,7 +2,7 @@
 
 ## Status
 
-Implemented; native Canvas acceptance pending on a supported runner.
+Implemented; native Canvas tests passed. Full emulator acceptance is pending.
 
 ## Context
 
@@ -54,7 +54,14 @@ ink against an unclipped reference. Existing live/snapshot placement, block seam
 selection, cursor and keyboard-resize tests are retained.
 Local Kotlin/test compilation succeeds. The local Linux AArch64 host cannot run
 the pinned native Canvas runtime; its unsupported-host failure is not a rendering
-pass. Native execution must succeed before merging.
+pass. On the supported x86_64 CI runner, both native Canvas character-grid tests
+and all 29 snapshot-view tests passed (Actions run 40113407229). The emulator run
+passed 25 of 26 cases; its pause-emoji color test still inferred row boundaries
+from natural font height and sampled the following colored row. That test now
+measures the actual rendered row boundary using a distant background cell, while
+retaining all color, text-presentation, adjacent-letter and size assertions.
+The updated instrumentation test compiles locally; the full emulator rerun must
+pass before merging. Physical-device visual acceptance remains unverified.
 
 ## Supersedes
 
