@@ -286,18 +286,18 @@ mod droid_tests {
     fn native_droid_file_takes_precedence_and_uses_flat_events() {
         let dir = tempfile::tempdir().unwrap();
         let settings = dir.path().join("settings.json");
-        apply_at(AgentHook::Droid, &settings, "/old/pebrel-hook", true).unwrap();
+        apply_at(AgentHook::Droid, &settings, "C:/old/pebrel-hook.exe", true).unwrap();
         let native = dir.path().join("hooks.json");
         std::fs::write(&native, r#"{"Stop":[{"hooks":[{"command":"user-hook"}]}]}"#).unwrap();
         assert_eq!(droid_path(dir.path()), native);
-        apply_droid_at(dir.path(), "/new/pebrel-hook", true).unwrap();
+        apply_droid_at(dir.path(), "C:/new tools/pebrel-hook.exe", true).unwrap();
         let raw = std::fs::read_to_string(&native).unwrap();
         let doc: Value = serde_json::from_str(&raw).unwrap();
         assert!(doc.get("hooks").is_none());
         assert!(doc["SessionStart"].is_array());
         assert_eq!(doc["Stop"][0]["hooks"][0]["command"], "user-hook");
-        assert!(current(AgentHook::Droid, &native, &raw, "/new/pebrel-hook").unwrap());
-        apply_droid_at(dir.path(), "/new/pebrel-hook", true).unwrap();
+        assert!(current(AgentHook::Droid, &native, &raw, "C:/new tools/pebrel-hook.exe").unwrap());
+        apply_droid_at(dir.path(), "C:/new tools/pebrel-hook.exe", true).unwrap();
         assert_eq!(std::fs::read_to_string(&native).unwrap(), raw);
         apply_droid_at(dir.path(), "", false).unwrap();
         for path in [&native, &settings] {
@@ -315,10 +315,10 @@ mod droid_tests {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, "{}").unwrap();
             assert_eq!(droid_path(dir.path()), path);
-            apply_droid_at(dir.path(), "/tools/pebrel-hook", true).unwrap();
+            apply_droid_at(dir.path(), "C:/tools/pebrel-hook.exe", true).unwrap();
             assert!(installed_at(AgentHook::Droid, &path).unwrap());
             let raw = std::fs::read_to_string(&path).unwrap();
-            assert!(current(AgentHook::Droid, &path, &raw, "/tools/pebrel-hook").unwrap());
+            assert!(current(AgentHook::Droid, &path, &raw, "C:/tools/pebrel-hook.exe").unwrap());
             if name != "hooks.json" {
                 assert!(!dir.path().join("hooks.json").exists());
             }
