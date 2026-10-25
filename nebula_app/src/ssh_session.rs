@@ -33,10 +33,12 @@ mod forward;
 mod integration;
 mod lifecycle;
 mod pane_connection;
+mod resume;
 mod route;
 pub(crate) use forward::{LocalForward, open_local_forward};
 pub(crate) use integration::setup_cli as setup_ai_cli;
 pub use pane_connection::PaneConnection;
+pub use resume::ResumeTarget;
 use route::{ResolvedRoute, RouteTransport};
 
 /// Remote terminals have no pre-primed ConPTY handshake or host row anchoring.
@@ -75,6 +77,9 @@ pub trait SshEventHost:
 {
     /// Access is scoped to this pane's live authenticated transport.
     fn ssh_pane_connection(&self, _connection: Option<PaneConnection>) {}
+
+    /// Last positively identified target survives transport loss; only a confirmed shell clears it.
+    fn ssh_resume_target(&self, _target: Option<ResumeTarget>) {}
 
     /// 连接阶段变化（连接卡片/横幅的数据源）。默认丢弃。
     fn ssh_stage(&self, stage: SshStage) {
@@ -647,10 +652,29 @@ pub fn spawn_session_at<H: SshEventHost>(
     terminal: Arc<FairMutex<Term<H>>>,
     event_proxy: H,
 ) -> io::Result<EventLoopSender> {
+    spawn_session_resuming(
+        destination,
+        initial_remote_cwd,
+        None,
+        initial_size,
+        terminal,
+        event_proxy,
+    )
+}
+
+pub fn spawn_session_resuming<H: SshEventHost>(
+    destination: String,
+    initial_remote_cwd: Option<String>,
+    resume_target: Option<ResumeTarget>,
+    initial_size: WindowSize,
+    terminal: Arc<FairMutex<Term<H>>>,
+    event_proxy: H,
+) -> io::Result<EventLoopSender> {
     let (sender, receiver) = EventLoopSender::standalone()?;
     runtime()?.spawn(lifecycle::run(
         destination,
         initial_remote_cwd,
+        resume_target,
         initial_size,
         terminal,
         event_proxy,
