@@ -291,7 +291,7 @@ impl SettingsPane {
                 .into_any_element()
         } else {
             div()
-                .font_family(crate::font_install::REQUIRED_FONT_FAMILY)
+                .font_family(crate::font_install::SYMBOL_FONT_FAMILY)
                 .text_size(px(24.0))
                 .child(crate::display::program_icon(agent.slug()))
                 .into_any_element()

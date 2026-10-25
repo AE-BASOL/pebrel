@@ -1078,7 +1078,7 @@ impl SettingsPane {
             .child(
                 div()
                     .w(px(target_ink_width))
-                    .font_family(crate::font_install::REQUIRED_FONT_FAMILY)
+                    .font_family(crate::font_install::SYMBOL_FONT_FAMILY)
                     .text_size(px(icon_size))
                     .child(crate::gpui_shell::widgets::terminal_glyph(
                         icon.glyph.to_string(), target_ink_width,
@@ -1175,7 +1175,7 @@ impl SettingsPane {
         let muted = theme.muted_foreground;
         let hover_bg = theme.list_hover;
         let selected_bg = theme.list_active;
-        let font_chain: SharedString = crate::font_install::REQUIRED_FONT_FAMILY.into();
+        let font_chain: SharedString = crate::font_install::SYMBOL_FONT_FAMILY.into();
         let current = self
             .ssh_editor
             .as_ref()

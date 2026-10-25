@@ -81,6 +81,7 @@ impl TerminalElement {
 pub struct TermLayout {
     cell_width: Pixels,
     line_height: Pixels,
+    text_baseline: Pixels,
     rows: usize,
     cols: usize,
     hitbox: Hitbox,
@@ -257,7 +258,9 @@ impl Element for TerminalElement {
         let scale = window.scale_factor();
         let view = self.view.read(cx);
         let cell_width = view.cell_width_for_advance(sample.width.as_f32(), scale);
-        let line_height = view.line_height_at_scale(scale);
+        let line_height = view.line_height_for_width(cell_width, scale);
+        let text_baseline =
+            super::view::typography::baseline(sample.ascent, sample.descent, line_height);
 
         // 网格裁定（floor、最小网格、resize 合流）全部由渲染合同的
         // ViewportTracker 在 view 内完成；元素只上报内容矩形与度量。
@@ -294,6 +297,7 @@ impl Element for TerminalElement {
         TermLayout {
             cell_width,
             line_height,
+            text_baseline,
             rows: view.grid_rows(),
             cols: view.grid_cols(),
             hitbox,
@@ -748,6 +752,15 @@ impl Element for TerminalElement {
                         run.clone(),
                         layout.cell_width,
                     );
+                    let origin = point(
+                        origin.x,
+                        super::view::typography::glyph_origin_y(
+                            &shaped,
+                            origin.y,
+                            layout.line_height,
+                            layout.text_baseline,
+                        ),
+                    );
                     let _ = shaped.paint(
                         origin,
                         layout.line_height,
@@ -774,6 +787,15 @@ impl Element for TerminalElement {
                         font_size,
                         &run,
                         layout.cell_width,
+                    );
+                    let origin = point(
+                        origin.x,
+                        super::view::typography::glyph_origin_y(
+                            &shaped,
+                            origin.y,
+                            layout.line_height,
+                            layout.text_baseline,
+                        ),
                     );
                     let _ = shaped.paint(
                         origin,

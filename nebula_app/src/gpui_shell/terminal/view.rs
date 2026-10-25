@@ -34,7 +34,7 @@ mod startup_command;
 #[cfg(all(test, feature = "gpui-test-support"))]
 pub(super) mod startup_tests;
 mod tab_identity;
-mod typography;
+pub(super) mod typography;
 
 pub use broadcast::TerminalInput;
 pub use runtime::InputOrigin;
@@ -557,8 +557,9 @@ impl TerminalView {
         typography::effective_cell_width(raw_width, self.cell_width_mode, scale, self.font_offset_x)
     }
 
-    pub(super) fn line_height_at_scale(&self, scale: f32) -> Pixels {
+    pub(super) fn line_height_for_width(&self, cell_width: Pixels, scale: f32) -> Pixels {
         typography::effective_line_height_with_theme(
+            cell_width,
             self.font_size.as_f32(),
             self.line_height_multiplier,
             self.font_offset_y,
@@ -1103,6 +1104,7 @@ impl TerminalView {
     /// 热应用运行时设置（设置页改动后由宿主调用）。默认光标样式只更新
     /// `Term` 的 fallback；程序通过 DECSCUSR 设置的临时样式仍保持权威。
     pub fn apply_settings(&mut self, cx: &mut Context<Self>) {
+        crate::gpui_shell::font_loading::ensure_selected(cx);
         self.cursor_animation.reset();
         self.refresh_ssh_label();
         let Some(settings) = cx.try_global::<Settings>() else { return };

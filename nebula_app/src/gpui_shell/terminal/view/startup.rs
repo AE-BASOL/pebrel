@@ -31,6 +31,7 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        crate::gpui_shell::font_loading::ensure_selected(cx);
         // 字体、调色板与终端启动配置来自用户配置（nebula.toml +
         // nebula_settings.txt，bootstrap 时装载为全局 Settings）。
         let (
