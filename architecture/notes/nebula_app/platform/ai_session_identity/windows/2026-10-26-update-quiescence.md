@@ -2,7 +2,7 @@
 
 ## Status
 
-Implemented; native validation and review pending.
+Implemented and merged in [#775](https://github.com/Kuddev/pebrel/pull/775); native validation passed on 2026-10-26.
 
 ## Context
 
@@ -70,8 +70,10 @@ concurrent polls while paused, cancellation/restart, overlapping pause owners,
 bounded acquisition failure, in-flight lock ordering and commit/drop lifetime.
 It also verifies that another live copy still blocks preparation and is not killed.
 The existing worker failure, owner-exit and installer handoff fixtures remain.
-Native Windows execution is required; Linux compilation cannot establish those
-process and PowerShell contracts.
+Native Windows x64 and ARM64 execution passed, including the production
+PowerShell guard regression. The full five-platform run and release workspace
+checks passed on the reviewed head in [run 40264935810](https://github.com/Kuddev/pebrel/actions/runs/40264935810).
+Local Linux compilation alone does not establish those Windows process contracts.
 
 ## Supersedes
 
