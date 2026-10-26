@@ -175,6 +175,15 @@ impl TerminalView {
         let confirmed_submission = self.suggest.pending_command_prompt.is_some()
             && !self.suggest.screen_line.trim().is_empty();
         suggest::commit_line(&mut self.suggest);
+        if self.ssh_destination.is_none() {
+            if let Some(destination) = crate::ssh::ssh_destination(&self.suggest.last_committed) {
+                self.ssh_destination = Some(destination);
+                self.ssh_stage = Some(crate::ssh_session::SshStage::Ready);
+                self.dynamic_ssh = true;
+                cx.emit(TerminalViewEvent::TitleChanged);
+                cx.notify();
+            }
+        }
         if confirmed_submission {
             self.mark_submitted_command(native_submission);
             cx.notify();

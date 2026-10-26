@@ -408,6 +408,7 @@ pub struct TerminalView {
     path_drop: path_drop::PathDropState,
     /// SSH 直连目的地（`user@host[:port]`）；本地会话为 None。
     pub ssh_destination: Option<String>,
+    pub dynamic_ssh: bool,
     /// 本 pane 拥有的本地端口转发；pane 销毁即停止监听。
     pub(crate) port_forwards: Vec<crate::ssh_session::LocalForward>,
     pub(crate) port_forward_task: Option<gpui::Task<()>>,
@@ -476,6 +477,7 @@ pub struct TerminalView {
     resize_epoch: u64,
     scroll_px: f32,
     selecting: bool,
+    pub(super) press_grid_point: Option<TermPoint>,
     /// 拖选越界后的自动回滚 tick 世代：停止或重开一轮就 +1，让在途的旧
     /// 定时器链自行失效（同 `cursor_blink_epoch` 的模式）。
     selection_scroll_epoch: u64,

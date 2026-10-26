@@ -544,6 +544,11 @@ impl TerminalView {
             return;
         }
         let (point, side) = self.grid_point(event.position);
+        if event.button == MouseButton::Left && event.click_count == 1 {
+            self.press_grid_point = Some(point);
+        } else {
+            self.press_grid_point = None;
+        }
         let ty = match event.click_count {
             1 => SelectionType::Simple,
             2 => SelectionType::Semantic,
@@ -712,7 +717,62 @@ impl TerminalView {
             return;
         }
         self.selecting = false;
-        let (point, _) = self.grid_point(event.position);
+        let (point, side) = self.grid_point(event.position);
+        let moved_cursor = if event.button == MouseButton::Left
+            && event.click_count == 1
+            && !event.modifiers.shift
+            && !event.modifiers.alt
+            && !event.modifiers.control
+            && !event.modifiers.platform
+            && !self.mouse_mode_active(&event.modifiers)
+            && !self.term_mode().contains(TermMode::ALT_SCREEN)
+            && !(self.command_running && !self.command_running_disproved)
+            && (self.press_grid_point == Some(point) || self.selection_is_empty())
+        {
+            if let Some(session) = &self.session {
+                let mut term = session.term.lock();
+                if term.grid().display_offset() == 0 && term.mode().contains(TermMode::SHOW_CURSOR) {
+                    let cursor = term.grid().cursor.point;
+                    if point.line == cursor.line {
+                        let target_col = if side == Side::Right {
+                            (point.column.0 + 1).min(self.cols.saturating_sub(1))
+                        } else {
+                            point.column.0
+                        };
+                        let delta = target_col as isize - cursor.column.0 as isize;
+                        term.selection = None;
+                        drop(term);
+                        if delta != 0 {
+                            let keystroke_name = if delta < 0 { "left" } else { "right" };
+                            let key_bytes = super::super::keymap::encode(
+                                &gpui::Keystroke::parse(keystroke_name).unwrap(),
+                                &self.term_mode(),
+                            )
+                            .unwrap_or_else(|| {
+                                if delta < 0 { b"\x1b[D".to_vec() } else { b"\x1b[C".to_vec() }
+                            });
+                            let bytes = key_bytes.repeat(delta.unsigned_abs());
+                            self.write_input(bytes, cx);
+                        }
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        self.press_grid_point = None;
+        if moved_cursor {
+            self.selecting = false;
+            cx.notify();
+            return;
+        }
         let open_link = pending_link_open
             && self.selection_is_empty()
             && self.link_hover.as_ref().is_some_and(|hover| hover.hint.bounds().contains(&point));
@@ -739,6 +799,7 @@ impl TerminalView {
             return;
         }
         self.stop_selection_scroll();
+        self.press_grid_point = None;
         let dragging_scrollbar = self.scrollbar_drag.take().is_some();
         self.scrollbar_hovered = false;
         self.pending_link_open = false;

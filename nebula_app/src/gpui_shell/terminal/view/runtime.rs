@@ -73,6 +73,15 @@ impl TerminalView {
             self.agent_activity.begin_command(agent);
         }
         self.mark_command_running();
+        if self.ssh_destination.is_none() {
+            if let Some(destination) = crate::ssh::ssh_destination(&self.suggest.last_committed) {
+                self.ssh_destination = Some(destination);
+                self.ssh_stage = Some(crate::ssh_session::SshStage::Ready);
+                self.dynamic_ssh = true;
+                cx.emit(TerminalViewEvent::TitleChanged);
+                cx.notify();
+            }
+        }
         self.probe_missing_codex_session(cx);
         // 首个词就是一个交互式 shell（`cmd`、`wsl`、裸 `bash`）：133;C
         // 是真的，但这条「命令」其实是一个新提示符，133;D 永远不会来
@@ -168,6 +177,12 @@ impl TerminalView {
         exit_code: Option<i32>,
         cx: &mut Context<Self>,
     ) {
+        if self.dynamic_ssh {
+            self.dynamic_ssh = false;
+            self.ssh_destination = None;
+            self.ssh_stage = None;
+            cx.emit(TerminalViewEvent::TitleChanged);
+        }
         let choose_codex_session = self.codex_restore_target_missing(exit_code);
         self.notify_command_done(exit_code, cx);
         self.last_command_failed = exit_code.is_some_and(|code| code != 0);
@@ -999,6 +1014,12 @@ impl TerminalView {
         });
         if !only_shells {
             return;
+        }
+        if self.dynamic_ssh {
+            self.dynamic_ssh = false;
+            self.ssh_destination = None;
+            self.ssh_stage = None;
+            cx.emit(TerminalViewEvent::TitleChanged);
         }
         self.command_running = false;
         self.command_started = None;
