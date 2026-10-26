@@ -6,21 +6,23 @@ Every release entry is provided in English and Simplified Chinese.
 
 ## 2.3.0 - 2026-10-26
 
-- `Pebrel-v2.3.0-linux-x64-preview.AppImage`: `f7ceb2695a9730531ea6fdbf48f260b694bce2cbba341eb5f8a5c8c5a27e1be9`
-- `Pebrel-v2.3.0-linux-x64-preview.deb`: `9df7b5f9524883d2e3cbe853079c3518310142dd36d54be1a9eeb4e257978d89`
-- `Pebrel-v2.3.0-linux-x64-preview.tar.gz`: `69eae1032891a709aa3fc132ed305d06c8c527629f35f678cd0137e810235306`
-- `Pebrel-v2.3.0-macos-arm64-preview.dmg`: `b9eb36b6cdecb15be5ffd5968f5092b302e5a943a014948ee3ab0713102eaf91`
-- `Pebrel-v2.3.0-macos-x64-preview.dmg`: `ad798f8593f6e3b566a1c3fe709406b20abda8e36ebc5a58be9ad65cf872bfb8`
-- `Pebrel-v2.3.0-windows-x64.zip`: `99f35706415b9f087c1f7d8a1b0c5eabc47b29da6a501a1182c062e2e944b2a5`
-- `Pebrel-v2.3.0-windows-x64-setup.exe`: `d9b65d3f7bd1da2be04911f8d78f5bcc63b05af8c729937aa2421832fd854af1`
-- `Pebrel-v2.3.0-windows-arm64.zip`: `addd3511ac6df353f84cbeffc0e888bf6524d4f4e132fb378d10b6a884ca1686`
-- `Pebrel-v2.3.0-windows-arm64-setup.exe`: `9fcd84ec45b7bb344be6fe4ac91cdd96ba342d9e02e7ed7f192695a76d0b0b38`
-- `Pebrel-v2.3.0-android-universal-preview.apk`: `1a39caeac156cdec8afebd4643852b11297109563162fae046234219dabc90cd`
-- `Pebrel-v2.3.0-relay-manual.tar.gz`: `61849fb018e040fcd59609e0dc7a0e084091ead451fcc860e11dbca08c90465b`
+- `Pebrel-v2.3.0-linux-x64-preview.AppImage`: `PENDING FINAL BUILD`
+- `Pebrel-v2.3.0-linux-x64-preview.deb`: `PENDING FINAL BUILD`
+- `Pebrel-v2.3.0-linux-x64-preview.tar.gz`: `PENDING FINAL BUILD`
+- `Pebrel-v2.3.0-macos-arm64-preview.dmg`: `PENDING FINAL BUILD`
+- `Pebrel-v2.3.0-macos-x64-preview.dmg`: `PENDING FINAL BUILD`
+- `Pebrel-v2.3.0-windows-x64.zip`: `PENDING FINAL BUILD`
+- `Pebrel-v2.3.0-windows-x64-setup.exe`: `PENDING FINAL BUILD`
+- `Pebrel-v2.3.0-windows-arm64.zip`: `PENDING FINAL BUILD`
+- `Pebrel-v2.3.0-windows-arm64-setup.exe`: `PENDING FINAL BUILD`
+- `Pebrel-v2.3.0-android-universal-preview.apk`: `PENDING FINAL BUILD`
+- `Pebrel-v2.3.0-relay-manual.tar.gz`: `PENDING FINAL BUILD`
 
 ### English
 
 This release covers the changes since 2.2.2, with Windows x64/ARM64 packages, macOS Apple Silicon/Intel builds, Linux x64 packages, an Android universal APK and the offline relay package. All packages are version 2.3.0; macOS, Linux and Android retain their Preview distribution labels.
+
+If 2.2.2 reports an update preparation failure, save your work, fully exit Pebrel (including the tray), then run the Windows installer manually. The installed 2.2.2 updater performs its process check before the new installer can run.
 
 #### Added
 
@@ -38,6 +40,7 @@ This release covers the changes since 2.2.2, with Windows x64/ARM64 packages, ma
 
 #### Fixed
 
+- Windows update preparation stops its own background session-detection worker before checking for other running instances. Cancelling preparation resumes detection; other application instances still require a full exit before installation. ([#775](https://github.com/Kuddev/pebrel/pull/775))
 - Terminal text keeps the configured glyph size while the default character grid preserves Braille and character-art proportions at fractional display scales. Explicit spacing preferences remain effective. Markdown text selection works across native result rows, and each formula scrollbar stays attached to its formula. ([#770](https://github.com/Kuddev/pebrel/pull/770))
 - Runtime split, zoom and pane-ratio commands commit the visible terminal layout before replying, so immediately following input uses the new PTY geometry. Ordinary window startup keeps its existing size stabilization. ([#769](https://github.com/Kuddev/pebrel/pull/769))
 - Clipboard image uploads in built-in SSH use the original pane's authenticated transport. SFTP subsystem rejection is reported promptly, and cancelling negotiation closes its channel without closing the existing connection. Uploads still require server-side SFTP support. ([#768](https://github.com/Kuddev/pebrel/pull/768))
@@ -77,6 +80,8 @@ This release covers the changes since 2.2.2, with Windows x64/ARM64 packages, ma
 
 本版汇总 2.2.2 以来的更新，包含 Windows x64/ARM64 安装包、macOS Apple Silicon/Intel 构建、Linux x64 软件包、Android 通用 APK 和离线中转包。所有包均为 2.3.0，macOS、Linux 与 Android 延续 Preview 分发标记。
 
+如果 2.2.2 提示更新准备失败，请保存工作，从托盘完整退出 Pebrel 后手动运行 Windows 安装包。已安装的 2.2.2 会先执行自身的进程检查，新安装包在此之前尚未运行。
+
 #### 新增
 
 - 可使用 `serial:COM3,115200,8N1` 等地址将串口打开为终端窗格；保存和置顶的串口地址在重启后保留，关闭窗格会中断待处理的读写。 ([#630](https://github.com/Kuddev/pebrel/pull/630))
@@ -93,6 +98,7 @@ This release covers the changes since 2.2.2, with Windows x64/ARM64 packages, ma
 
 #### 修复
 
+- Windows 更新准备会先停止自身的后台会话检测进程，再检查其他运行实例；取消准备后恢复检测。其他应用实例仍需完整退出才能安装。 ([#775](https://github.com/Kuddev/pebrel/pull/775))
 - 终端文字保持所选字号，默认字符网格在非整数显示缩放下仍保持盲文及字符图形的比例，并继续遵循显式间距设置。Markdown 原生结果可跨行选择文本，各公式的滚动条保持在对应公式内。 ([#770](https://github.com/Kuddev/pebrel/pull/770))
 - Runtime 分屏、缩放和窗格比例命令在回复前提交可见终端布局，紧接着到达的输入因此使用新的 PTY 尺寸；普通开窗保留原有尺寸稳定过程。 ([#769](https://github.com/Kuddev/pebrel/pull/769))
 - 内置 SSH 的剪贴板图片上传复用原窗格已认证的连接；服务器拒绝 SFTP 子系统时及时报告，取消协商会关闭所属通道而保留现有连接。上传仍需服务器支持 SFTP。 ([#768](https://github.com/Kuddev/pebrel/pull/768))
